@@ -1,0 +1,9 @@
+[llm]
+provider = "mock"
+model    = "fake-1"
+
+# Per-agent overrides: [llm.overrides.<agent_name>]
+# Example:
+# [llm.overrides.planner]
+# provider = "anthropic"
+# model    = "claude-opus-4-5"

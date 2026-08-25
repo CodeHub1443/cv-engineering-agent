@@ -1,144 +1,156 @@
-# Capability Registry
+# CV Engineering Agent — Capability Registry
 
-## Purpose
+**Version:** 1.0  
+**Machine-readable source:** `spec/capability_registry.json`  
+**Status:** This document and the JSON file must remain consistent.  
+**Scope:** Computer Vision engineering — model development, evaluation, and deployment.
 
-The CV Engineering Agent must discover and use specialized engineering capabilities when they materially improve a task. Capabilities may be provided by local agent skills, external coding agents, MCP tools, command-line tools, SDKs, or internal implementations.
+---
 
-## Core Principle
+## Entity Types
 
-Capabilities are registered and selected by applicability. The agent must not assume that a named skill or tool is appropriate merely because it exists.
+The registry distinguishes four entity types:
 
-For each capability, the registry should track:
+| Type | Definition |
+|------|-----------|
+| **CAPABILITY** | What the CV Agent needs to accomplish. A goal-oriented unit of work. |
+| **SKILL** | Specialized procedural knowledge or instructions available to the agent (e.g., a framework-specific workflow). |
+| **TOOL** | An executable interface or program the agent can invoke (e.g., TensorRT CLI, profiler). |
+| **AGENT / RUNTIME** | An execution worker the orchestrator can delegate to (e.g., Claude Code, Codex). |
+| **KNOWLEDGE SOURCE** | Documentation, research papers, or reference material the agent can consult. |
 
-- capability identifier
-- provider/project
-- category
-- supported tasks
-- invocation method
-- required runtime/environment
-- supported hardware/software versions when relevant
-- trust/provenance
-- installation status
-- availability status
-- constraints
-- approval level
-- last verified timestamp
+Capabilities reference skills, tools, agents, and knowledge sources by ID. Skills and tools are **not** implemented here — this registry represents relationships and availability.
 
-## NVIDIA Capability Families
+---
 
-The first-class NVIDIA capability family includes:
+## Capability Metadata Schema
 
-### Base NVIDIA / CV infrastructure
+Each capability carries:
 
-- DALI dynamic mode
-- DeepStream development
-- DeepStream pipeline generation
-- DeepStream vision-model import
-- DeepStream pipeline profiling
-- TAO fine-tuning Hugging Face models
-- TAO workflow launch
-- TAO Hugging Face model porting
-- TAO AutoML
-- TAO single-step training
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Dot-notation identifier (e.g., `cv.evaluation`) |
+| `name` | string | Human-readable name |
+| `category` | string | Functional grouping |
+| `description` | string | What this capability accomplishes |
+| `required_inputs` | list | Input specifications (name, type, description) |
+| `outputs` | list | Output specifications |
+| `relevant_skills` | list | Skill IDs applicable to this capability |
+| `relevant_tools` | list | Tool IDs applicable to this capability |
+| `relevant_agents` | list | Agent/runtime IDs that can execute this |
+| `knowledge_sources` | list | Knowledge source IDs |
+| `applicable_task_types` | list | Task type tags for capability selection |
+| `prerequisites` | list | Capability IDs that should be completed first |
+| `status` | enum | `available` / `partial` / `experimental` / `unavailable` |
+| `risk_level` | enum | `low` / `medium` / `high` |
 
-### CV architecture / training
+---
 
-- action recognition
-- CenterPose
-- Deformable DETR
-- Depth Anything V2
-- DINO
-- Grounding DINO
-- image classification
-- Mask2Former
-- metric-learning recognition
-- NV-DINOv2
-- OCDNet
-- OCRNet
-- ReID
-- RT-DETR
-- SegFormer
+## Registered Capabilities
 
-### GPU kernel optimization
+### `cv.requirements.analysis`
+**Category:** planning  
+Analyse a Computer Vision problem statement to produce structured requirements: task type (detection, segmentation, classification, etc.), performance targets (accuracy, latency, throughput), hardware constraints, dataset requirements, and deployment context.
 
-- CUTILE kernel creation
-- CUTILE to Triton conversion
-- CUTILE autotuning
-- CUTILE Python integration
-- CUTILE kernel performance improvement
+**Skills:** problem-decomposition, constraint-analysis  
+**Agents:** claude-code  
+**Risk:** low
 
-### CLIP
+---
 
-- CLIP fine-tuning
+### `cv.dataset.audit`
+**Category:** data  
+Inspect and characterise a Computer Vision dataset: class distribution, image quality, annotation consistency, coverage gaps, and data-leakage risks. Produces a structured audit report and recommendations.
 
-### Advanced CV / industrial
+**Skills:** dataset-analysis, label-quality-assessment  
+**Tools:** nvidia-dali-inspect  
+**Agents:** claude-code  
+**Risk:** low
 
-- optical inspection
-- Visual ChangeNet
-- OneFormer
-- Mask Auto Encoder
-- Mask Auto Label
-- Mask Grounding DINO
-- pose classification
+---
 
-### TensorRT
+### `cv.model.selection`
+**Category:** modeling  
+Evaluate and recommend CV model architectures for a given task, considering accuracy/latency trade-offs, hardware targets, and available training data volume.
 
-- C++ runtime quickstart
-- ONNX quickstart
-- performance analysis
-- strong typing migration
-- Torch quickstart
+**Skills:** architecture-survey, benchmark-comparison, transfer-learning  
+**Knowledge sources:** paperswithcode-cv, nvidia-model-zoo  
+**Agents:** claude-code  
+**Risk:** low
 
-### NVIDIA Model Optimizer
+---
 
-- PTQ
-- quantization recipe search
-- result comparison
-- Day-0 release
-- monitoring
-- debugging
-- evaluation
-- MLflow access
-- evaluation launching
+### `cv.training.design`
+**Category:** modeling  
+Design a training pipeline: data augmentation strategy, loss functions, optimiser, LR schedule, mixed-precision settings, and distributed training topology.
 
-## CUDA Agent
+**Skills:** pytorch-training, nvidia-dali, apex-amp, distributed-training  
+**Tools:** nvidia-nsight-systems, pytorch-profiler  
+**Agents:** claude-code, codex  
+**Risk:** medium
 
-The project should recognize CUDA-Agent (`BytedTsinghua-SIA/CUDA-Agent`) as a specialized GPU/CUDA engineering capability for CUDA kernel development, analysis, optimization and related engineering workflows.
+---
 
-CUDA-Agent is complementary to the NVIDIA skill collection. The agent should select between them based on task requirements rather than treating them as interchangeable.
+### `cv.evaluation`
+**Category:** evaluation  
+Evaluate a trained CV model against a held-out test set. Compute task-appropriate metrics (mAP, mIoU, top-k accuracy, FPS) and produce per-class breakdowns, confusion analysis, and failure-case summaries.
 
-## Skill Selection Policy
+**Skills:** metric-computation, error-analysis  
+**Tools:** nvidia-nsight-systems  
+**Agents:** claude-code  
+**Risk:** low
 
-The agent should prefer a specialized capability when:
+---
 
-1. the task falls directly within its documented scope;
-2. the capability is available in the current environment;
-3. its version/runtime constraints are satisfied;
-4. using it reduces engineering effort or increases reliability;
-5. the capability is appropriate for the target hardware and deployment constraints.
+### `cv.benchmarking`
+**Category:** evaluation  
+Run controlled performance benchmarks across hardware targets (GPU, Jetson, edge devices): throughput, latency percentiles, memory footprint, and power consumption.
 
-The agent should record which capability it used and why when producing an engineering artifact or experiment record.
+**Skills:** trt-profiling, triton-perf-analyzer, jetson-power-measurement  
+**Tools:** trt-profile, triton-perf-analyzer, nvidia-smi, tegrastats  
+**Agents:** claude-code, cuda-agent  
+**Risk:** medium
 
-## Installation
+---
 
-The NVIDIA skills and CUDA-Agent tooling are installed globally in the user's development environment. The repository should contain the registry and configuration necessary for the CV Engineering Agent to discover and reason about those capabilities, but it must not copy the installed skill implementations into this repository.
+### `cv.model.inspection`
+**Category:** analysis  
+Inspect model internals: parameter counts, layer structure, FLOPs, activation statistics, gradient flow, and interpretability visualisations (GradCAM, feature maps, attention maps).
 
-## Separation of Concerns
+**Skills:** model-surgery, gradcam, flop-counting  
+**Tools:** pytorch-summary, netron  
+**Agents:** claude-code  
+**Risk:** low
 
-- Skills provide specialized procedures/knowledge.
-- Coding agents such as Codex CLI and Claude Code provide implementation workers.
-- MCP tools provide structured execution interfaces.
-- LLM providers provide reasoning models.
-- The CV Engineering Agent decides which capability is appropriate and orchestrates the workflow.
+---
 
-## Future Integration
+### `cv.deployment.optimization`
+**Category:** deployment  
+Optimise a trained CV model for target deployment: TensorRT engine building, quantisation (INT8/FP16), pruning, kernel fusion, and DeepStream pipeline integration.
 
-The runtime should expose capability discovery to agents through a structured interface, for example:
+**Skills:** tensorrt, deepstream, nvidia-model-optimizer, cuda-agent, jetson  
+**Tools:** trt-build, trt-profile, deepstream-runtime, nvidia-profiling-tools, tao-toolkit  
+**Agents:** claude-code, cuda-agent  
+**Knowledge sources:** tensorrt-docs, deepstream-docs, jetson-developer-guide  
+**Risk:** high
 
-- `capability.list`
-- `capability.describe`
-- `capability.check`
-- `capability.select`
-- `capability.invoke`
+---
 
-The initial implementation should remain lightweight and should not require a separate orchestration framework beyond the project's chosen agent runtime.
+### `cv.research`
+**Category:** research  
+Survey the research literature for a given CV problem: identify state-of-the-art methods, summarise key papers, compare approaches, and produce a structured literature review with links to implementations.
+
+**Skills:** arxiv-search, paperswithcode-search, citation-analysis  
+**Knowledge sources:** arxiv-cv, paperswithcode-cv, semantic-scholar  
+**Agents:** claude-code  
+**Risk:** low
+
+---
+
+## Registry Extension
+
+To add a new capability:
+1. Add an entry to `spec/capability_registry.json` following the schema above.
+2. Update this document to keep human and machine representations consistent.
+3. Add skills/tools/agents/knowledge_sources entries if they are not already present.
+4. Do **not** implement the capability as Python code in the registry module — the registry represents relationships, not implementations.
