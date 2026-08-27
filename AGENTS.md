@@ -179,7 +179,13 @@ Do not optimize a model solely for accuracy when deployment constraints are know
 
 Record important experiment inputs and outputs so results remain reproducible.
 
-## 11. NVIDIA / GPU Tooling
+## 11. Platform Detection and NVIDIA / GPU Tooling
+
+Before platform-specific installation, training, profiling, inference, or deployment, detect and verify the execution environment. At minimum distinguish macOS, Linux, Windows, and NVIDIA Jetson, plus architecture, accelerator, driver/runtime state, and relevant framework support. Never assume Linux, Windows, macOS, and Jetson are interchangeable.
+
+Use a verified platform profile to choose installation commands, accelerator backends, optimization tools, and runtime settings. Do not claim GPU acceleration from device presence alone; validate that the selected framework and workload actually execute on the accelerator.
+
+### NVIDIA / GPU Tooling
 
 Use the project's available NVIDIA/CUDA-related skills and tooling when relevant rather than reinventing established workflows.
 
