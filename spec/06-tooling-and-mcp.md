@@ -7,7 +7,7 @@
 
 Define the boundary between agent reasoning and executable operations.
 
-~~~text
+```text
 Agent
   ├── LLM
   ├── Knowledge
@@ -15,7 +15,7 @@ Agent
   └── Tools / Workers
           ↓
       controlled interfaces
-~~~
+```
 
 ## Execution Principle
 
@@ -25,7 +25,7 @@ The agent should prefer typed interfaces over arbitrary shell execution.
 
 ## Capability Resolution
 
-~~~text
+```text
 Task
  ↓
 Capability
@@ -34,20 +34,22 @@ Skill
  ↓
 Tool / Worker
  ↓
+Platform Profile
+ ↓
 Policy
  ↓
 Execution
  ↓
 Structured Result
-~~~
+```
 
-The capability registry describes relationships. The runtime performs resolution and policy checks.
+The capability registry describes relationships. The runtime performs resolution, platform checks, and policy checks.
 
 ## Tool Families
 
 Initial conceptual interfaces include:
 
-~~~text
+```text
 research.search
 research.fetch
 github.search
@@ -71,15 +73,28 @@ evaluation.run
 benchmark.run
 gpu.profile
 
+platform.detect
+platform.verify
+platform.profile
+platform.optimize
+
 onnx.export
 tensorrt.build
 deepstream.test
 
 docker.build
 deployment.validate
-~~~
+```
 
 Names are stable conceptual boundaries, not mandatory final function names.
+
+## Platform-Aware Tooling
+
+Platform detection must occur before platform-dependent installation or optimization.
+
+Every platform-sensitive tool should receive or resolve a verified `PlatformProfile` rather than assuming Linux, Windows, macOS, or Jetson semantics.
+
+Installation tools must distinguish inspection from mutation. System changes should expose the intended change set and pass policy before execution.
 
 ## MCP
 
@@ -87,16 +102,16 @@ MCP is an integration protocol, not the definition of CV engineering semantics.
 
 Project-owned tool contracts remain independent of MCP so the application can evolve protocol and SDK versions without rewriting domain logic.
 
-For current implementations, target MCP through an adapter layer rather than binding the core runtime to a specific MCP transport or SDK version. The 2026-07-28 specification introduced a stateless protocol core and changed the surrounding extension and authorization model, so protocol/version details belong in the adapter layer. citeturn832299search0turn832299search4
+MCP-specific transport, authorization, SDK, and version details belong in the adapter layer. Do not hard-code those details into CV domain contracts.
 
 Where relevant, distinguish:
 
-~~~text
+```text
 Tools
 Resources
 Prompts
 Long-running Tasks / extensions
-~~~
+```
 
 according to the selected MCP specification and SDK version.
 
@@ -104,7 +119,7 @@ according to the selected MCP specification and SDK version.
 
 A material tool should return structured data containing, where relevant:
 
-~~~text
+```text
 status
 result
 artifacts
@@ -113,7 +128,7 @@ logs
 errors
 provenance
 execution_metadata
-~~~
+```
 
 Long-running operations should expose a stable operation or experiment identifier and status retrieval.
 
@@ -142,7 +157,7 @@ Relevant integrations include:
 - Model Optimizer;
 - kernel optimization.
 
-Capability resolution determines when these are applicable.
+Capability resolution determines when these are applicable and the platform detector determines whether the local target can support them.
 
 ## Safety
 
