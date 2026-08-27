@@ -140,3 +140,14 @@ The architecture must allow a provider, coding worker, vector store, research ad
 ## Non-Goals
 
 V1.0 does not require a single permanent vector database, a specific LLM vendor, a specific MCP transport, or NAS for every project.
+
+
+## Platform Detection and Optimization
+
+Platform detection is a first-class component. Before platform-dependent installation, training, profiling, inference, or deployment, the agent must produce a structured platform profile covering OS, architecture, CPU, memory, GPU/accelerator, driver/runtime state, framework support, and Jetson-specific information where applicable.
+
+Supported platform classes are macOS, Linux, Windows, and NVIDIA Jetson. Jetson is treated as a distinct platform profile because its JetPack/Jetson Linux, ARM64, CUDA, TensorRT, DeepStream, power, and thermal characteristics materially affect execution.
+
+The platform layer must distinguish hardware presence from hardware accessibility, driver availability, runtime availability, and framework support. The agent must select installation and optimization actions from the verified profile rather than from a generic command set.
+
+See `spec/11-platform-detection-and-optimization.md` for the platform contract.
