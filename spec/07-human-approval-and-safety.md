@@ -29,6 +29,9 @@ DENY
 | Run large GPU training | ASK |
 | Start broad hyperparameter sweep | ASK |
 | Consume significant paid compute/API budget | ASK |
+| Install/upgrade system drivers or GPU runtime | ASK |
+| Change power/thermal/performance mode | ASK |
+| Modify system packages or kernel/runtime configuration | ASK |
 | Modify production deployment | ASK |
 | Deploy model/software | ASK |
 | Publish externally | ASK |
@@ -125,3 +128,8 @@ request clarification / approval
 ~~~
 
 Do not guess.
+
+
+## Platform-Sensitive Actions
+
+System-level installation and performance changes must use a verified PlatformProfile. The agent must not execute Linux-specific or Jetson-specific commands on another platform. Hardware/driver/toolkit changes require the applicable approval policy.
