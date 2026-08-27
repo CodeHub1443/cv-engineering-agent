@@ -1,7 +1,7 @@
 # CV Engineering Agent — Capability Registry
 
 **Version:** V1.0  
-**Machine-readable source:** spec/capability_registry.json  
+**Machine-readable source:** `spec/capability_registry.json`  
 **Status:** Human and machine representations must remain consistent.
 
 ## Purpose
@@ -20,73 +20,92 @@ The registry maps goal-oriented CV capabilities to applicable skills, tools, wor
 
 ## Resolution Model
 
-~~~text
+```text
 Task
  ↓
 Capability
  ↓
 Skill / Tool / Worker / Knowledge resolution
  ↓
+Platform compatibility
+ ↓
 Policy check
  ↓
 Execution
  ↓
 Structured result + artifacts
-~~~
+```
 
 Capability selection and execution are separate concerns.
+
+## Platform Rule
+
+Platform-dependent capabilities must resolve a verified `PlatformProfile` before installation, training, profiling, inference, or deployment.
 
 ## Capability Metadata
 
 Each capability should define:
 
-- id
-- name
-- category
-- description
-- required inputs
-- outputs
-- relevant skills
-- relevant tools
-- relevant agents
-- knowledge sources
-- applicable task types
-- prerequisites
-- status
-- risk level
+- `id`
+- `name`
+- `category`
+- `description`
+- `required_inputs`
+- `outputs`
+- `relevant_skills`
+- `relevant_tools`
+- `relevant_agents`
+- `knowledge_sources`
+- `applicable_task_types`
+- `prerequisites`
+- `status`
+- `risk_level`
 
 ## Capability Families
 
 ### Planning
-- cv.requirements.analysis
-- cv.problem.formulation
+
+- `cv.requirements.analysis`
+- `cv.problem.formulation`
 
 ### Data / Modeling
-- cv.dataset.audit
-- cv.model.selection
-- cv.model.inspection
+
+- `cv.dataset.audit`
+- `cv.model.selection`
+- `cv.model.inspection`
 
 ### Training / Experimentation
-- cv.training.design
-- cv.experiment.management
+
+- `cv.training.design`
+- `cv.experiment.management`
 
 ### Evaluation
-- cv.evaluation
-- cv.baseline.establishment
-- cv.failure.analysis
-- cv.benchmarking
+
+- `cv.evaluation`
+- `cv.baseline.establishment`
+- `cv.failure.analysis`
+- `cv.benchmarking`
 
 ### Research / Knowledge
-- cv.research
-- cv.knowledge.retrieval
-- cv.research.verify
+
+- `cv.research`
+- `cv.knowledge.retrieval`
+- `cv.research.verify`
 
 ### Deployment / Optimization
-- cv.deployment.optimization
-- cv.deployment.validation
+
+- `cv.deployment.optimization`
+- `cv.deployment.validation`
+
+### Platform
+
+- `platform.detect`
+- `platform.verify`
+- `platform.optimization`
 
 ### Orchestration
-- cv.skill.resolution
+
+- `cv.skill.resolution`
 
 ## Architectural Rules
 
@@ -94,7 +113,8 @@ Each capability should define:
 2. A capability may use multiple skills, tools and workers.
 3. Availability does not imply automatic execution.
 4. Policy determines whether execution is permitted.
-5. Material results must produce traceable artifacts.
-6. Human and machine registry representations must remain consistent.
-7. Provider/model names are not architectural requirements.
-8. The resolver must verify that referenced skills and tools are actually available before execution.
+5. Platform-sensitive capabilities must verify the detected platform before execution.
+6. Material results must produce traceable artifacts.
+7. Human and machine registry representations must remain consistent.
+8. Provider/model names are not architectural requirements.
+9. The resolver must verify that referenced skills and tools are actually available before execution.
