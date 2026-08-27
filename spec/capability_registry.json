@@ -802,6 +802,116 @@
       ],
       "status": "partial",
       "risk_level": "high"
+    },
+    {
+      "id": "platform.detect",
+      "name": "Platform Detection",
+      "category": "platform",
+      "description": "Detect operating system, architecture, CPU, GPU/accelerator, drivers, runtimes and Jetson-specific platform metadata.",
+      "required_inputs": [],
+      "outputs": [
+        {
+          "name": "platform_profile",
+          "type": "document",
+          "description": "Structured verified platform profile"
+        }
+      ],
+      "relevant_skills": [],
+      "relevant_tools": [
+        "platform.detect"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "platform_detection",
+        "installation",
+        "training",
+        "deployment"
+      ],
+      "prerequisites": [],
+      "status": "partial",
+      "risk_level": "low"
+    },
+    {
+      "id": "platform.verify",
+      "name": "Platform Verification",
+      "category": "platform",
+      "description": "Verify that required drivers, runtimes, toolkits and framework accelerator backends are installed, compatible and usable.",
+      "required_inputs": [
+        {
+          "name": "platform_profile",
+          "type": "document",
+          "description": "Detected platform profile"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "compatibility_report",
+          "type": "document",
+          "description": "Verified compatibility and missing/incompatible components"
+        }
+      ],
+      "relevant_skills": [],
+      "relevant_tools": [
+        "platform.verify"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "installation",
+        "compatibility",
+        "deployment"
+      ],
+      "prerequisites": [
+        "platform.detect"
+      ],
+      "status": "partial",
+      "risk_level": "medium"
+    },
+    {
+      "id": "platform.optimization",
+      "name": "Platform Optimization",
+      "category": "platform",
+      "description": "Select and validate platform-specific acceleration, precision, profiling, resource and runtime optimizations against measured constraints.",
+      "required_inputs": [
+        {
+          "name": "platform_profile",
+          "type": "document",
+          "description": "Verified platform profile"
+        },
+        {
+          "name": "baseline",
+          "type": "document",
+          "description": "Baseline measurements"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "optimization_profile",
+          "type": "document",
+          "description": "Platform-specific optimization plan and measured result"
+        }
+      ],
+      "relevant_skills": [
+        "trt-profiling",
+        "jetson-power-measurement"
+      ],
+      "relevant_tools": [
+        "platform.optimize"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "optimization",
+        "benchmarking",
+        "deployment"
+      ],
+      "prerequisites": [
+        "platform.detect",
+        "cv.baseline.establishment"
+      ],
+      "status": "partial",
+      "risk_level": "high"
     }
   ],
   "skills": [
@@ -1031,6 +1141,21 @@
       "id": "deployment.validate",
       "name": "Deployment Validation",
       "description": "Run deployment acceptance checks and return structured validation results."
+    },
+    {
+      "id": "platform.detect",
+      "name": "Platform Detector",
+      "description": "Detect host OS, architecture, hardware and accelerator state."
+    },
+    {
+      "id": "platform.verify",
+      "name": "Platform Compatibility Checker",
+      "description": "Verify driver, runtime, toolkit and framework compatibility for the detected platform."
+    },
+    {
+      "id": "platform.optimize",
+      "name": "Platform Optimization Planner",
+      "description": "Produce and validate platform-specific performance optimization actions."
     }
   ],
   "agents": [
