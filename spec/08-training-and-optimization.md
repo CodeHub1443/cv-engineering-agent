@@ -187,3 +187,8 @@ operational complexity
 ~~~
 
 The agent must never fabricate before/after measurements.
+
+
+## Platform-Aware Training
+
+Training and optimization plans must incorporate the detected platform profile, accelerator, software stack, precision/backend support, memory limits, and power/thermal constraints. Benchmark claims must identify the hardware and software environment used.
