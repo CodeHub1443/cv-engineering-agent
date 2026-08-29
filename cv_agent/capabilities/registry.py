@@ -18,6 +18,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Optional
+from importlib.resources.abc import Traversable
 
 CapabilityStatus = Literal["available", "partial", "experimental", "unavailable"]
 RiskLevel = Literal["low", "medium", "high"]
@@ -130,10 +131,10 @@ class CapabilityRegistry:
     Capability invocation is explicitly out of scope for this class.
     """
 
-    def __init__(self, registry_path: Path) -> None:
+    def __init__(self, registry_path: Path | Traversable) -> None:
         self._path = registry_path
         self._capabilities: dict[str, Capability] = {}
-        self._items: dict[str, RegistryItem] = {}
+        self._items: dict[tuple[ItemType, str], RegistryItem] = {}
         self._version: str = "unknown"
         self._loaded: bool = False
 
@@ -147,13 +148,13 @@ class CapabilityRegistry:
             FileNotFoundError: If the registry JSON file does not exist.
             ValueError: If the JSON is structurally invalid.
         """
-        if not self._path.exists():
+        if not self._path.is_file():
             raise FileNotFoundError(
                 f"Capability registry not found: {self._path}\n"
                 "Expected: spec/capability_registry.json relative to repo root."
             )
 
-        with open(self._path, "r", encoding="utf-8") as fh:
+        with self._path.open("r", encoding="utf-8") as fh:
             raw: dict[str, Any] = json.load(fh)
 
         self._version = raw.get("version", "unknown")
@@ -172,7 +173,7 @@ class CapabilityRegistry:
         for json_key, item_type in type_map.items():
             for item_data in raw.get(json_key, []):
                 item = _parse_item(item_data, item_type)
-                self._items[item.id] = item
+                self._items[(item_type, item.id)] = item
 
         self._loaded = True
 
@@ -299,7 +300,35 @@ class CapabilityRegistry:
         items = list(self._items.values())
         if item_type is not None:
             items = [i for i in items if i.item_type == item_type]
-        return sorted(items, key=lambda i: i.id)
+        return sorted(items, key=lambda i: (i.item_type, i.id))
+
+    def describe_item(
+        self,
+        item_id: str,
+        *,
+        item_type: ItemType,
+    ) -> RegistryItem:
+        """Return a supporting registry item using type-aware identity."""
+        self._ensure_loaded()
+        key = (item_type, item_id)
+        if key not in self._items:
+            available = ", ".join(
+                sorted(i.id for i in self._items.values() if i.item_type == item_type)
+            )
+            raise KeyError(
+                f"Unknown {item_type} {item_id!r}. Registered: {available}"
+            )
+        return self._items[key]
+
+    def check_item(self, item_id: str, *, item_type: ItemType) -> dict[str, Any]:
+        """Return metadata and availability information for a supporting item."""
+        item = self.describe_item(item_id, item_type=item_type)
+        return {
+            "item_id": item.id,
+            "item_type": item.item_type,
+            "available": True,
+            "name": item.name,
+        }
 
     @property
     def capability_count(self) -> int:

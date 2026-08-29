@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from importlib.resources import files as resource_files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +25,16 @@ else:
 
 # Repo root: cv_agent/config/settings.py → cv_agent/config/ → cv_agent/ → root
 _REPO_ROOT = Path(__file__).parent.parent.parent
+
+_DEFAULT_CONFIG_RESOURCE = resource_files("cv_agent").joinpath("resources/default.toml")
+_DEFAULT_REGISTRY_RESOURCE = resource_files("cv_agent").joinpath("resources/capability_registry.json")
+
+def _default_config_path() -> Path | Traversable:
+    return _DEFAULT_CONFIG_RESOURCE if _DEFAULT_CONFIG_RESOURCE.is_file() else _REPO_ROOT / "config" / "default.toml"
+
+
+def _default_registry_path() -> Path | Traversable:
+    return _DEFAULT_REGISTRY_RESOURCE if _DEFAULT_REGISTRY_RESOURCE.is_file() else _REPO_ROOT / "spec" / "capability_registry.json"
 
 
 @dataclass
@@ -48,30 +60,30 @@ class AgentConfig:
     """Top-level agent configuration."""
 
     llm: LLMConfig = field(default_factory=LLMConfig)
-    registry_path: Path = field(
-        default_factory=lambda: _REPO_ROOT / "spec" / "capability_registry.json"
+    registry_path: Path | Traversable = field(
+        default_factory=_default_registry_path
     )
 
 
-def load_config(path: Optional[Path] = None) -> AgentConfig:
+def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
     """
     Load agent configuration from a TOML file.
 
     Args:
         path: Explicit path to a .toml config file.
-              Defaults to <repo_root>/config/default.toml.
+              Defaults to the packaged config resource.
               If the file does not exist, built-in defaults are returned.
 
     Returns:
         Populated AgentConfig.
     """
     if path is None:
-        path = _REPO_ROOT / "config" / "default.toml"
+        path = _default_config_path()
 
-    if not path.exists():
+    if not path.is_file():
         return AgentConfig()
 
-    with open(path, "rb") as fh:
+    with path.open("rb") as fh:
         raw = tomllib.load(fh)
 
     llm_raw: dict = raw.get("llm", {})
@@ -95,7 +107,7 @@ def load_config(path: Optional[Path] = None) -> AgentConfig:
     registry_path = (
         Path(registry_path_raw)
         if registry_path_raw
-        else _REPO_ROOT / "spec" / "capability_registry.json"
+        else _default_registry_path()
     )
 
     return AgentConfig(llm=llm, registry_path=registry_path)
