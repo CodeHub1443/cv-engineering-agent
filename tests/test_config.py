@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from importlib.resources.abc import Traversable
 
 from cv_agent.config.settings import AgentConfig, LLMConfig, LLMOverride, load_config
 
@@ -31,7 +32,8 @@ class TestLoadConfigDefaults:
 
     def test_registry_path_is_path_object(self, tmp_path: Path) -> None:
         cfg = load_config(tmp_path / "missing.toml")
-        assert isinstance(cfg.registry_path, Path)
+        assert isinstance(cfg.registry_path, (Path, Traversable))
+        assert cfg.registry_path.is_file()
 
 
 class TestLoadConfigFromFile:
