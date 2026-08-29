@@ -1,156 +1,120 @@
 # CV Engineering Agent — Capability Registry
 
-**Version:** 1.0  
+**Version:** V1.0  
 **Machine-readable source:** `spec/capability_registry.json`  
-**Status:** This document and the JSON file must remain consistent.  
-**Scope:** Computer Vision engineering — model development, evaluation, and deployment.
+**Status:** Human and machine representations must remain consistent.
 
----
+## Purpose
+
+The registry maps goal-oriented CV capabilities to applicable skills, tools, workers and knowledge sources. It describes availability and relationships; it does not execute work.
 
 ## Entity Types
 
-The registry distinguishes four entity types:
-
 | Type | Definition |
-|------|-----------|
-| **CAPABILITY** | What the CV Agent needs to accomplish. A goal-oriented unit of work. |
-| **SKILL** | Specialized procedural knowledge or instructions available to the agent (e.g., a framework-specific workflow). |
-| **TOOL** | An executable interface or program the agent can invoke (e.g., TensorRT CLI, profiler). |
-| **AGENT / RUNTIME** | An execution worker the orchestrator can delegate to (e.g., Claude Code, Codex). |
-| **KNOWLEDGE SOURCE** | Documentation, research papers, or reference material the agent can consult. |
+|---|---|
+| CAPABILITY | Goal-oriented engineering outcome. |
+| SKILL | Specialized procedural knowledge or workflow. |
+| TOOL | Executable interface for an operation. |
+| AGENT / RUNTIME | Worker/runtime that can perform delegated work. |
+| KNOWLEDGE SOURCE | Reference material used for grounded reasoning. |
 
-Capabilities reference skills, tools, agents, and knowledge sources by ID. Skills and tools are **not** implemented here — this registry represents relationships and availability.
+## Resolution Model
 
----
+```text
+Task
+ ↓
+Capability
+ ↓
+Skill / Tool / Worker / Knowledge resolution
+ ↓
+Platform compatibility
+ ↓
+Policy check
+ ↓
+Execution
+ ↓
+Structured result + artifacts
+```
 
-## Capability Metadata Schema
+Capability selection and execution are separate concerns.
 
-Each capability carries:
+## Platform Rule
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Dot-notation identifier (e.g., `cv.evaluation`) |
-| `name` | string | Human-readable name |
-| `category` | string | Functional grouping |
-| `description` | string | What this capability accomplishes |
-| `required_inputs` | list | Input specifications (name, type, description) |
-| `outputs` | list | Output specifications |
-| `relevant_skills` | list | Skill IDs applicable to this capability |
-| `relevant_tools` | list | Tool IDs applicable to this capability |
-| `relevant_agents` | list | Agent/runtime IDs that can execute this |
-| `knowledge_sources` | list | Knowledge source IDs |
-| `applicable_task_types` | list | Task type tags for capability selection |
-| `prerequisites` | list | Capability IDs that should be completed first |
-| `status` | enum | `available` / `partial` / `experimental` / `unavailable` |
-| `risk_level` | enum | `low` / `medium` / `high` |
+Platform-dependent capabilities must resolve a verified `PlatformProfile` before installation, training, profiling, inference, or deployment.
 
----
+## Capability Metadata
 
-## Registered Capabilities
+Each capability should define:
 
-### `cv.requirements.analysis`
-**Category:** planning  
-Analyse a Computer Vision problem statement to produce structured requirements: task type (detection, segmentation, classification, etc.), performance targets (accuracy, latency, throughput), hardware constraints, dataset requirements, and deployment context.
+- `id`
+- `name`
+- `category`
+- `description`
+- `required_inputs`
+- `outputs`
+- `relevant_skills`
+- `relevant_tools`
+- `relevant_agents`
+- `knowledge_sources`
+- `applicable_task_types`
+- `prerequisites`
+- `status`
+- `risk_level`
 
-**Skills:** problem-decomposition, constraint-analysis  
-**Agents:** claude-code  
-**Risk:** low
+## Capability Families
 
----
+### Planning
 
-### `cv.dataset.audit`
-**Category:** data  
-Inspect and characterise a Computer Vision dataset: class distribution, image quality, annotation consistency, coverage gaps, and data-leakage risks. Produces a structured audit report and recommendations.
+- `cv.requirements.analysis`
+- `cv.problem.formulation`
 
-**Skills:** dataset-analysis, label-quality-assessment  
-**Tools:** nvidia-dali-inspect  
-**Agents:** claude-code  
-**Risk:** low
+### Data / Modeling
 
----
+- `cv.dataset.audit`
+- `cv.model.selection`
+- `cv.model.inspection`
 
-### `cv.model.selection`
-**Category:** modeling  
-Evaluate and recommend CV model architectures for a given task, considering accuracy/latency trade-offs, hardware targets, and available training data volume.
+### Training / Experimentation
 
-**Skills:** architecture-survey, benchmark-comparison, transfer-learning  
-**Knowledge sources:** paperswithcode-cv, nvidia-model-zoo  
-**Agents:** claude-code  
-**Risk:** low
+- `cv.training.design`
+- `cv.experiment.management`
 
----
+### Evaluation
 
-### `cv.training.design`
-**Category:** modeling  
-Design a training pipeline: data augmentation strategy, loss functions, optimiser, LR schedule, mixed-precision settings, and distributed training topology.
+- `cv.evaluation`
+- `cv.baseline.establishment`
+- `cv.failure.analysis`
+- `cv.benchmarking`
 
-**Skills:** pytorch-training, nvidia-dali, apex-amp, distributed-training  
-**Tools:** nvidia-nsight-systems, pytorch-profiler  
-**Agents:** claude-code, codex  
-**Risk:** medium
+### Research / Knowledge
 
----
+- `cv.research`
+- `cv.knowledge.retrieval`
+- `cv.research.verify`
 
-### `cv.evaluation`
-**Category:** evaluation  
-Evaluate a trained CV model against a held-out test set. Compute task-appropriate metrics (mAP, mIoU, top-k accuracy, FPS) and produce per-class breakdowns, confusion analysis, and failure-case summaries.
+### Deployment / Optimization
 
-**Skills:** metric-computation, error-analysis  
-**Tools:** nvidia-nsight-systems  
-**Agents:** claude-code  
-**Risk:** low
+- `cv.deployment.optimization`
+- `cv.deployment.validation`
 
----
+### Platform
 
-### `cv.benchmarking`
-**Category:** evaluation  
-Run controlled performance benchmarks across hardware targets (GPU, Jetson, edge devices): throughput, latency percentiles, memory footprint, and power consumption.
+- `platform.detect`
+- `platform.verify`
+- `platform.optimization`
 
-**Skills:** trt-profiling, triton-perf-analyzer, jetson-power-measurement  
-**Tools:** trt-profile, triton-perf-analyzer, nvidia-smi, tegrastats  
-**Agents:** claude-code, cuda-agent  
-**Risk:** medium
+### Orchestration
 
----
+- `cv.skill.resolution`
 
-### `cv.model.inspection`
-**Category:** analysis  
-Inspect model internals: parameter counts, layer structure, FLOPs, activation statistics, gradient flow, and interpretability visualisations (GradCAM, feature maps, attention maps).
+## Architectural Rules
 
-**Skills:** model-surgery, gradcam, flop-counting  
-**Tools:** pytorch-summary, netron  
-**Agents:** claude-code  
-**Risk:** low
-
----
-
-### `cv.deployment.optimization`
-**Category:** deployment  
-Optimise a trained CV model for target deployment: TensorRT engine building, quantisation (INT8/FP16), pruning, kernel fusion, and DeepStream pipeline integration.
-
-**Skills:** tensorrt, deepstream, nvidia-model-optimizer, cuda-agent, jetson  
-**Tools:** trt-build, trt-profile, deepstream-runtime, nvidia-profiling-tools, tao-toolkit  
-**Agents:** claude-code, cuda-agent  
-**Knowledge sources:** tensorrt-docs, deepstream-docs, jetson-developer-guide  
-**Risk:** high
-
----
-
-### `cv.research`
-**Category:** research  
-Survey the research literature for a given CV problem: identify state-of-the-art methods, summarise key papers, compare approaches, and produce a structured literature review with links to implementations.
-
-**Skills:** arxiv-search, paperswithcode-search, citation-analysis  
-**Knowledge sources:** arxiv-cv, paperswithcode-cv, semantic-scholar  
-**Agents:** claude-code  
-**Risk:** low
-
----
-
-## Registry Extension
-
-To add a new capability:
-1. Add an entry to `spec/capability_registry.json` following the schema above.
-2. Update this document to keep human and machine representations consistent.
-3. Add skills/tools/agents/knowledge_sources entries if they are not already present.
-4. Do **not** implement the capability as Python code in the registry module — the registry represents relationships, not implementations.
+1. Domain capability ownership is separate from coding-worker ownership.
+2. A capability may use multiple skills, tools and workers.
+3. Availability does not imply automatic execution.
+4. Policy determines whether execution is permitted.
+5. Platform-sensitive capabilities must verify the detected platform before execution.
+6. Material results must produce traceable artifacts.
+7. Human and machine registry representations must remain consistent.
+8. Provider/model names are not architectural requirements.
+9. The resolver must verify that referenced skills and tools are actually available before execution.
