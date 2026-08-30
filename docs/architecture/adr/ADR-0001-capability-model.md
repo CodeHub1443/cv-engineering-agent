@@ -99,17 +99,23 @@ CapabilityId = NewType("CapabilityId", str)
 SkillId = NewType("SkillId", str)
 ToolId = NewType("ToolId", str)
 AgentId = NewType("AgentId", str)
+
+
 class Skill(Protocol):
     id: SkillId
     satisfies: tuple[CapabilityId, ...]
     requires_tools: tuple[ToolId, ...]
     provenance: Literal["internal", "external"]
+
+
 class Resolution(NamedTuple):
     capability: Capability
     skill: Skill | None
     tools: tuple[ToolId, ...]
     available: bool
     unavailable_reason: str | None
+
+
 class Registry(Protocol):
     def resolve(self, capability: CapabilityId) -> Resolution: ...
     def capabilities(self, *, stage: str | None = None) -> tuple[Capability, ...]: ...
