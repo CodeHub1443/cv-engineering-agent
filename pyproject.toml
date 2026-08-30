@@ -21,6 +21,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.16,<0.17",
     "mypy>=1.17",
+    "setuptools>=83.0.0",
 ]
 
 [project.scripts]
