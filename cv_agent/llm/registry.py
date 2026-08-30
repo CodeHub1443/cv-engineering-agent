@@ -49,8 +49,7 @@ def get_provider(name: str, model: str) -> LLMProvider:
     if name not in _REGISTRY:
         available = ", ".join(sorted(_REGISTRY))
         raise ValueError(
-            f"Unknown LLM provider {name!r}. "
-            f"Registered providers: {available}"
+            f"Unknown LLM provider {name!r}. Registered providers: {available}"
         )
     cls = _REGISTRY[name]
     return cls(model=model)
