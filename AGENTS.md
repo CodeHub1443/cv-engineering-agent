@@ -6,6 +6,8 @@ These instructions govern all AI/coding-agent work in this repository.
 
 The agent must follow the repository's GitHub workflow and must not bypass its approval gates.
 
+The canonical product definition is maintained in the project context supplied to this repository. Repository specifications derived from it must remain consistent with that source. `spec/00-vision.md` is the canonical in-repository vision and product-boundary specification.
+
 ## 2. Branch Safety — NON-NEGOTIABLE
 
 ### `main` is OFF LIMITS
@@ -51,7 +53,7 @@ test locally
   ↓
 PR → dev-munna
   ↓
-CI/CD
+CI/CD when coding work requires it
   ↓
 technical review
   ↓
@@ -94,18 +96,7 @@ ci/<name>
 hotfix/<name>
 ```
 
-Examples:
-
-```text
-feature/llm-gateway
-feature/rag-foundation
-feature/requirement-agent
-fix/runtime-state
-docs/architecture-v1
-ci/github-actions
-```
-
-Keep branches short-lived. Prefer less than one day; 1–3 days is acceptable for larger but still bounded work.
+Keep branches short-lived.
 
 ## 6. Before Changing Code
 
@@ -138,11 +129,13 @@ Do not introduce a dependency without checking whether an existing project depen
 
 ## 8. AI / LLM Provider Policy
 
-The CV Engineering Agent is intended to support interchangeable LLM providers and models.
+The CV Engineering Agent must support interchangeable LLM providers and models.
 
 Provider-specific logic must not be unnecessarily coupled to agent business logic.
 
-Use provider abstractions/interfaces where appropriate so providers such as Claude, OpenAI, Qwen, DeepSeek, local models, and future providers can be added without redesigning the orchestration layer.
+Use provider abstractions/interfaces where appropriate so providers such as Claude, OpenAI/Codex-compatible models, Qwen, DeepSeek, local models, and future providers can be added without redesigning the orchestration layer.
+
+Coding-worker runtimes such as Codex CLI and Claude Code are separate from the LLM provider abstraction and must remain controlled workers rather than becoming the source of truth for project state or architecture.
 
 ## 9. Knowledge / RAG / Research
 
@@ -156,24 +149,36 @@ Research-driven changes must distinguish between:
 
 Current information should be verified when the feature depends on rapidly changing technologies.
 
-Community sources such as LinkedIn may be used for discovery, but important engineering decisions should be corroborated with stronger primary sources where possible.
+Relevant research channels may include Roboflow, YOLO ecosystem sources, Hugging Face, NVIDIA, TensorRT, DeepStream, TAO, CUDA, GitHub, papers, and professional engineering discussions including LinkedIn.
+
+Community sources are discovery signals and are not automatically authoritative.
+
+RAG is a knowledge subsystem, not the agent itself. Live research and persistent project knowledge must preserve provenance, freshness, authority, and verification state.
 
 ## 10. CV / ML Engineering
 
-When implementing CV/ML functionality, consider the complete lifecycle where relevant:
+The product abstraction is the CV engineering lifecycle, not code generation. When implementing CV/ML functionality, consider the applicable lifecycle stages:
 
 ```text
-Requirements
- → Data
- → Dataset Versioning
- → Architecture
- → Training
- → Evaluation
- → Benchmarking
- → Optimization
- → Deployment
- → Monitoring
+DISCOVER
+ → DEFINE
+ → RESEARCH
+ → DESIGN
+ → DATA
+ → BASELINE
+ → TRAIN
+ → EVALUATE
+ → DIAGNOSE
+ → OPTIMIZE
+ → BENCHMARK
+ → DEPLOY
+ → MONITOR
+ → ITERATE
 ```
+
+Not every project requires every stage. The agent should determine which stages are necessary for the current problem.
+
+Do not assume every CV problem is object detection. Consider detection, classification, segmentation, pose, tracking, action recognition, anomaly detection, geometry, classical CV, and hybrid systems as appropriate.
 
 Do not optimize a model solely for accuracy when deployment constraints are known.
 
@@ -181,11 +186,9 @@ Record important experiment inputs and outputs so results remain reproducible.
 
 ## 11. Platform Detection and NVIDIA / GPU Tooling
 
-Before platform-specific installation, training, profiling, inference, or deployment, detect and verify the execution environment. At minimum distinguish macOS, Linux, Windows, and NVIDIA Jetson, plus architecture, accelerator, driver/runtime state, and relevant framework support. Never assume Linux, Windows, macOS, and Jetson are interchangeable.
+Before platform-specific installation, training, profiling, inference, or deployment, detect and verify the execution environment. At minimum distinguish macOS, Linux, Windows, and NVIDIA Jetson, plus architecture, accelerator, driver/runtime state, and relevant framework support.
 
 Use a verified platform profile to choose installation commands, accelerator backends, optimization tools, and runtime settings. Do not claim GPU acceleration from device presence alone; validate that the selected framework and workload actually execute on the accelerator.
-
-### NVIDIA / GPU Tooling
 
 Use the project's available NVIDIA/CUDA-related skills and tooling when relevant rather than reinventing established workflows.
 
@@ -205,7 +208,26 @@ Relevant areas include:
 
 GPU-specific work should remain isolated from the core runtime when practical and must include appropriate validation.
 
-## 12. Testing and Validation
+## 12. Training, Optimization and NAS
+
+Training and optimization must be baseline-driven and experiment-driven.
+
+```text
+Baseline
+ → Profile
+ → Identify bottleneck
+ → Generate candidates
+ → Estimate cost/risk
+ → Approval when required
+ → Execute
+ → Evaluate
+ → Benchmark
+ → Accept / Reject
+```
+
+NAS is optional. It must not be the default response to an optimization request. Establish a baseline, justify the search space and expected value, estimate compute cost, and obtain approval when required before expensive searches.
+
+## 13. Testing and Validation
 
 Before opening a PR, run the applicable project checks.
 
@@ -236,7 +258,7 @@ TensorRT/DeepStream validation
 
 Never claim a test passed unless it was actually run or its result is otherwise directly verified.
 
-## 13. Pull Requests
+## 14. Pull Requests
 
 Feature PRs target **`dev-munna` only**.
 
@@ -254,9 +276,9 @@ PRs should clearly state:
 
 Keep the PR focused on one feature.
 
-Use squash merging for normal feature branches when the repository settings permit it.
+Use squash merging for normal feature branches when repository settings permit it.
 
-## 14. Approval Boundary
+## 15. Approval Boundary
 
 The agent may implement, test, inspect, and prepare a PR.
 
@@ -276,7 +298,7 @@ AJ approval
 
 Do not self-approve and merge a feature when PM approval is required.
 
-## 15. Git Operations
+## 16. Git Operations
 
 Safe development sequence:
 
@@ -302,7 +324,7 @@ git push --force-with-lease
 
 Never use force-push against `dev-munna` or `main`.
 
-## 16. Documentation
+## 17. Documentation
 
 When a feature changes architecture, interfaces, behavior, configuration, deployment, or operational procedures, update the relevant documentation in the same feature branch.
 
@@ -314,7 +336,7 @@ The canonical GitHub workflow is documented in:
 docs/development/GITHUB_FLOW_V1.md
 ```
 
-## 17. Milestone Discipline
+## 18. Milestone Discipline
 
 Important milestones must be committed and pushed to GitHub.
 
@@ -326,13 +348,13 @@ Completion requires the applicable:
 implementation
 → tests
 → documentation
-→ CI
+→ CI when applicable
 → review
 → PM approval
 → dev-munna integration
 ```
 
-## 18. Current V1.0 Development Sequence
+## 19. Current V1.0 Development Sequence
 
 Unless explicitly changed by the Development PM, follow this dependency order:
 
@@ -362,7 +384,7 @@ Unless explicitly changed by the Development PM, follow this dependency order:
 
 Only the current feature should be implemented unless explicit approval is given to change the sequence.
 
-## 19. Current Branch Policy Summary
+## 20. Current Branch Policy Summary
 
 ```text
 main
@@ -382,7 +404,7 @@ main
   ⛔ requires Official PM process
 ```
 
-## 20. Final Rule
+## 21. Final Rule
 
 When uncertain, **do not make a broad change**.
 
