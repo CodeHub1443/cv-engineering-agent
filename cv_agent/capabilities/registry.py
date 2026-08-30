@@ -133,7 +133,7 @@ class CapabilityRegistry:
     def __init__(self, registry_path: Path) -> None:
         self._path = registry_path
         self._capabilities: dict[str, Capability] = {}
-        self._items: dict[str, RegistryItem] = {}
+        self._items: dict[tuple[ItemType, str], RegistryItem] = {}
         self._version: str = "unknown"
         self._loaded: bool = False
 
@@ -172,7 +172,7 @@ class CapabilityRegistry:
         for json_key, item_type in type_map.items():
             for item_data in raw.get(json_key, []):
                 item = _parse_item(item_data, item_type)
-                self._items[item.id] = item
+                self._items[(item.item_type, item.id)] = item
 
         self._loaded = True
 
@@ -300,6 +300,23 @@ class CapabilityRegistry:
         if item_type is not None:
             items = [i for i in items if i.item_type == item_type]
         return sorted(items, key=lambda i: i.id)
+
+    def describe_item(self, item_type: ItemType, item_id: str) -> RegistryItem:
+        """Return a supporting item using its type-safe registry identity."""
+        self._ensure_loaded()
+        key = (item_type, item_id)
+        if key not in self._items:
+            raise KeyError(f"Unknown {item_type} {item_id!r}.")
+        return self._items[key]
+
+    def check_item(self, item_type: ItemType, item_id: str) -> dict[str, Any]:
+        """Report the presence of a typed registry item without probing it."""
+        item = self.describe_item(item_type, item_id)
+        return {
+            "item_id": item.id,
+            "item_type": item.item_type,
+            "available": True,
+        }
 
     @property
     def capability_count(self) -> int:

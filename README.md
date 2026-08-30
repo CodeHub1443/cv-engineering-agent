@@ -1,86 +1,66 @@
 # CV Engineering Agent
 
-Autonomous Computer Vision engineering assistant built on LangGraph.
+An AI system that **performs** computer-vision engineering — not one that merely knows
+computer vision `[P§35]`.
 
-## Overview
+It takes a CV problem from **problem definition → research → architecture → dataset →
+training → evaluation → optimization → deployment → benchmarking → monitoring**, keeping
+humans in control of consequential decisions `[P§3]`.
 
-`cv-agent` is a structured agent runtime for Computer Vision engineering workflows:
-model selection, training design, evaluation, benchmarking, deployment optimisation,
-and research survey.
+It is **not** a chatbot, a YOLO wrapper, an NVIDIA-only agent, an unlimited-autonomy
+system, a RAG dump, a fixed technique list, or a pile of prompts `[P§31]`.
 
-## Requirements
+## Start here
 
-- Python 3.10+
-- No API keys required to run tests (uses `FakeLLMProvider` by default)
+| If you are… | Read |
+|---|---|
+| a coding agent starting a session | `CLAUDE.md`, then `docs/state/STATUS.md` |
+| a non-Claude agent | `AGENTS.md` |
+| a human joining the project | this file → `docs/PROJECT.md` → `docs/architecture/OVERVIEW.md` |
+| about to make a design choice | `docs/architecture/adr/` + `ADR-0000-template.md` |
+| about to run anything expensive | `docs/APPROVALS.md` |
+| about to claim an improvement | `docs/EVALUATION.md` |
 
-## Installation
-
-```bash
-pip install -e ".[dev]"
-```
-
-## Usage
-
-```bash
-# Health check
-python -m cv_agent
-# or, after install:
-cv-agent
-```
-
-## Running Tests
-
-```bash
-pytest tests/ -v
-```
-
-## Project Structure
+## Document map
 
 ```
-cv_agent/
-├── config/         # Configuration loading (TOML)
-├── llm/            # LLM provider abstraction + mock
-├── capabilities/   # Capability registry interface
-├── graph/          # LangGraph state + graph builder
-└── runtime/        # CVAgent orchestrator + CLI
-
-spec/
-├── 10-capability-registry.md   # Authoritative capability registry spec
-└── capability_registry.json    # Machine-readable registry data
-
-config/
-└── default.toml                # Default configuration
+CLAUDE.md                    operating rules for coding agents (short, imperative)
+AGENTS.md                    the same contract, tool-neutral
+docs/
+  PROJECT.md                 FROZEN canon, §1–§35 — cited everywhere as [P§n]
+  GLOSSARY.md                capability/skill/tool/agent, stages, metrics
+  APPROVALS.md               what needs human authorization, and how to ask [P§24]
+  RESEARCH_POLICY.md         source weighting, provenance, freshness [P§17][P§18]
+  EVALUATION.md              measurement contract, baseline discipline [P§12][P§27]
+  DATA.md                    dataset versioning, splits, leakage [P§26]
+  architecture/
+    OVERVIEW.md              layers + responsibility table [P§34]
+    adr/                     one decision per file, numbered
+  roadmap/ROADMAP.md         phases with measurable exit tests
+  state/
+    STATUS.md                where we are NOW (rewritten, ≤60 lines)
+    JOURNAL.md               how we got here (append-only)
+    DECISIONS.md             what is settled (append-only)
+    OPEN_QUESTIONS.md        what is unresolved (strike through, never delete)
+    EXPERIMENTS.md           reproducible experiment ledger [P§25]
 ```
 
-## Capability Registry
+## The three conventions that hold this together
 
-The capability registry (`spec/capability_registry.json`) represents the agent's
-CV engineering knowledge structure. It distinguishes:
+1. **The canon is frozen.** `docs/PROJECT.md` is never edited or summarized. Every
+   normative statement elsewhere cites it as `[P§12]`, so drift from intent is
+   `grep`-able rather than a matter of opinion.
+2. **State and history are separate files.** `STATUS.md` is rewritten and stays short;
+   `JOURNAL.md` only ever grows. Conflating them is why project memory usually rots.
+3. **Two gates.** No implementation code without an issue; no architectural code without
+   an ADR that answers *what does this own, and why not elsewhere* `[P§34]`.
 
-- **CAPABILITY** — what the agent accomplishes (e.g. `cv.deployment.optimization`)
-- **SKILL** — specialised procedural knowledge (e.g. TensorRT, DeepStream)
-- **TOOL** — executable interface (e.g. `trtexec`, `tegrastats`)
-- **AGENT/RUNTIME** — execution worker (e.g. Claude Code, CUDA Agent)
-- **KNOWLEDGE SOURCE** — reference material (e.g. arXiv, NVIDIA docs)
+## Workflow
 
-See `spec/10-capability-registry.md` for the full specification.
+One issue → one branch `<type>/<n>-<slug>` → one PR. Never commit to `main`. Acceptance
+test written first and shown failing. Rolling state updated before every commit.
 
-## Adding a Real LLM Provider
+## Status
 
-```python
-from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
-from cv_agent.llm.registry import register_provider
-
-class AnthropicProvider(LLMProvider):
-    PROVIDER_NAME = "anthropic"
-    # ... implement complete()
-
-register_provider("anthropic", AnthropicProvider)
-```
-
-Then set in `config/default.toml`:
-```toml
-[llm]
-provider = "anthropic"
-model    = "claude-opus-4-5"
-```
+Phase 0 — governance. The code baseline `[P§32]` exists; the intelligence layers do not.
+See `docs/state/STATUS.md`.

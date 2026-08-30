@@ -3,7 +3,7 @@ cv_agent.config.settings — Configuration dataclasses and loader.
 
 Config discovery order:
   1. Path explicitly passed to load_config()
-  2. <repo_root>/config/default.toml
+  2. Packaged config/default.toml
   3. Built-in defaults (no file needed — tests run without a config file)
 
 Environment variable overrides are intentionally deferred to a later step.
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from importlib import resources
 from pathlib import Path
 from typing import Optional
 
@@ -21,8 +22,13 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib  # type: ignore[no-redef]
 
-# Repo root: cv_agent/config/settings.py → cv_agent/config/ → cv_agent/ → root
-_REPO_ROOT = Path(__file__).parent.parent.parent
+_RESOURCE_PACKAGE = "cv_agent.resources"
+
+
+def _resource_path(relative_path: str) -> Path:
+    """Return the installed filesystem path for a packaged runtime resource."""
+    resource = resources.files(_RESOURCE_PACKAGE).joinpath(relative_path)
+    return Path(resource)
 
 
 @dataclass
@@ -49,7 +55,7 @@ class AgentConfig:
 
     llm: LLMConfig = field(default_factory=LLMConfig)
     registry_path: Path = field(
-        default_factory=lambda: _REPO_ROOT / "spec" / "capability_registry.json"
+        default_factory=lambda: _resource_path("spec/capability_registry.json")
     )
 
 
@@ -59,14 +65,14 @@ def load_config(path: Optional[Path] = None) -> AgentConfig:
 
     Args:
         path: Explicit path to a .toml config file.
-              Defaults to <repo_root>/config/default.toml.
+              Defaults to packaged config/default.toml.
               If the file does not exist, built-in defaults are returned.
 
     Returns:
         Populated AgentConfig.
     """
     if path is None:
-        path = _REPO_ROOT / "config" / "default.toml"
+        path = _resource_path("config/default.toml")
 
     if not path.exists():
         return AgentConfig()
@@ -95,7 +101,7 @@ def load_config(path: Optional[Path] = None) -> AgentConfig:
     registry_path = (
         Path(registry_path_raw)
         if registry_path_raw
-        else _REPO_ROOT / "spec" / "capability_registry.json"
+        else _resource_path("spec/capability_registry.json")
     )
 
     return AgentConfig(llm=llm, registry_path=registry_path)
