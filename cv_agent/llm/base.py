@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -18,7 +18,7 @@ class LLMRequest:
     """Input to an LLM completion call."""
 
     prompt: str
-    system: Optional[str] = None
+    system: str | None = None
     max_tokens: int = 1024
     temperature: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
