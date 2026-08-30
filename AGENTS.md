@@ -98,7 +98,7 @@ Keep branches short-lived. Prefer less than one day; 1–3 days is acceptable fo
 
 ## 6. Before Changing Code
 
-The agent must first inspect the relevant repository structure, documentation, contracts, current `dev-munna` state, existing implementations, smallest viable change, and required tests.
+The agent must first inspect the repository structure relevant to the task, existing documentation and contracts, current `dev-munna` state, existing implementations, smallest viable change, and tests that must be added or updated.
 
 Do not make speculative architecture changes unrelated to the current feature.
 
