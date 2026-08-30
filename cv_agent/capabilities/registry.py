@@ -19,7 +19,7 @@ import json
 from dataclasses import dataclass, field
 from importlib.resources.abc import Traversable
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 CapabilityStatus = Literal["available", "partial", "experimental", "unavailable"]
 RiskLevel = Literal["low", "medium", "high"]
@@ -154,7 +154,7 @@ class CapabilityRegistry:
             self.load()
 
     def list(
-        self, *, category: Optional[str] = None, status: Optional[str] = None
+        self, *, category: str | None = None, status: str | None = None
     ) -> list[Capability]:
         self._ensure_loaded()
         caps = list(self._capabilities.values())
@@ -189,7 +189,7 @@ class CapabilityRegistry:
         }
 
     def select(
-        self, task_type: str, *, category: Optional[str] = None
+        self, task_type: str, *, category: str | None = None
     ) -> list[Capability]:
         self._ensure_loaded()
         results = [
@@ -201,9 +201,7 @@ class CapabilityRegistry:
         ]
         return sorted(results, key=lambda c: c.id)
 
-    def list_items(
-        self, item_type: Optional[ItemType] = None
-    ) -> list[RegistryItem]:
+    def list_items(self, item_type: ItemType | None = None) -> list[RegistryItem]:
         self._ensure_loaded()
         items = list(self._items.values())
         if item_type is not None:
