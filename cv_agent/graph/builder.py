@@ -23,7 +23,6 @@ from langgraph.graph import END, START, StateGraph
 
 from cv_agent.graph.state import AgentState
 
-
 # ── Node implementations ──────────────────────────────────────────────────────
 
 
@@ -86,4 +85,3 @@ def build_graph(checkpointer: Any = None) -> Any:
     builder.add_edge("initialize", END)
 
     return builder.compile(checkpointer=checkpointer)
-
