@@ -14,8 +14,8 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from importlib.resources import files as resource_files
-from importlib.resources.abc import Traversable
 from pathlib import Path
+from typing import Any
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -25,7 +25,7 @@ else:
 _RESOURCE_PACKAGE = "cv_agent.resources"
 
 
-def _resource_path(relative_path: str) -> Traversable:
+def _resource_path(relative_path: str) -> Any:
     """Return a package resource without assuming it is a filesystem path."""
     return resource_files(_RESOURCE_PACKAGE).joinpath(relative_path)
 
@@ -53,12 +53,12 @@ class AgentConfig:
     """Top-level agent configuration."""
 
     llm: LLMConfig = field(default_factory=LLMConfig)
-    registry_path: Path | Traversable = field(
+    registry_path: Path | Any = field(
         default_factory=lambda: _resource_path("spec/capability_registry.json")
     )
 
 
-def load_config(path: Path | Traversable | None = None) -> AgentConfig:
+def load_config(path: Path | Any | None = None) -> AgentConfig:
     """
     Load agent configuration from a TOML file.
 
@@ -97,7 +97,7 @@ def load_config(path: Path | Traversable | None = None) -> AgentConfig:
     )
 
     registry_path_raw: str | None = raw.get("registry_path")
-    registry_path: Path | Traversable = (
+    registry_path: Path | Any = (
         Path(registry_path_raw)
         if registry_path_raw
         else _resource_path("spec/capability_registry.json")
