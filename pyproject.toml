@@ -35,6 +35,9 @@ asyncio_mode = "auto"
 # Keep the CI lint contract within the 0.16 release line until it is deliberately reviewed.
 required-version = ">=0.16,<0.17"
 
+[tool.ruff.lint.isort]
+known-first-party = ["cv_agent"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["cv_agent"]
 include = ["cv_agent/resources/**"]
