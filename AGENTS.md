@@ -94,43 +94,17 @@ ci/<name>
 hotfix/<name>
 ```
 
-Examples:
-
-```text
-feature/llm-gateway
-feature/rag-foundation
-feature/requirement-agent
-fix/runtime-state
-docs/architecture-v1
-ci/github-actions
-```
-
 Keep branches short-lived. Prefer less than one day; 1–3 days is acceptable for larger but still bounded work.
 
 ## 6. Before Changing Code
 
-The agent must first:
-
-- inspect the repository structure relevant to the task;
-- inspect existing documentation and contracts;
-- inspect the current `dev-munna` state;
-- identify existing implementations before creating duplicates;
-- determine the smallest viable change;
-- identify tests that must be added or updated.
+The agent must first inspect the relevant repository structure, documentation, contracts, current `dev-munna` state, existing implementations, smallest viable change, and required tests.
 
 Do not make speculative architecture changes unrelated to the current feature.
 
 ## 7. Implementation Standards
 
-Changes must be:
-
-- production-oriented;
-- modular;
-- testable;
-- typed where the language supports typing;
-- observable where runtime behavior matters;
-- secure by default;
-- compatible with existing contracts unless the feature explicitly changes them.
+Changes must be production-oriented, modular, testable, typed where supported, observable where runtime behavior matters, secure by default, and compatible with existing contracts unless the feature explicitly changes them.
 
 Prefer small, reversible changes over broad refactors.
 
@@ -146,13 +120,7 @@ Use provider abstractions/interfaces where appropriate so providers such as Clau
 
 ## 9. Knowledge / RAG / Research
 
-Research-driven changes must distinguish between:
-
-- repository-defined facts;
-- official documentation;
-- research/papers;
-- community or practitioner signals;
-- agent inference.
+Research-driven changes must distinguish between repository-defined facts, official documentation, research/papers, community or practitioner signals, and agent inference.
 
 Current information should be verified when the feature depends on rapidly changing technologies.
 
@@ -181,80 +149,31 @@ Record important experiment inputs and outputs so results remain reproducible.
 
 ## 11. Platform Detection and NVIDIA / GPU Tooling
 
-Before platform-specific installation, training, profiling, inference, or deployment, detect and verify the execution environment. At minimum distinguish macOS, Linux, Windows, and NVIDIA Jetson, plus architecture, accelerator, driver/runtime state, and relevant framework support. Never assume Linux, Windows, macOS, and Jetson are interchangeable.
+Before platform-specific installation, training, profiling, inference, or deployment, detect and verify the execution environment. At minimum distinguish macOS, Linux, Windows, and NVIDIA Jetson, plus architecture, accelerator, driver/runtime state, and relevant framework support.
 
 Use a verified platform profile to choose installation commands, accelerator backends, optimization tools, and runtime settings. Do not claim GPU acceleration from device presence alone; validate that the selected framework and workload actually execute on the accelerator.
 
-### NVIDIA / GPU Tooling
-
-Use the project's available NVIDIA/CUDA-related skills and tooling when relevant rather than reinventing established workflows.
-
-Relevant areas include:
-
-- CUDA
-- TensorRT
-- DeepStream
-- GStreamer
-- Jetson
-- NVIDIA TAO
-- Model Optimizer
-- GPU profiling
-- kernel optimization
-- FP16 / INT8
-- PTQ / QAT
+Relevant NVIDIA/CUDA areas include CUDA, TensorRT, DeepStream, GStreamer, Jetson, NVIDIA TAO, Model Optimizer, GPU profiling, kernel optimization, FP16/INT8, and PTQ/QAT.
 
 GPU-specific work should remain isolated from the core runtime when practical and must include appropriate validation.
 
 ## 12. Testing and Validation
 
-Before opening a PR, run the applicable project checks.
+Before opening a PR, run applicable formatting, linting, type checking, unit/integration tests, security checks, and build/package validation as appropriate.
 
-At minimum, determine whether the change requires:
+For ML/GPU changes, also consider model validation, accuracy regression, latency/FPS, GPU memory, CPU/GPU utilization, power/resource constraints, and TensorRT/DeepStream validation.
 
-```text
-formatting
-linting
-type checking
-unit tests
-integration tests
-security checks
-build/package validation
-```
-
-For ML/GPU changes, also consider:
-
-```text
-model validation
-accuracy regression checks
-latency/FPS
-GPU memory
-CPU utilization
-GPU utilization
-power/resource constraints
-TensorRT/DeepStream validation
-```
-
-Never claim a test passed unless it was actually run or its result is otherwise directly verified.
+Never claim a test passed unless it was actually run or directly verified.
 
 ## 13. Pull Requests
 
 Feature PRs target **`dev-munna` only**.
 
-PRs should clearly state:
-
-- problem;
-- scope;
-- implementation;
-- architecture impact;
-- tests;
-- risks;
-- dependencies;
-- acceptance criteria;
-- documentation impact.
+PRs should clearly state problem, scope, implementation, architecture impact, tests, risks, dependencies, acceptance criteria, and documentation impact.
 
 Keep the PR focused on one feature.
 
-Use squash merging for normal feature branches when the repository settings permit it.
+Use squash merging for normal feature branches when repository settings permit it.
 
 ## 14. Approval Boundary
 
@@ -320,17 +239,7 @@ Important milestones must be committed and pushed to GitHub.
 
 A milestone is not complete merely because local code works.
 
-Completion requires the applicable:
-
-```text
-implementation
-→ tests
-→ documentation
-→ CI
-→ review
-→ PM approval
-→ dev-munna integration
-```
+Completion requires the applicable implementation, tests, documentation, CI, review, PM approval, and `dev-munna` integration.
 
 ## 18. Current V1.0 Development Sequence
 
