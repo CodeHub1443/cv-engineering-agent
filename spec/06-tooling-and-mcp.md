@@ -23,6 +23,36 @@ Agents determine **what** should happen. Tools/workers determine **how** it happ
 
 The agent should prefer typed interfaces over arbitrary shell execution.
 
+## Capability / Skill / Tool / Worker Model
+
+These concepts are intentionally separate:
+
+| Concept | Responsibility | Example |
+|---|---|---|
+| Capability | Goal-oriented engineering outcome | model optimization |
+| Skill | Specialized procedural knowledge/workflow | NVIDIA Model Optimizer PTQ |
+| Tool | Executable interface for an operation | TensorRT profiling |
+| Agent / Worker | Reasoning or delegated execution worker | CUDA Agent, Claude Code |
+| Knowledge Source | Evidence used for grounded reasoning | NVIDIA documentation |
+
+Resolution should follow the requirement rather than the implementation technology:
+
+```text
+User Task
+ ↓
+Required Capability
+ ↓
+Applicable Skill(s)
+ ↓
+Required Tool(s) / Worker(s)
+ ↓
+Platform Profile
+ ↓
+Policy
+ ↓
+Execution
+```
+
 ## Capability Resolution
 
 ```text
@@ -158,6 +188,8 @@ Relevant integrations include:
 - kernel optimization.
 
 Capability resolution determines when these are applicable and the platform detector determines whether the local target can support them.
+
+The agent should use existing specialized NVIDIA/CUDA capabilities rather than duplicating their implementation inside the CV domain layer.
 
 ## Safety
 

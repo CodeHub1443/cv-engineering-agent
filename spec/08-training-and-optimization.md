@@ -8,7 +8,9 @@
 ~~~text
 Dataset Audit
    ↓
-Experiment Proposal
+Baseline / Experiment Proposal
+   ↓
+Cost + Risk Assessment
    ↓
 Approval (when required)
    ↓
@@ -91,7 +93,9 @@ The agent may propose:
 - knowledge distillation;
 - architecture modification.
 
-Recommendations must include assumptions, expected trade-offs and decision criteria.
+Recommendations must include assumptions, expected trade-offs, estimated resource cost where material, and decision criteria.
+
+The agent should propose training plans before executing them. Materially expensive training requires appropriate human approval.
 
 ## Baseline
 
@@ -111,6 +115,8 @@ accuracy metrics
 performance metrics
 ~~~
 
+A baseline must not be silently overwritten by later experiments.
+
 ## Optimization Loop
 
 ~~~text
@@ -121,6 +127,8 @@ Profile
 Identify Bottleneck
    ↓
 Generate Candidates
+   ↓
+Estimate Cost / Risk
    ↓
 Select Candidate
    ↓
@@ -156,7 +164,7 @@ Use only when justified by measured bottlenecks and constraints.
 
 ## NAS
 
-NAS is optional.
+NAS is optional and is an optimization instrument, not the default methodology.
 
 Use NAS when:
 
@@ -166,7 +174,15 @@ Use NAS when:
 - evaluation is well-defined;
 - expected value exceeds search complexity.
 
+Before NAS, establish a reproducible baseline, identify the architectural bottleneck, define the search space and stopping/acceptance criteria, estimate resource cost, and obtain approval when required.
+
 When an existing architecture meets the requirements, select and validate it rather than running NAS by default.
+
+## Hardware-Aware Optimization
+
+Optimization must consider the complete deployment path rather than model inference in isolation. Relevant bottlenecks include CPU, GPU, memory, I/O, decoding, preprocessing, postprocessing, tracking, event logic, kernel launch overhead, synchronization, and thermal/power limits.
+
+NVIDIA-specific workflows may use CUDA, TensorRT, DeepStream, Nsight, NVIDIA Model Optimizer, and CUDA/kernel optimization capabilities where applicable. The agent should select these through capability/skill resolution rather than hard-code one vendor stack for every project.
 
 ## Acceptance Criteria
 
@@ -187,7 +203,6 @@ operational complexity
 ~~~
 
 The agent must never fabricate before/after measurements.
-
 
 ## Platform-Aware Training
 

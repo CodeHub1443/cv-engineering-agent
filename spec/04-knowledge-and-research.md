@@ -5,7 +5,25 @@
 
 ## Purpose
 
-Provide grounded, current knowledge for CV engineering decisions while preserving provenance and freshness.
+Provide grounded, current knowledge for CV engineering decisions while preserving provenance, authority, verification state, applicability, and freshness.
+
+## Knowledge Is Not Reasoning
+
+~~~text
+LLM
+ ↓
+reasoning
+
+Knowledge / RAG
+ ↓
+grounded retrieval
+
+Research
+ ↓
+current information acquisition
+~~~
+
+RAG is a knowledge subsystem, not the agent itself. The LLM remains responsible for reasoning over retrieved evidence.
 
 ## Knowledge Planes
 
@@ -25,7 +43,7 @@ Live Research
 
 ### Stable / Canonical
 
-Includes durable CV fundamentals, validated internal decisions, project specifications, and established engineering knowledge.
+Includes durable CV fundamentals, validated internal decisions, project specifications, project memory, experiment history, dataset knowledge, and established engineering knowledge.
 
 ### Current Technology
 
@@ -45,7 +63,7 @@ Prefer evidence in this order:
 4. credible practitioner reports;
 5. community/social discovery signals.
 
-LinkedIn and community sources are valuable discovery channels but are not automatically authoritative.
+LinkedIn and community sources are valuable discovery channels for practical engineering knowledge, but are not automatically authoritative. A professional post must not be treated as equivalent to primary documentation or peer-reviewed evidence without verification.
 
 ## Research Workflow
 
@@ -66,6 +84,10 @@ Store with provenance
   ↓
 Retrieve for task
 ~~~
+
+Relevant current sources may include Roboflow, YOLO ecosystem sources, Hugging Face, NVIDIA, TensorRT, DeepStream, TAO, CUDA, GitHub projects, research papers, and professional engineering discussions.
+
+The system should continuously be capable of researching changing ecosystem information without indiscriminately ingesting everything it finds.
 
 ## Evidence Record
 
@@ -136,3 +158,7 @@ Unknown
 It must never turn a discovery signal into a verified fact without appropriate evidence.
 
 It must not invent citations, benchmark numbers, release facts or source content.
+
+## Knowledge Lineage
+
+Project memory and experiment knowledge must remain traceable to the project, dataset/model version, source evidence, or experiment artifact that produced them. Knowledge derived from research should preserve its provenance and retrieval time so stale recommendations can be identified.

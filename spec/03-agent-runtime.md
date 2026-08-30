@@ -14,17 +14,35 @@ Request
   ↓
 Load / Create Project State
   ↓
+Discover required lifecycle stages
+  ↓
 LangGraph Workflow
   ↓
 Agent Node
   ├── LLM reasoning
   ├── Knowledge retrieval
+  ├── Research when required
   ├── Capability / skill resolution
+  ├── Platform verification
   ├── Tool execution
   └── Human approval / interrupt
   ↓
 State + Artifacts + Decision Trace
 ~~~
+
+## Adaptive Lifecycle
+
+The runtime must not assume that every CV project follows every lifecycle stage. It should determine the required stages from project requirements, constraints, evidence, current state, and approved scope.
+
+The canonical product lifecycle is:
+
+~~~text
+DISCOVER → DEFINE → RESEARCH → DESIGN → DATA → BASELINE
+→ TRAIN → EVALUATE → DIAGNOSE → OPTIMIZE → BENCHMARK
+→ DEPLOY → MONITOR → ITERATE
+~~~
+
+The runtime may branch, skip non-required stages, revisit prior stages, pause for information or approval, and resume from checkpoints.
 
 ## State Domains
 
@@ -35,12 +53,16 @@ The runtime state should explicitly represent, as applicable:
 - requirements and unknowns
 - active provider/model
 - selected capabilities
+- selected skills/tools/workers
+- platform profile
 - pending actions and approvals
 - execution steps
 - research/evidence references
 - artifacts
+- datasets and versions
 - experiments and results
 - decisions
+- resource usage/cost metadata
 - errors and recovery metadata
 
 The current AgentState is the foundation. Future state additions must be explicit, typed, versioned when necessary, and backward-compatible where practical.
@@ -70,11 +92,17 @@ LangGraph owns topology and transitions. Domain logic stays in project-owned com
 
 Agent nodes receive an abstract LLM interface. They must not instantiate vendor SDKs directly.
 
-Provider/model selection belongs to configuration and routing.
+Provider/model selection belongs to configuration and routing. The architecture must permit replaceable providers and models, including Claude, OpenAI/Codex-compatible models, Qwen, DeepSeek, local models, and future providers where supported.
 
 ## Tool Contract
 
 A node requests a capability/tool operation through a controlled interface. It must receive structured results rather than parsing arbitrary shell output whenever a typed tool is available.
+
+## Expensive / Consequential Execution
+
+The runtime should estimate material resource cost and risk before expensive or consequential operations. Examples include large training runs, NAS, broad hyperparameter searches, cloud GPU consumption, system-level installation changes, destructive data operations, and production deployment.
+
+Where policy requires it, the runtime pauses for explicit approval before execution. Planning approval must not be interpreted as execution approval.
 
 ## Failure Handling
 
@@ -118,12 +146,14 @@ The long-term production implementation may replace the current in-memory checkp
 Material actions must preserve:
 
 - what was proposed;
-- which capability/tool/worker was selected;
+- which lifecycle stage was active;
+- which capability/skill/tool/worker was selected;
 - who/what executed it;
 - execution status;
 - outputs;
 - artifacts;
 - relevant metrics;
+- resource usage;
 - errors;
 - decision/result.
 
