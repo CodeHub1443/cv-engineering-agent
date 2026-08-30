@@ -211,7 +211,9 @@ class TestRegistryItems:
         assert triton_skill.item_type == "skill"
         assert triton_tool.item_type == "tool"
 
-    def test_item_type_lists_are_not_overwritten(self, registry: CapabilityRegistry) -> None:
+    def test_item_type_lists_are_not_overwritten(
+        self, registry: CapabilityRegistry
+    ) -> None:
         skills = registry.list_items("skill")
         tools = registry.list_items("tool")
         agents = registry.list_items("agent")
