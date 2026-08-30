@@ -168,7 +168,9 @@ class CapabilityRegistry:
         self._ensure_loaded()
         if capability_id not in self._capabilities:
             available = ", ".join(sorted(self._capabilities))
-            raise KeyError(f"Unknown capability {capability_id!r}. Registered: {available}")
+            raise KeyError(
+                f"Unknown capability {capability_id!r}. Registered: {available}"
+            )
         return self._capabilities[capability_id]
 
     def check(self, capability_id: str) -> dict[str, Any]:
