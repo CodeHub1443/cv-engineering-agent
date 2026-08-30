@@ -39,6 +39,46 @@ CV Engineering Agent
              └── Monitoring
 ~~~
 
+## Primary Product Abstraction
+
+The system is organized around an adaptive CV engineering lifecycle, not around code generation:
+
+~~~text
+CV Problem
+   ↓
+Discover → Define → Research → Design → Data → Baseline
+   ↓
+Train → Evaluate → Diagnose → Optimize → Benchmark
+   ↓
+Deploy → Monitor → Iterate
+~~~
+
+Not every project requires every stage. The runtime determines the required stages from the project state, constraints, evidence, and approved scope.
+
+## Responsibility Planes
+
+The architecture separates three primary responsibilities:
+
+~~~text
+REASONING              KNOWLEDGE                 EXECUTION
+LLM Gateway            RAG / Project Memory      MCP / Tools
+LangGraph              Live Research             Skills
+Project-owned agents   Evidence / Sources        Coding Workers
+                                               Training / Profiling
+~~~
+
+The separation is normative:
+
+- **LLM** provides reasoning; it does not own project state or execution semantics.
+- **LangGraph** owns workflow orchestration, branching, iteration, interrupts, and recovery.
+- **Knowledge/RAG** provides grounded retrieval; it does not replace reasoning.
+- **Research** acquires current information and preserves provenance/freshness.
+- **Capabilities** describe what the system can accomplish.
+- **Skills** provide specialized procedural knowledge.
+- **Tools/MCP** provide controlled executable interfaces.
+- **Training/Evaluation/Benchmarking** are execution and measurement subsystems, not LLM responsibilities.
+- **Project memory** preserves durable project state, decisions, datasets, experiments, and evidence.
+
 ## Component Responsibilities
 
 | Component | Responsibility |
@@ -93,6 +133,8 @@ Capability Registry
  ↓
 Skill / Tool / Worker resolution
  ↓
+Platform Profile
+ ↓
 Policy check
  ↓
 Execution
@@ -141,7 +183,6 @@ The architecture must allow a provider, coding worker, vector store, research ad
 
 V1.0 does not require a single permanent vector database, a specific LLM vendor, a specific MCP transport, or NAS for every project.
 
-
 ## Platform Detection and Optimization
 
 Platform detection is a first-class component. Before platform-dependent installation, training, profiling, inference, or deployment, the agent must produce a structured platform profile covering OS, architecture, CPU, memory, GPU/accelerator, driver/runtime state, framework support, and Jetson-specific information where applicable.
@@ -151,3 +192,9 @@ Supported platform classes are macOS, Linux, Windows, and NVIDIA Jetson. Jetson 
 The platform layer must distinguish hardware presence from hardware accessibility, driver availability, runtime availability, and framework support. The agent must select installation and optimization actions from the verified profile rather than from a generic command set.
 
 See `spec/11-platform-detection-and-optimization.md` for the platform contract.
+
+## Product Architecture Rule
+
+The internal implementation roadmap and the product lifecycle are separate concepts. The repository may build Runtime, LLM, Knowledge, Research, Tooling, Training, and other subsystems in an order appropriate for engineering delivery, while the user-facing system remains organized around the CV engineering lifecycle.
+
+No subsystem may become the product abstraction merely because it is technically convenient to implement first.
