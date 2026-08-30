@@ -67,7 +67,7 @@ Platform Optimization Profile
 
 Detect Intel vs Apple Silicon.
 
-For Apple Silicon, use the supported PyTorch MPS backend when available; do not describe MPS as CUDA. See the PyTorch MPS documentation. 
+For Apple Silicon, use the supported PyTorch MPS backend when available; do not describe MPS as CUDA.
 
 Do not assume NVIDIA CUDA, TensorRT, or DeepStream is available on macOS.
 
@@ -75,9 +75,7 @@ Do not assume NVIDIA CUDA, TensorRT, or DeepStream is available on macOS.
 
 Detect distribution, release, kernel, architecture, compiler/toolchain where relevant, NVIDIA GPU and driver state.
 
-For CUDA installation, select a toolkit compatible with the detected OS, compiler and GPU rather than installing an arbitrary version. NVIDIA's Linux guide requires a supported Linux distribution, CUDA-capable GPU and compatible host toolchain.
-
-Prefer the platform's supported package/repository installation method and avoid mixing incompatible installation mechanisms.
+For CUDA installation, select a toolkit compatible with the detected OS, compiler and GPU rather than installing an arbitrary version. Prefer the platform's supported package/repository installation method and avoid mixing incompatible installation mechanisms.
 
 ### Windows
 
@@ -229,6 +227,12 @@ Accept / Reject
 ```
 
 The agent must never claim full GPU utilization, a speedup, or improved efficiency without measurement.
+
+## Project-Level Hardware Principle
+
+Hardware is a first-class engineering constraint, not a deployment detail added at the end. Model selection, training configuration, optimization strategy, and deployment architecture should account for the target platform when that platform is known.
+
+The agent should reason about the complete path, including camera/video decode, data movement, preprocessing, inference, postprocessing, tracking, temporal/event logic, and thermal/power behavior for real-time systems.
 
 ## Safety
 
