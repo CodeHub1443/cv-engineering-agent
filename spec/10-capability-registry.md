@@ -18,6 +18,28 @@ The registry maps goal-oriented CV capabilities to applicable skills, tools, wor
 | AGENT / RUNTIME | Worker/runtime that can perform delegated work. |
 | KNOWLEDGE SOURCE | Reference material used for grounded reasoning. |
 
+## Registry Identity
+
+Registry items are uniquely identified by the pair:
+
+```text
+(item_type, id)
+```
+
+IDs are **not globally unique across entity types**. The same ID may legitimately occur for different entity types and must never overwrite another entity during registry loading or lookup.
+
+Examples:
+
+```text
+(skill, cuda-agent)
+(agent, cuda-agent)
+
+(skill, triton-perf-analyzer)
+(tool, triton-perf-analyzer)
+```
+
+Listing, description, checking, and selection operations must preserve the requested entity type. Backward-compatible ID-only operations may be retained only where the type is unambiguous; ambiguous IDs must not be guessed.
+
 ## Resolution Model
 
 ```text
@@ -111,10 +133,11 @@ Each capability should define:
 
 1. Domain capability ownership is separate from coding-worker ownership.
 2. A capability may use multiple skills, tools and workers.
-3. Availability does not imply automatic execution.
-4. Policy determines whether execution is permitted.
-5. Platform-sensitive capabilities must verify the detected platform before execution.
-6. Material results must produce traceable artifacts.
-7. Human and machine registry representations must remain consistent.
-8. Provider/model names are not architectural requirements.
-9. The resolver must verify that referenced skills and tools are actually available before execution.
+3. Registry identity is `(item_type, id)`; cross-type IDs must never overwrite one another.
+4. Availability does not imply automatic execution.
+5. Policy determines whether execution is permitted.
+6. Platform-sensitive capabilities must verify the detected platform before execution.
+7. Material results must produce traceable artifacts.
+8. Human and machine registry representations must remain consistent.
+9. Provider/model names are not architectural requirements.
+10. The resolver must verify that referenced skills and tools are actually available before execution.
