@@ -1,76 +1,110 @@
-# ADR-0001: Capability / Skill / Tool / Agent as four distinct registries
+# ADR-0001: Typed capability registry and explicit resolution contract
 
-- **Status:** Proposed — *seed ADR, written as a worked example of the required form.
-  Review and accept, amend, or reject before building on it.*
+- **Status:** Accepted
 - **Date:** 2026-08-30
 - **Layer:** cross-cutting
 - **Canon:** `[P§23]`, `[P§15]`, `[P§22]`, `[P§34]`, `[P§32]`
-- **Issue:** #TBD
+- **Issue:** #10
 
 ## 1. Context
 
 `[P§23]` states that capability, skill, tool, and agent "are not interchangeable" and
 defines the resolution chain `task → capability → skill → tools → execution agent`.
-`[P§32]` records that the existing repository already has a capability registry with
-type-safe identities. The risk is the common failure where these four collapse into one
-"tools" dictionary, after which `[P§15]`'s rule — know that NVIDIA capabilities exist and
-select them rather than duplicating them — becomes unenforceable, because there is no
-place to record "this capability is satisfied by an external skill."
+`[P§32]` records that the repository already contains a capability registry with
+type-aware identities. The implementation stores heterogeneous registry items in one
+registry behind a typed `(item_type, id)` identity; it does not currently implement four
+independent persistence registries or an execution resolver.
+
+The architecture must preserve the semantic distinction without prematurely multiplying
+storage and lifecycle components. It must also represent a capability that is known but
+currently unavailable, including the case where no satisfying skill is installed.
 
 ## 2. Responsibility `[P§34]`
 
-- **Owns:** the typed catalogue of what the system can do, and the resolution from a
-  required capability to the skill and tools that satisfy it.
-- **Does NOT own:**
-  - deciding *whether* a capability should be invoked → reasoning layer;
-  - executing anything → tools / MCP layer;
-  - the procedural know-how of a capability → skills;
-  - workflow sequencing → orchestration.
-- **Why not elsewhere:** reasoning must be able to ask "what can this system do?" without
-  importing every execution backend. Orchestration must be able to check a capability is
-  available before entering a stage. Neither can own the catalogue without acquiring the
-  other's concerns.
+The capability registry owns:
+
+- the typed catalogue of what the system can do;
+- typed identities for capabilities and supporting entities;
+- metadata describing relationships among capabilities, skills, tools, agents, and
+  knowledge sources;
+- availability metadata used to determine whether a capability may be selected.
+
+It does **not** own:
+
+- deciding whether a capability should be invoked → reasoning layer;
+- executing anything → tools / MCP layer;
+- procedural know-how → skills;
+- workflow sequencing and approval control → orchestration.
 
 ## 3. Decision
 
-Four separate registries with distinct identity types — `CapabilityId`, `SkillId`,
-`ToolId`, `AgentId` — and an explicit resolver. A capability declares *what*; zero or
-more skills declare they *satisfy* a capability and *how*; skills declare the tools they
-require; an execution agent is bound at invocation. A capability with no satisfying skill
-is a first-class state ("known but unavailable") that the reasoning layer can report
-rather than a lookup failure. External capabilities (NVIDIA TAO, DeepStream, TensorRT,
-CUDA agent) register as skills with an `external` provenance marker, satisfying `[P§15]`
-without duplicating their implementation.
+Use a **single registry storage boundary with typed domain identities**, rather than four
+independent persistence registries.
+
+The public model remains semantically distinct:
+
+```text
+CapabilityId
+SkillId
+ToolId
+AgentId
+```
+
+Registry items are identified internally as `(ItemType, id)`, so the same string may be
+used safely by different entity types. A capability may reference zero or more skills,
+tools, agents, and knowledge sources without conflating those entities.
+
+The registry will expose an explicit resolution contract as the capability-selection layer
+matures:
+
+```python
+Resolution = (
+    capability,
+    selected_skill,
+    required_tools,
+    available,
+    unavailable_reason,
+)
+
+resolve(capability_id) -> Resolution
+```
+
+Resolution is a domain operation, not an execution operation. It must never execute a tool.
+A capability with no satisfying skill remains a valid registry entry and resolves as
+`available=False` with an actionable reason rather than raising because the capability is
+unknown.
+
+External expertise (for example NVIDIA TAO, TensorRT, DeepStream, CUDA agent) is recorded
+as externally-provenanced skills when that integration is implemented. The repository must
+not duplicate their procedural knowledge `[P§15]`.
+
+The current baseline therefore keeps `CapabilityRegistry` as the storage/API boundary;
+the typed resolution surface is implemented when the Phase 1 capability acceptance tests
+require it. This ADR does not authorize that implementation by itself.
 
 ## 4. Alternatives considered
 
-| Alternative | Evidence for | Evidence against | Why not chosen |
+| Alternative | Evidence for | Evidence against | Decision |
 |---|---|---|---|
-| Single tool registry (LangChain-style flat tools) | Simplest; standard in the ecosystem | Cannot express "capability exists, no skill available"; no place to hang external NVIDIA skills | Violates `[P§23]` explicitly; makes `[P§15]` unenforceable |
-| Capability + tool only (skills folded into capabilities) | Fewer moving parts | Procedural knowledge ends up inline in capability definitions, which is the "hundreds of hardcoded prompts" failure `[P§31]` | Collapses the distinction the canon calls critical |
-| Registry per layer, no central resolver | Loose coupling | Resolution logic duplicates in every caller; no single answer to "what can this system do?" | Reasoning layer needs one catalogue |
+| Four independent registries | Mirrors conceptual domains directly | Adds unnecessary persistence/lifecycle boundaries at the current scale | Rejected for V1 substrate |
+| Single flat tool registry | Simple and common | Cannot represent known-but-unavailable capabilities or external skills cleanly | Rejected; violates `[P§23]` |
+| Single typed registry + explicit resolver contract | Preserves semantic separation while keeping one storage boundary | Requires disciplined typed APIs and resolver tests | **Accepted** |
 
-## 5. Interface
+## 5. Interface contract
 
 ```python
-# module: cv_agent.capabilities
+from typing import Literal, NewType, NamedTuple, Protocol
 
-CapabilityId = NewType("CapabilityId", str)   # e.g. "model.optimize.quantization"
-SkillId      = NewType("SkillId", str)
-ToolId       = NewType("ToolId", str)
-AgentId      = NewType("AgentId", str)
-
-class Capability(Protocol):
-    id: CapabilityId
-    stage: Stage                  # [P§6]
-    description: str
-    requires_approval: bool       # [P§24]
+CapabilityId = NewType("CapabilityId", str)
+SkillId = NewType("SkillId", str)
+ToolId = NewType("ToolId", str)
+AgentId = NewType("AgentId", str)
 
 class Skill(Protocol):
     id: SkillId
     satisfies: tuple[CapabilityId, ...]
     requires_tools: tuple[ToolId, ...]
-    provenance: Literal["internal", "external"]   # [P§15]
+    provenance: Literal["internal", "external"]
 
 class Resolution(NamedTuple):
     capability: Capability
@@ -81,31 +115,36 @@ class Resolution(NamedTuple):
 
 class Registry(Protocol):
     def resolve(self, capability: CapabilityId) -> Resolution: ...
-    def capabilities(self, *, stage: Stage | None = None) -> tuple[Capability, ...]: ...
+    def capabilities(self, *, stage: str | None = None) -> tuple[Capability, ...]: ...
 ```
+
+The concrete baseline may use the existing dataclasses and JSON schema until the resolver
+is implemented. No provider SDK, tool invocation, or skill execution belongs in this API.
 
 ## 6. Consequences
 
-- **Enables:** honest "I know this is possible but cannot do it yet" answers; external
-  skills as first-class; capability-gated stage entry in orchestration.
-- **Makes harder:** adding a quick one-off tool now requires declaring a capability.
-  This friction is intentional `[P§34]`.
-- **Costs:** small; registry code and its tests.
-- **If reversed:** contained — the resolver is the only consumer-facing surface.
+- **Enables:** honest "known but unavailable" answers, cross-type identity safety, and a
+  future capability → skill → tools resolution path.
+- **Preserves:** the existing registry storage boundary and avoids four premature
+  persistence systems.
+- **Makes harder:** ad-hoc tool registration without capability metadata. This friction is
+  intentional `[P§34]`.
+- **Costs:** a small resolver contract and focused acceptance tests in Phase 1.
 
-## 7. Acceptance test
+## 7. Acceptance tests
 
-`tests/capabilities/test_resolution.py`
+The Phase 1 implementation must prove:
 
-- a capability with no satisfying skill resolves with `available=False` and a reason,
-  and does **not** raise;
-- an external skill satisfies its capability and reports `provenance="external"`;
-- a capability marked `requires_approval` cannot be executed through the orchestration
-  layer without an approval record (`docs/APPROVALS.md`);
-- registry identities are type-distinct: passing a `SkillId` where a `CapabilityId` is
-  expected fails `mypy`.
+- a capability with no satisfying skill resolves with `available=False` and a reason;
+- an external skill can satisfy a capability and reports `provenance="external"`;
+- a capability marked `requires_approval` cannot be executed through orchestration without
+  an approval record `[P§24]`;
+- cross-type IDs remain distinct and cannot overwrite one another;
+- the typed public API prevents a `SkillId` from being accepted where a `CapabilityId` is
+  required by static type checking.
 
 ## 8. Revisit trigger
 
-If, after the first three stage workflows are built, no capability is ever satisfied by
-more than one skill, the skill layer is redundant and this ADR should be reconsidered.
+Reconsider this ADR if implementation experience shows that independent registry lifecycles
+are required for deployment, versioning, authorization, or discovery, or if the resolver
+cannot remain a coherent boundary without introducing those separate stores.
