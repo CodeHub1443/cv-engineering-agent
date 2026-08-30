@@ -14,7 +14,9 @@ from argparse import ArgumentParser
 
 def main(argv: list[str] | None = None) -> int:
     """Run a health check and print runtime status to stdout."""
-    parser = ArgumentParser(prog="cv-agent", description="CV Engineering Agent health check")
+    parser = ArgumentParser(
+        prog="cv-agent", description="CV Engineering Agent health check"
+    )
     parser.parse_args(argv)
     from cv_agent.runtime.agent import CVAgent
 
