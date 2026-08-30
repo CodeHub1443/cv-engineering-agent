@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-from importlib.resources.abc import Traversable
-
 from cv_agent.config.settings import AgentConfig, LLMConfig, LLMOverride, load_config
 
 
@@ -30,9 +27,8 @@ class TestLoadConfigDefaults:
         cfg = load_config(tmp_path / "missing.toml")
         assert cfg.llm.overrides == {}
 
-    def test_registry_path_is_path_object(self, tmp_path: Path) -> None:
+    def test_registry_path_is_file_like(self, tmp_path: Path) -> None:
         cfg = load_config(tmp_path / "missing.toml")
-        assert isinstance(cfg.registry_path, (Path, Traversable))
         assert cfg.registry_path.is_file()
 
 
@@ -77,7 +73,7 @@ class TestLoadConfigFromFile:
 
     def test_default_toml_is_valid(self) -> None:
         """The committed config/default.toml must be parseable."""
-        cfg = load_config()  # uses default path
+        cfg = load_config()
         assert cfg.llm.provider == "mock"
         assert cfg.llm.model == "fake-1"
 

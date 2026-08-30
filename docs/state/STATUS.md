@@ -7,32 +7,34 @@
 
 ## Where we are
 
-Repository documentation scaffold is in place. `docs/PROJECT.md` is frozen canon.
-The pre-existing code baseline `[P§32]` — package, config, LLM abstraction, mock
-provider, LangGraph runtime, agent state, capability registry, CLI, tests — is present
-but **not yet governed by ADRs**. No intelligence layers exist yet.
+Phase 0 governance is substantially scaffolded. `docs/PROJECT.md` remains frozen canon.
+Baseline cleanup and governance reconciliation are in progress on issue #10 and branch
+`fix/phase-0-baseline-governance`. The capability registry and package-resource loader
+have been corrected; ADR-0001 has been reconciled with the existing typed-registry
+implementation and accepted. CI validation has been added but has not yet run in GitHub.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| Governance docs committed & reviewed | #— | in progress |
-| GitHub scaffolding (labels, templates, CI, milestones) | #— | not started |
-| ADR-0001 capability model — seed written, needs review | #— | proposed |
+| Baseline cleanup + ADR-0001 reconciliation | #10 | PR preparation |
+| GitHub validation (ruff/mypy/pytest/build/audit) | #10 | added; CI pending |
+| Phase 0 governance completion | #10 | pending review |
 
 ## Next 3 actions
 
-1. Human review of `CLAUDE.md` and `docs/architecture/OVERVIEW.md`; accept or amend.
-2. Create GitHub labels, issue/PR templates, CI, and Phase-1 milestone with issues.
-3. Accept or revise ADR-0001, then write ADR-0002 (LLM gateway) `[P§20]`.
+1. Run/inspect CI for issue #10 and fix only failures caused by this change set.
+2. Complete Phase 0 GitHub scaffolding review: labels, milestones, branch protections, and
+   PR workflow consistency.
+3. Answer blocking Q1–Q5 in `OPEN_QUESTIONS.md`; then proceed to ADR-0002 and ADR-0003 in
+   dependency order.
 
 ## Blockers
 
-- `docs/state/OPEN_QUESTIONS.md` Q1–Q5 are **blocking**: they must be answered before
-  ADR-0003 (orchestration state) can be written.
+- Q1–Q5 remain unanswered and block ADR-0003 / ADR-0004 or NVIDIA integration where stated.
+- ADR-0002 LLM gateway is the next architecture decision after Phase 0 review.
 
 ## Do not start yet
 
-Stage workflows `[P§6]`, RAG `[P§19]`, training execution `[P§10]`. These depend on the
-registry, gateway, state model, and memory. Building them first is the failure mode
-`[P§34]` warns about.
+Stage workflows `[P§6]`, RAG `[P§19]`, training execution `[P§10]`, and NVIDIA skill
+integration `[P§15]`. These require the approved substrate and their stated blockers.

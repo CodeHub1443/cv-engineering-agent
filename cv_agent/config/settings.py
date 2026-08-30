@@ -13,34 +13,21 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from importlib import resources
 from importlib.resources import files as resource_files
-from importlib.resources.abc import Traversable
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 if sys.version_info >= (3, 11):
-    import tomllib  # stdlib from 3.11+
+    import tomllib
 else:
     import tomli as tomllib  # type: ignore[no-redef]
 
 _RESOURCE_PACKAGE = "cv_agent.resources"
 
 
-def _resource_path(relative_path: str) -> Path:
-    """Return the installed filesystem path for a packaged runtime resource."""
-    resource = resources.files(_RESOURCE_PACKAGE).joinpath(relative_path)
-    return Path(resource)
-
-_DEFAULT_CONFIG_RESOURCE = resource_files("cv_agent").joinpath("resources/default.toml")
-_DEFAULT_REGISTRY_RESOURCE = resource_files("cv_agent").joinpath("resources/capability_registry.json")
-
-def _default_config_path() -> Path | Traversable:
-    return _DEFAULT_CONFIG_RESOURCE if _DEFAULT_CONFIG_RESOURCE.is_file() else _REPO_ROOT / "config" / "default.toml"
-
-
-def _default_registry_path() -> Path | Traversable:
-    return _DEFAULT_REGISTRY_RESOURCE if _DEFAULT_REGISTRY_RESOURCE.is_file() else _REPO_ROOT / "spec" / "capability_registry.json"
+def _resource_path(relative_path: str) -> Any:
+    """Return a package resource without assuming it is a filesystem path."""
+    return resource_files(_RESOURCE_PACKAGE).joinpath(relative_path)
 
 
 @dataclass
@@ -66,12 +53,12 @@ class AgentConfig:
     """Top-level agent configuration."""
 
     llm: LLMConfig = field(default_factory=LLMConfig)
-    registry_path: Path = field(
+    registry_path: Path | Any = field(
         default_factory=lambda: _resource_path("spec/capability_registry.json")
     )
 
 
-def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
+def load_config(path: Path | Any | None = None) -> AgentConfig:
     """
     Load agent configuration from a TOML file.
 
@@ -109,8 +96,8 @@ def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
         overrides=overrides,
     )
 
-    registry_path_raw: Optional[str] = raw.get("registry_path")
-    registry_path = (
+    registry_path_raw: str | None = raw.get("registry_path")
+    registry_path: Path | Any = (
         Path(registry_path_raw)
         if registry_path_raw
         else _resource_path("spec/capability_registry.json")

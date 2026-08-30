@@ -8,18 +8,16 @@ get_provider(); it never imports a concrete adapter directly.
 
 from __future__ import annotations
 
-from typing import Type
-
 from cv_agent.llm.base import LLMProvider
 from cv_agent.llm.mock import FakeLLMProvider
 
 # Internal registry: provider name → concrete class
-_REGISTRY: dict[str, Type[LLMProvider]] = {
+_REGISTRY: dict[str, type[LLMProvider]] = {
     FakeLLMProvider.PROVIDER_NAME: FakeLLMProvider,
 }
 
 
-def register_provider(name: str, cls: Type[LLMProvider]) -> None:
+def register_provider(name: str, cls: type[LLMProvider]) -> None:
     """
     Register a new LLM provider adapter.
 
@@ -51,8 +49,7 @@ def get_provider(name: str, model: str) -> LLMProvider:
     if name not in _REGISTRY:
         available = ", ".join(sorted(_REGISTRY))
         raise ValueError(
-            f"Unknown LLM provider {name!r}. "
-            f"Registered providers: {available}"
+            f"Unknown LLM provider {name!r}. Registered providers: {available}"
         )
     cls = _REGISTRY[name]
     return cls(model=model)

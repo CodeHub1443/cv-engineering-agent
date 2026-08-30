@@ -15,6 +15,7 @@ class TestCLISmoke:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
 
     def test_cli_exits_with_zero_or_one(self) -> None:
@@ -62,6 +63,7 @@ class TestCLISmoke:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
 
         assert result.returncode == 2

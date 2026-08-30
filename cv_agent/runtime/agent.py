@@ -17,8 +17,9 @@ kept out of this class and belong in their respective modules.
 
 from __future__ import annotations
 
+import importlib
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from cv_agent.capabilities.registry import CapabilityRegistry
 from cv_agent.config.settings import AgentConfig, load_config
@@ -36,7 +37,7 @@ class CVAgent:
     from the default TOML file (config/default.toml).
     """
 
-    def __init__(self, config: Optional[AgentConfig] = None) -> None:
+    def __init__(self, config: AgentConfig | None = None) -> None:
         self._config: AgentConfig = config or load_config()
         self._llm: LLMProvider = get_provider(
             self._config.llm.provider,
@@ -65,10 +66,10 @@ class CVAgent:
 
     def run(
         self,
-        task: Optional[str] = None,
+        task: str | None = None,
         *,
-        session_id: Optional[str] = None,
-        task_type: Optional[str] = None,
+        session_id: str | None = None,
+        task_type: str | None = None,
     ) -> AgentState:
         """
         Execute a single agent session through the graph.
@@ -116,9 +117,9 @@ class CVAgent:
         # LangGraph check
         try:
             from importlib.metadata import version
-            
+
             lg_version: str = version("langgraph")
-            import langgraph  # noqa: PLC0415
+            importlib.import_module("langgraph")
             lg_ok = True
         except Exception as exc:  # noqa: BLE001
             lg_version = str(exc)

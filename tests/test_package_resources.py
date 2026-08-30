@@ -14,7 +14,9 @@ def test_copied_package_loads_default_resources_outside_repository(
     """Removing sibling repo directories must not degrade the default runtime."""
     source_package = Path(__file__).parent.parent / "cv_agent"
     target_package = tmp_path / "cv_agent"
-    shutil.copytree(source_package, target_package, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(
+        source_package, target_package, ignore=shutil.ignore_patterns("__pycache__")
+    )
 
     result = subprocess.run(
         [sys.executable, "-m", "cv_agent"],
@@ -22,6 +24,7 @@ def test_copied_package_loads_default_resources_outside_repository(
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

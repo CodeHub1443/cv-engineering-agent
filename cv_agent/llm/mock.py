@@ -7,8 +7,6 @@ predictable responses.  It is the default provider in config/default.toml.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
 
 
@@ -28,7 +26,7 @@ class FakeLLMProvider(LLMProvider):
     def __init__(
         self,
         model: str = "fake-1",
-        fixed_response: Optional[str] = None,
+        fixed_response: str | None = None,
     ) -> None:
         self._model = model
         self._fixed_response = fixed_response
