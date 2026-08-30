@@ -92,9 +92,7 @@ class TestCapabilityDescribe:
         assert isinstance(cap, Capability)
         assert cap.id == "cv.evaluation"
 
-    def test_describe_returns_full_metadata(
-        self, registry: CapabilityRegistry
-    ) -> None:
+    def test_describe_returns_full_metadata(self, registry: CapabilityRegistry) -> None:
         cap = registry.describe("cv.deployment.optimization")
         assert cap.name
         assert cap.category == "deployment"
@@ -108,9 +106,7 @@ class TestCapabilityDescribe:
         with pytest.raises(KeyError, match="Unknown capability"):
             registry.describe("cv.does.not.exist")
 
-    def test_inputs_and_outputs_are_typed(
-        self, registry: CapabilityRegistry
-    ) -> None:
+    def test_inputs_and_outputs_are_typed(self, registry: CapabilityRegistry) -> None:
         cap = registry.describe("cv.requirements.analysis")
         assert len(cap.required_inputs) > 0
         for inp in cap.required_inputs:
@@ -202,7 +198,6 @@ class TestRegistryItems:
         sources = registry.list_items("knowledge_source")
         assert all(i.item_type == "knowledge_source" for i in sources)
         assert len(sources) > 0
-
 
     def test_cross_type_ids_do_not_collide(self, registry: CapabilityRegistry) -> None:
         """The same ID may legitimately exist for different registry entity types."""
