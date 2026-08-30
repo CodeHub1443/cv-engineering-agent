@@ -203,6 +203,29 @@ class TestRegistryItems:
         assert all(i.item_type == "knowledge_source" for i in sources)
         assert len(sources) > 0
 
+
+    def test_cross_type_ids_do_not_collide(self, registry: CapabilityRegistry) -> None:
+        """The same ID may legitimately exist for different registry entity types."""
+        skill = registry.describe_item("cuda-agent", item_type="skill")
+        agent = registry.describe_item("cuda-agent", item_type="agent")
+        triton_skill = registry.describe_item("triton-perf-analyzer", item_type="skill")
+        triton_tool = registry.describe_item("triton-perf-analyzer", item_type="tool")
+
+        assert skill.item_type == "skill"
+        assert agent.item_type == "agent"
+        assert triton_skill.item_type == "skill"
+        assert triton_tool.item_type == "tool"
+
+    def test_item_type_lists_are_not_overwritten(self, registry: CapabilityRegistry) -> None:
+        skills = registry.list_items("skill")
+        tools = registry.list_items("tool")
+        agents = registry.list_items("agent")
+
+        assert any(i.id == "cuda-agent" for i in skills)
+        assert any(i.id == "cuda-agent" for i in agents)
+        assert any(i.id == "triton-perf-analyzer" for i in skills)
+        assert any(i.id == "triton-perf-analyzer" for i in tools)
+
     def test_known_skills_present(self, registry: CapabilityRegistry) -> None:
         skill_ids = {i.id for i in registry.list_items("skill")}
         assert "tensorrt" in skill_ids
