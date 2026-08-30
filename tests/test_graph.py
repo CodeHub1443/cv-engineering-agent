@@ -6,6 +6,7 @@ import pytest
 
 from cv_agent.graph.builder import build_graph
 from cv_agent.graph.state import AgentState
+from cv_agent.runtime.agent import CVAgent
 
 
 @pytest.fixture()
@@ -81,3 +82,27 @@ class TestGraphExecution:
         # Both should succeed independently
         assert r_a["status"] == "ready"
         assert r_b["status"] == "ready"
+
+
+class TestCVAgentRun:
+    def test_run_initializes_and_executes_a_checkpointed_session(self) -> None:
+        result = CVAgent().run(
+            "inspect a model",
+            task_type="model_analysis",
+            session_id="runtime-test-session",
+        )
+
+        assert result["status"] == "ready"
+        assert result["session_id"] == "runtime-test-session"
+        assert result["task"] == "inspect a model"
+        assert result["task_type"] == "model_analysis"
+        assert result["provider"] == "mock"
+        assert result["model"] == "fake-1"
+        assert result["selected_capabilities"] == []
+        assert result["steps"] == [
+            {
+                "node": "initialize",
+                "action": "session_started",
+                "session_id": "runtime-test-session",
+            }
+        ]

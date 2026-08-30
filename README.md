@@ -1,200 +1,66 @@
 # CV Engineering Agent
 
-Independent, production-oriented Computer Vision engineering agent built around LangGraph and a project-owned CV engineering architecture.
+An AI system that **performs** computer-vision engineering — not one that merely knows
+computer vision `[P§35]`.
 
-## Purpose
+It takes a CV problem from **problem definition → research → architecture → dataset →
+training → evaluation → optimization → deployment → benchmarking → monitoring**, keeping
+humans in control of consequential decisions `[P§3]`.
 
-Turn ambiguous real-world CV requests into evidence-backed, reproducible engineering work:
+It is **not** a chatbot, a YOLO wrapper, an NVIDIA-only agent, an unlimited-autonomy
+system, a RAG dump, a fixed technique list, or a pile of prompts `[P§31]`.
 
-~~~text
-Requirement
-→ Research / Problem Framing
-↔ Problem Formulation
-→ Architecture
-→ Data
-→ Model
-→ Experiment
-→ Training
-→ Evaluation
-→ Benchmark
-→ Failure Analysis
-→ Optimization / NAS when justified
-→ Deployment
-→ Production Validation
-→ Monitoring
-~~~
+## Start here
 
-The lifecycle is iterative. The agent may revisit earlier stages when new evidence changes a decision.
-
-## Current Foundation
-
-The repository currently provides:
-
-- LangGraph runtime foundation
-- shared agent state
-- LLM provider abstraction and mock provider
-- configuration
-- capability registry
-- foundational V1.0 architecture specifications
-- artifact and experiment contracts
-- automated tests for the existing runtime
-
-## Architecture
-
-~~~text
-CV Engineering Agent
-├── LangGraph Orchestrator
-├── Agent Runtime / Project State
-├── LLM Gateway
-├── Policy / Approval Engine
-├── Capability Registry
-├── Capability / Skill Resolver
-├── Knowledge + RAG
-├── Research Engine
-├── MCP / Tool Layer
-├── Experiment Manager
-├── Artifact Manager
-├── Model Inspector
-└── CV Engineering Agents
-~~~
-
-Important architectural boundary:
-
-~~~text
-LLM Provider / Model
-        ≠
-Coding Worker Runtime
-        ≠
-MCP Tool / Resource
-        ≠
-CV Engineering Agent
-        ≠
-Skill
-        ≠
-Knowledge Source
-~~~
-
-Codex CLI and Claude Code are coding-worker runtimes. They are not the domain agents or provider abstraction.
-
-## Technology Baseline
-
-| Layer | Baseline |
+| If you are… | Read |
 |---|---|
-| Orchestration | LangGraph |
-| LLM abstraction | Project-owned interface + provider adapters |
-| Knowledge/RAG | Project-owned abstraction initially |
-| Research | Project-owned evidence/research layer |
-| Tool protocol | MCP through an adapter boundary |
-| Coding workers | Codex CLI, Claude Code |
-| CV execution | Python / C++ / CUDA / DeepStream as applicable |
-| Training | PyTorch + task/framework trainers |
-| Benchmarking | Project-owned benchmark layer |
-| Vector store | TBD |
-| Model inspection | Project-owned inspector + Netron visualization |
+| a coding agent starting a session | `CLAUDE.md`, then `docs/state/STATUS.md` |
+| a non-Claude agent | `AGENTS.md` |
+| a human joining the project | this file → `docs/PROJECT.md` → `docs/architecture/OVERVIEW.md` |
+| about to make a design choice | `docs/architecture/adr/` + `ADR-0000-template.md` |
+| about to run anything expensive | `docs/APPROVALS.md` |
+| about to claim an improvement | `docs/EVALUATION.md` |
 
-## NVIDIA / Edge Capabilities
+## Document map
 
-The architecture is designed to use applicable installed NVIDIA and CUDA capabilities, including:
-
-- NVIDIA TAO
-- DALI
-- DeepStream
-- TensorRT
-- NVIDIA Model Optimizer
-- CUDA-Agent
-- Jetson tooling
-- GPU profiling
-- kernel optimization
-
-The capability resolver should select only the capabilities relevant to the current engineering task.
-
-## Knowledge and Research
-
-The knowledge system combines:
-
-~~~text
-Stable / Canonical Knowledge
-        +
-Current Technology Knowledge
-        +
-Live Research
-~~~
-
-Important research sources include:
-
-- NVIDIA
-- Ultralytics / YOLO
-- Roboflow
-- Hugging Face
-- GitHub
-- research papers
-- official documentation
-- engineering blogs
-- practitioner sources including LinkedIn
-
-Community content is a discovery signal and should be verified before supporting important engineering decisions.
-
-## Repository Structure
-
-~~~text
-cv_agent/
-├── capabilities/   # Capability registry interface
-├── config/         # Configuration
-├── graph/          # LangGraph state and graph
-├── llm/            # LLM abstraction
-└── runtime/        # Top-level CVAgent runtime
-
-spec/
-├── 00-vision.md
-├── 01-principles.md
-├── 02-architecture.md
-├── 03-agent-runtime.md
-├── 04-knowledge-and-research.md
-├── 05-cv-engineering-lifecycle.md
-├── 06-tooling-and-mcp.md
-├── 07-human-approval-and-safety.md
-├── 08-training-and-optimization.md
-├── 09-artifact-and-experiment-contracts.md
-├── 10-capability-registry.md
-└── capability_registry.json
-
+```
+CLAUDE.md                    operating rules for coding agents (short, imperative)
+AGENTS.md                    the same contract, tool-neutral
 docs/
-└── development/
-    └── GITHUB_FLOW_V1.md
-~~~
+  PROJECT.md                 FROZEN canon, §1–§35 — cited everywhere as [P§n]
+  GLOSSARY.md                capability/skill/tool/agent, stages, metrics
+  APPROVALS.md               what needs human authorization, and how to ask [P§24]
+  RESEARCH_POLICY.md         source weighting, provenance, freshness [P§17][P§18]
+  EVALUATION.md              measurement contract, baseline discipline [P§12][P§27]
+  DATA.md                    dataset versioning, splits, leakage [P§26]
+  architecture/
+    OVERVIEW.md              layers + responsibility table [P§34]
+    adr/                     one decision per file, numbered
+  roadmap/ROADMAP.md         phases with measurable exit tests
+  state/
+    STATUS.md                where we are NOW (rewritten, ≤60 lines)
+    JOURNAL.md               how we got here (append-only)
+    DECISIONS.md             what is settled (append-only)
+    OPEN_QUESTIONS.md        what is unresolved (strike through, never delete)
+    EXPERIMENTS.md           reproducible experiment ledger [P§25]
+```
 
-## Development Model
+## The three conventions that hold this together
 
-Development is performed through:
+1. **The canon is frozen.** `docs/PROJECT.md` is never edited or summarized. Every
+   normative statement elsewhere cites it as `[P§12]`, so drift from intent is
+   `grep`-able rather than a matter of opinion.
+2. **State and history are separate files.** `STATUS.md` is rewritten and stays short;
+   `JOURNAL.md` only ever grows. Conflating them is why project memory usually rots.
+3. **Two gates.** No implementation code without an issue; no architectural code without
+   an ADR that answers *what does this own, and why not elsewhere* `[P§34]`.
 
-~~~text
-Short-lived feature branch
-        ↓
-PR → dev-munna
-        ↓
-CI/CD
-        ↓
-Technical Review
-        ↓
-AJ / Development PM Approval
-        ↓
-dev-munna
-~~~
+## Workflow
 
-The official main branch is outside the normal agent development workflow.
-
-## Installation
-
-~~~bash
-pip install -e ".[dev]"
-~~~
-
-## Tests
-
-~~~bash
-pytest tests/ -v
-~~~
+One issue → one branch `<type>/<n>-<slug>` → one PR. Never commit to `main`. Acceptance
+test written first and shown failing. Rolling state updated before every commit.
 
 ## Status
 
-The project is currently establishing its V1.0 architecture and contracts. Runtime execution, live research, RAG, MCP tools, training, benchmarking, optimization, and deployment capabilities are being added incrementally behind these contracts.
+Phase 0 — governance. The code baseline `[P§32]` exists; the intelligence layers do not.
+See `docs/state/STATUS.md`.

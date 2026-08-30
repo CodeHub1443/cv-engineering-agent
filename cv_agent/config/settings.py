@@ -3,7 +3,7 @@ cv_agent.config.settings — Configuration dataclasses and loader.
 
 Config discovery order:
   1. Path explicitly passed to load_config()
-  2. <repo_root>/config/default.toml
+  2. Packaged config/default.toml
   3. Built-in defaults (no file needed — tests run without a config file)
 
 Environment variable overrides are intentionally deferred to a later step.
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from importlib import resources
 from importlib.resources import files as resource_files
 from importlib.resources.abc import Traversable
 from pathlib import Path
@@ -23,8 +24,13 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib  # type: ignore[no-redef]
 
-# Repo root: cv_agent/config/settings.py → cv_agent/config/ → cv_agent/ → root
-_REPO_ROOT = Path(__file__).parent.parent.parent
+_RESOURCE_PACKAGE = "cv_agent.resources"
+
+
+def _resource_path(relative_path: str) -> Path:
+    """Return the installed filesystem path for a packaged runtime resource."""
+    resource = resources.files(_RESOURCE_PACKAGE).joinpath(relative_path)
+    return Path(resource)
 
 _DEFAULT_CONFIG_RESOURCE = resource_files("cv_agent").joinpath("resources/default.toml")
 _DEFAULT_REGISTRY_RESOURCE = resource_files("cv_agent").joinpath("resources/capability_registry.json")
@@ -60,8 +66,8 @@ class AgentConfig:
     """Top-level agent configuration."""
 
     llm: LLMConfig = field(default_factory=LLMConfig)
-    registry_path: Path | Traversable = field(
-        default_factory=_default_registry_path
+    registry_path: Path = field(
+        default_factory=lambda: _resource_path("spec/capability_registry.json")
     )
 
 
@@ -71,14 +77,14 @@ def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
 
     Args:
         path: Explicit path to a .toml config file.
-              Defaults to the packaged config resource.
+              Defaults to packaged config/default.toml.
               If the file does not exist, built-in defaults are returned.
 
     Returns:
         Populated AgentConfig.
     """
     if path is None:
-        path = _default_config_path()
+        path = _resource_path("config/default.toml")
 
     if not path.is_file():
         return AgentConfig()
@@ -107,7 +113,7 @@ def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
     registry_path = (
         Path(registry_path_raw)
         if registry_path_raw
-        else _default_registry_path()
+        else _resource_path("spec/capability_registry.json")
     )
 
     return AgentConfig(llm=llm, registry_path=registry_path)

@@ -55,3 +55,14 @@ class TestCLISmoke:
         if result.returncode == 0:
             # No errors should appear on stdout for a healthy run
             assert "STARTUP FAILURE" not in result.stdout
+
+    def test_step_two_command_name_is_rejected_until_implemented(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "cv_agent", "skills"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 2
+        assert "unrecognized arguments: skills" in result.stderr

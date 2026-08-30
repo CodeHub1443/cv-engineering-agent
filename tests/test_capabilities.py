@@ -236,3 +236,45 @@ class TestRegistryItems:
         tool_ids = {i.id for i in registry.list_items("tool")}
         assert "trt-build" in tool_ids
         assert "deepstream-runtime" in tool_ids
+
+
+class TestCrossTypeRegistryItems:
+    """An ID may be reused only when its entity type differs."""
+
+    def test_cross_type_ids_are_retained_and_described_by_type(
+        self, registry: CapabilityRegistry
+    ) -> None:
+        assert len(registry.list_items("skill")) == 27
+        assert len(registry.list_items("tool")) == 13
+        assert len(registry.list_items("agent")) == 3
+
+        cuda_skill = registry.describe_item("skill", "cuda-agent")
+        cuda_agent = registry.describe_item("agent", "cuda-agent")
+        triton_skill = registry.describe_item("skill", "triton-perf-analyzer")
+        triton_tool = registry.describe_item("tool", "triton-perf-analyzer")
+
+        assert (cuda_skill.id, cuda_skill.item_type) == ("cuda-agent", "skill")
+        assert (cuda_agent.id, cuda_agent.item_type) == ("cuda-agent", "agent")
+        assert (triton_skill.id, triton_skill.item_type) == (
+            "triton-perf-analyzer",
+            "skill",
+        )
+        assert (triton_tool.id, triton_tool.item_type) == (
+            "triton-perf-analyzer",
+            "tool",
+        )
+
+    def test_item_check_is_type_safe(self, registry: CapabilityRegistry) -> None:
+        assert registry.check_item("skill", "cuda-agent") == {
+            "item_id": "cuda-agent",
+            "item_type": "skill",
+            "available": True,
+        }
+
+    def test_capability_selection_returns_only_capabilities(
+        self, registry: CapabilityRegistry
+    ) -> None:
+        selected = registry.select("benchmarking")
+
+        assert [cap.id for cap in selected] == ["cv.benchmarking"]
+        assert all(isinstance(cap, Capability) for cap in selected)
