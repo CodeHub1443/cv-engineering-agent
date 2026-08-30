@@ -15,9 +15,9 @@ Public interface:
 
 from __future__ import annotations
 
+import builtins
 import json
 from dataclasses import dataclass, field
-from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -112,7 +112,7 @@ def _parse_item(data: dict[str, Any], item_type: ItemType) -> RegistryItem:
 class CapabilityRegistry:
     """Programmatic interface to the CV Agent capability registry."""
 
-    def __init__(self, registry_path: Path | Traversable) -> None:
+    def __init__(self, registry_path: Path | Any) -> None:
         self._path = registry_path
         self._capabilities: dict[str, Capability] = {}
         self._items: dict[tuple[ItemType, str], RegistryItem] = {}
@@ -155,7 +155,7 @@ class CapabilityRegistry:
 
     def list(
         self, *, category: str | None = None, status: str | None = None
-    ) -> list[Capability]:
+    ) -> builtins.list[Capability]:
         self._ensure_loaded()
         caps = list(self._capabilities.values())
         if category is not None:
@@ -192,7 +192,7 @@ class CapabilityRegistry:
 
     def select(
         self, task_type: str, *, category: str | None = None
-    ) -> list[Capability]:
+    ) -> builtins.list[Capability]:
         self._ensure_loaded()
         results = [
             c
@@ -203,7 +203,7 @@ class CapabilityRegistry:
         ]
         return sorted(results, key=lambda c: c.id)
 
-    def list_items(self, item_type: ItemType | None = None) -> list[RegistryItem]:
+    def list_items(self, item_type: ItemType | None = None) -> builtins.list[RegistryItem]:
         self._ensure_loaded()
         items = list(self._items.values())
         if item_type is not None:
