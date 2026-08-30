@@ -45,6 +45,10 @@ class LLMProvider(ABC):
     by graph or capability code.
     """
 
+    def __init__(self, model: str) -> None:
+        """Initialize the provider contract with its model identifier."""
+        del model
+
     @property
     @abstractmethod
     def provider_name(self) -> str:
