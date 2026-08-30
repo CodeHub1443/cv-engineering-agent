@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from importlib.resources import files as resource_files
 from importlib.resources.abc import Traversable
 from pathlib import Path
-from typing import Optional
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -59,7 +58,7 @@ class AgentConfig:
     )
 
 
-def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
+def load_config(path: Path | Traversable | None = None) -> AgentConfig:
     """
     Load agent configuration from a TOML file.
 
@@ -97,7 +96,7 @@ def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
         overrides=overrides,
     )
 
-    registry_path_raw: Optional[str] = raw.get("registry_path")
+    registry_path_raw: str | None = raw.get("registry_path")
     registry_path: Path | Traversable = (
         Path(registry_path_raw)
         if registry_path_raw
