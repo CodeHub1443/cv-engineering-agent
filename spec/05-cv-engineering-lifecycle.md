@@ -6,38 +6,36 @@
 ## Lifecycle
 
 ~~~text
-Requirement Discovery
-        ↓
-Initial Research / Problem Framing
-        ↕
-Problem Formulation
-        ↓
-System Architecture
-        ↓
-Data / Dataset Audit & Design
-        ↓
-Model Selection
-        ↓
-Experiment Design
-        ↓
-Training
-        ↓
-Evaluation
-        ↓
-Benchmarking
-        ↓
-Failure Analysis
-        ↓
-Optimization / Architecture Search
-        ↓
-Deployment
-        ↓
-Production Validation
-        ↓
-Monitoring
+DISCOVER
+   ↓
+DEFINE
+   ↓
+RESEARCH
+   ↓
+DESIGN
+   ↓
+DATA
+   ↓
+BASELINE
+   ↓
+TRAIN
+   ↓
+EVALUATE
+   ↓
+DIAGNOSE
+   ↓
+OPTIMIZE
+   ↓
+BENCHMARK
+   ↓
+DEPLOY
+   ↓
+MONITOR
+   ↓
+ITERATE
 ~~~
 
-The arrows do not imply irreversible transitions. Research, formulation, architecture, data, evaluation and optimization may loop when evidence requires it.
+This is an adaptive lifecycle, not a rigid one-way pipeline. Not every project requires every stage. The agent determines which stages are necessary and may revisit earlier stages when evidence requires it.
 
 ## Stage Contract
 
@@ -52,10 +50,11 @@ Each stage should define:
 - conditions requiring fresh research;
 - conditions requiring human approval.
 
-## Requirement Discovery
+## Discover / Define
 
-Convert an ambiguous business request into structured technical requirements, including as applicable:
+Convert an ambiguous business request into a structured project understanding and technical requirements, including as applicable:
 
+- operational objective and success condition;
 - events/classes/tasks;
 - camera and scene constraints;
 - temporal requirements;
@@ -66,11 +65,17 @@ Convert an ambiguous business request into structured technical requirements, in
 - deployment environment;
 - operational response requirements.
 
-Missing requirements must remain explicit unknowns until answered or safely bounded.
+Ask only the questions necessary to remove material uncertainty. Missing requirements must remain explicit unknowns until answered or safely bounded.
 
-## Problem Formulation
+## Research
 
-Determine what CV problem actually represents the business requirement.
+Research is used to reduce uncertainty around problem formulation, architecture, data, algorithms, tooling, and deployment. Current or changing information must be researched rather than assumed from static model knowledge.
+
+Relevant sources may include official documentation, primary repositories, papers, benchmarks, verified engineering implementations, practitioner reports, and professional/community discovery signals. Evidence must retain provenance, authority, verification state, and freshness.
+
+## Design / Problem Formulation
+
+Determine what CV problem actually represents the business requirement and design the complete system rather than defaulting to a single model.
 
 Possible formulations include:
 
@@ -85,54 +90,72 @@ Possible formulations include:
 - classical CV;
 - hybrid systems.
 
+For real-time CCTV, consider camera placement, field of view, blind spots, frame rate, compression, RTSP/decoding, buffering, frame dropping, zones, calibration, tracking, temporal consistency, and multi-camera constraints where relevant.
+
 The agent must not assume the task is object detection merely because objects are involved.
-
-## Research
-
-Research is used to reduce uncertainty around problem formulation, architecture, data, algorithms, tooling, and deployment.
 
 ## Data / Dataset
 
 Audit data before committing to a training strategy. Check:
 
-- annotation quality;
+- annotation quality and consistency;
 - class balance;
-- camera/scene coverage;
+- camera/scene/lighting coverage;
 - hard negatives;
 - edge cases;
+- annotation and sampling bias;
 - leakage;
-- train/validation/test independence.
+- train/validation/test independence;
+- dataset/version lineage.
 
-For video/CCTV data, avoid correlated-frame leakage and consider camera, scene, time, sequence and identity boundaries where relevant.
+For video/CCTV data, avoid correlated-frame leakage and consider camera, scene, time, sequence, and identity boundaries where relevant. The agent should recommend annotation, active-learning, synthetic-data, and augmentation strategies according to the problem rather than applying them by default.
+
+## Baseline
+
+Establish a reproducible baseline before optimization. Record model, dataset version, input, precision, hardware, software/runtime, benchmark procedure, accuracy metrics, and performance metrics.
+
+The baseline is the reference against which subsequent experiments are compared; it must not be silently overwritten.
 
 ## Model Selection
 
 When alternatives materially differ, produce a comparison based on:
 
 - task suitability;
-- accuracy;
-- latency;
+- accuracy and error profile;
+- latency/throughput;
 - memory;
 - training/data requirements;
 - deployment compatibility;
 - maturity;
 - evidence.
 
-Do not choose a model solely because it is popular.
+Modern architecture families are candidates, not commitments. The agent must remain architecture-agnostic and select based on the problem and measured constraints.
 
 ## Experiment Design
 
-Each experiment must have a defined objective/hypothesis and expected decision criterion.
+Each experiment must have a defined objective/hypothesis, reproducible configuration, resource budget, and expected decision criterion.
 
 ## Training
 
-Training must be reproducible and subject to approval for materially expensive execution.
+Training must be reproducible and subject to approval for materially expensive execution. The agent may propose transfer learning, augmentation, loss/optimizer/scheduler choices, mixed precision, gradient clipping, regularization, distillation, architecture modification, distributed training, or other justified methods.
+
+Expensive NAS or hyperparameter searches require a cost/benefit assessment and appropriate approval before execution.
 
 ## Evaluation
 
-Use task-appropriate held-out evaluation and include per-class/error analysis when useful.
+Use task-appropriate held-out evaluation and include per-class metrics, confusion/error analysis, and threshold analysis when useful. Evaluation must distinguish model quality from system performance.
 
-## Benchmarking
+## Diagnose
+
+Failure analysis should classify errors, identify probable root causes, quantify their impact where possible, and produce targeted follow-up experiments. Typical categories include small objects, occlusion, blur, illumination, camera angle, compression, class confusion, localization errors, domain shift, temporal instability, tracking failures, and annotation errors.
+
+## Optimize
+
+Optimization must start from a reproducible baseline and measured bottleneck. Candidates may include architecture changes, distillation, pruning, quantization, TensorRT, ONNX optimization, kernel fusion, CUDA/kernel optimization, DeepStream optimization, or NAS when justified.
+
+NAS is an optional optimization instrument, not a default methodology.
+
+## Benchmark
 
 Measure system performance separately from model accuracy. Where applicable distinguish:
 
@@ -146,18 +169,14 @@ Event Logic
 End-to-End
 ~~~
 
-## Failure Analysis
+Record hardware and software environment for every material benchmark. Never claim an optimization or speedup without comparable measurements.
 
-Failure analysis should classify errors, identify probable root causes and produce targeted follow-up experiments.
+## Deploy / Monitor
 
-## Optimization / NAS
-
-Optimization must start from a reproducible baseline and a measured bottleneck.
-
-NAS is optional. Use it only when the architecture gap, search space, constraints and compute budget justify it.
-
-## Deployment
-
-Deployment decisions must account for hardware, runtime, packaging, reliability, monitoring, rollback and production validation.
+Deployment decisions must account for hardware, runtime, packaging, reliability, observability, rollback, and production validation. Production monitoring should cover model behavior, data/scene changes, stream health, latency, throughput, CPU/GPU/memory usage, power, and thermal behavior where applicable.
 
 Production-changing actions require approval.
+
+## Iterate
+
+A completed stage may trigger a return to an earlier stage when evidence indicates that assumptions, requirements, data, architecture, or constraints were incorrect or incomplete.
