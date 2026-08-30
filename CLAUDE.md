@@ -53,8 +53,10 @@ quietly and do not work around them.
    so instead of writing the code.
 7. **No layer leakage.** Reasoning, orchestration, knowledge, and execution stay
    separate `[P§19]`, `[P§21]`, `[P§22]`. See `docs/architecture/OVERVIEW.md`.
-8. **Provider agnosticism.** No LLM provider name, SDK, or model string outside the LLM
-   gateway `[P§20]`.
+8. **Provider boundary.** Provider SDKs, provider-specific execution logic, and provider
+   semantics stay inside the LLM gateway `[P§20]`. Provider/model identifiers may appear
+   in configuration and execution metadata; they must not become provider-specific logic
+   in orchestration or reasoning.
 9. **Don't reinvent.** Discover and invoke existing NVIDIA skills, CUDA agent, TAO,
    TensorRT, DeepStream tooling rather than reimplementing their knowledge `[P§15]`,
    `[P§29.9]`.
@@ -85,15 +87,15 @@ the system toward any of these, flag it.
 
 1. Read the issue and its governing ADR. No ADR + architectural change ⇒ stop.
 2. Plan first: files, interfaces, tests, and explicitly what you will **not** change.
-3. Branch `<type>/<issue-number>-<slug>`. **Never commit to `main`.**
+3. Branch `<type>/<issue-number>-<slug>` from current `dev-munna`. **Never commit to
+   `dev-munna` or `main` directly.** Feature PRs target `dev-munna`.
 4. Write the acceptance test first, from the issue's acceptance criteria. Show it
    failing.
 5. Implement the minimum that makes it pass. No speculative abstraction. No unrelated
    refactors.
 6. Lint, type-check, full test suite.
 7. Update rolling state (§7).
-8. Commit (conventional commits, body cites issue + ADR), push, open a PR from the
-   template.
+8. Commit (conventional commits, body cites issue + ADR), push, open a PR from the template.
 9. Report what you changed, what you deliberately did not, and what you are unsure about.
 
 Keep diffs reviewable — under ~400 lines. If the issue cannot fit, split the issue.
