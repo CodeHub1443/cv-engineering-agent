@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
 from importlib.resources.abc import Traversable
+from pathlib import Path
 
 from cv_agent.config.settings import AgentConfig, LLMConfig, LLMOverride, load_config
 
