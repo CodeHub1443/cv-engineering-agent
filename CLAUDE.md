@@ -105,8 +105,11 @@ the system toward any of these, flag it.
    refactors.
 6. Lint, type-check, full test suite.
 7. Update rolling state (§7).
-8. Commit (conventional commits, body cites issue + ADR), push, open a PR from the template.
-9. Report what you changed, what you deliberately did not, and what you are unsure about.
+8. **Show the full diff / summary of changes to AJ and await explicit approval before
+   committing or pushing anything.** Do not combine "show" and "push" in the same step.
+9. Commit (conventional commits, body cites issue + ADR), push, open a PR from the template.
+10. Report what you changed, what you deliberately did not, and what you are unsure about.
+
 
 Keep diffs reviewable — under ~400 lines. If the issue cannot fit, split the issue.
 

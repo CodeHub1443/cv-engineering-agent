@@ -20,6 +20,8 @@
 | D-011 | 2026-08-31 | Existing code is audited against each ADR as it is written; kept if it fits, marked for change if it does not, deleted if it has no place | `[P§32]`, `[P§34]` | — | accepted |
 | D-012 | 2026-08-31 | Q1 (unit of a project) deferred to implementation — ADR-0003/0004 keep it as an open parameter | `[P§25]`, `[P§33]` | ADR-0003 (pending) | accepted |
 | D-013 | 2026-08-31 | LLM gateway substrate (ADR-0002) must support any deployment location — local, remote GPU box, cloud — without location assumptions | `[P§20]` | ADR-0002 (pending) | accepted |
+| D-014 | 2026-08-31 | After any file is written, edited, or modified — show the changes to AJ first, await explicit approval, then commit and push. Never push without showing and getting approval. | — | — | accepted |
+
 
 
 ## Reversals

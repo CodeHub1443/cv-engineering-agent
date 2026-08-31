@@ -56,6 +56,7 @@ Tier 2+: FEATURES (Phase 3–10)
 | A-14 | Q1 (project unit) deferred — kept as open parameter in ADR-0003/0004 | D-012 |
 | A-15 | LLM gateway must be location-agnostic (local/remote/cloud) | D-013 |
 | A-16 | No skeleton code until all 13 ADRs accepted + Q1–Q14 answered | CLAUDE.md §5 |
+| A-17 | **Show changes to AJ first — await approval — then commit and push.** Never push without showing changes and receiving explicit approval. | D-014 |
 
 ---
 
@@ -135,6 +136,7 @@ Q1–Q4 answered. See `OPEN_QUESTIONS.md` for full context.
 
 - ❌ Edit `docs/PROJECT.md`
 - ❌ Commit directly to `dev-munna` or `main` without PM approval
+- ❌ **Push to remote without first showing AJ the changes and receiving explicit approval**
 - ❌ Create implementation code without a GitHub issue
 - ❌ Create architectural code without an ADR
 - ❌ Begin skeleton code (Phase 2) until all 13 ADRs are accepted
