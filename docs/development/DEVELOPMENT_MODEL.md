@@ -45,7 +45,11 @@
 
 1. **Never develop directly on `main`.**
 2. **Never push directly to `main`.**
-3. **Never develop directly on `dev-munna`.** *(Rolling-state-only commits are the only exception, and only with PM approval.)*
+3. **Never develop directly on `dev-munna`.** The sole exception is **rolling-state-only
+   commits** — changes limited exclusively to `AGENT_HANDOFF.md`, `STATUS.md`,
+   `JOURNAL.md`, `DECISIONS.md`, `OPEN_QUESTIONS.md`, or `EXPERIMENTS.md` — and only
+   with explicit PM approval granted per commit. Any source file, ADR, test, config,
+   ROADMAP, or documentation change requires a short-lived branch and PR. No exceptions.
 4. All feature work uses a short-lived branch — one coherent feature per branch.
 5. CI/CD must pass before any feature is approved.
 6. Technical review is required.
@@ -72,6 +76,8 @@ Implement the minimum that makes it pass
 Lint + type-check + full test suite locally
          ↓
 Update rolling state (AGENT_HANDOFF.md, STATUS.md, JOURNAL.md, DECISIONS.md)
+         ↓
+Show full diff/summary to AJ — await explicit approval
          ↓
 Commit (conventional: body cites issue + ADR)
          ↓

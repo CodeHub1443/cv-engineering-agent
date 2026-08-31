@@ -37,8 +37,13 @@ normative statement. Never edit or summarize it. Gaps go to
 
 ## Workflow
 One issue → one branch (`<type>/<issue-number>-<slug>`) from current `dev-munna` → one PR
-back to `dev-munna`. Never commit directly to `dev-munna` or `main`. Acceptance test first;
-diffs under ~400 lines.
+back to `dev-munna`. This applies to **all work types**: ADR writing, docs, skeleton layers,
+and real feature implementations. Never commit directly to `dev-munna` or `main`. The sole
+exception is rolling-state-only commits (limited to `AGENT_HANDOFF.md`, `STATUS.md`,
+`JOURNAL.md`, `DECISIONS.md`, `OPEN_QUESTIONS.md`, `EXPERIMENTS.md`) with explicit PM
+approval granted per commit. Show changes to AJ before committing or pushing anything.
+Acceptance test first; diffs under ~400 lines.
+
 
 ## Rolling state
 Rewrite `STATUS.md` and `AGENT_HANDOFF.md`; append to `JOURNAL.md`, `DECISIONS.md`, and

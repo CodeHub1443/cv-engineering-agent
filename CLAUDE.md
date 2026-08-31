@@ -98,7 +98,11 @@ the system toward any of these, flag it.
 1. Read the issue and its governing ADR. No ADR + architectural change ⇒ stop.
 2. Plan first: files, interfaces, tests, and explicitly what you will **not** change.
 3. Branch `<type>/<issue-number>-<slug>` from current `dev-munna`. **Never commit to
-   `dev-munna` or `main` directly.** Feature PRs target `dev-munna`.
+   `dev-munna` or `main` directly.** This applies to ALL work: ADR writing, docs,
+   skeleton layers, and real feature implementations. Every PR targets `dev-munna`.
+   Rolling-state-only commits to `dev-munna` are the sole exception and require
+   explicit PM approval granted per commit. Source files, ADRs, tests, config, and
+   ROADMAP changes always require a branch and PR — no exceptions.
 4. Write the acceptance test first, from the issue's acceptance criteria. Show it
    failing.
 5. Implement the minimum that makes it pass. No speculative abstraction. No unrelated
