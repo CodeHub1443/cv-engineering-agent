@@ -10,7 +10,7 @@ normative statement. Never edit or summarize it. Gaps go to
 `docs/state/OPEN_QUESTIONS.md` or an ADR — never silent invention, never silent omission.
 
 ## Read order at session start
-`docs/state/STATUS.md` → `docs/state/DECISIONS.md` → the relevant ADRs → the issue.
+`docs/state/AGENT_HANDOFF.md` → `docs/state/STATUS.md` → `docs/state/DECISIONS.md` → the relevant ADRs → the issue.
 
 ## Hard rules
 1. Problem first — characterize before selecting `[P§29.1]`.
@@ -41,8 +41,8 @@ back to `dev-munna`. Never commit directly to `dev-munna` or `main`. Acceptance 
 diffs under ~400 lines.
 
 ## Rolling state
-Rewrite `STATUS.md`; append to `JOURNAL.md`, `DECISIONS.md`, and `EXPERIMENTS.md`; strike
-through answered `OPEN_QUESTIONS.md` entries rather than deleting them.
+Rewrite `STATUS.md` and `AGENT_HANDOFF.md`; append to `JOURNAL.md`, `DECISIONS.md`, and
+`EXPERIMENTS.md`; strike through answered `OPEN_QUESTIONS.md` entries rather than deleting them.
 
 ## What this is NOT `[P§31]`
 Not a chatbot, not a YOLO wrapper, not NVIDIA-only, not unlimited autonomy, not a RAG dump,

@@ -23,13 +23,15 @@ engineering, not one that merely knows computer vision.
 
 ## 2. Session start — read in this order
 
-1. `docs/state/STATUS.md` — where the project actually is.
-2. `docs/state/DECISIONS.md` — what is already settled.
-3. Only the ADRs relevant to the task at hand.
-4. The GitHub issue you are working.
+1. `docs/state/AGENT_HANDOFF.md` — session context: agreed decisions, pending approvals,
+   known contradictions, implementation truth, and anti-patterns. Rewritten every session.
+2. `docs/state/STATUS.md` — where the project actually is.
+3. `docs/state/DECISIONS.md` — what is already settled.
+4. Only the ADRs relevant to the task at hand.
+5. The GitHub issue you are working.
 
-Do **not** bulk-read `docs/`. If `STATUS.md` contradicts the repository, stop and say so
-rather than guessing which is right.
+Do **not** bulk-read `docs/`. If `STATUS.md` or `AGENT_HANDOFF.md` contradict the
+repository, stop and say so rather than guessing which is right.
 
 ## 3. Hard rules — non-negotiable
 
@@ -106,6 +108,7 @@ Before every commit, and at the end of every session:
 
 | File | Operation | Contents |
 |---|---|---|
+| `docs/state/AGENT_HANDOFF.md` | **Rewrite** | Session context: agreed decisions, pending approvals, contradictions, implementation truth, anti-patterns. |
 | `docs/state/STATUS.md` | **Rewrite**, max 60 lines | Current phase, in-flight work, next 3 actions, blockers. Describes **now**, not history. |
 | `docs/state/JOURNAL.md` | **Append** one dated entry | What changed, why, what broke, what was learned. Never edit or delete past entries. |
 | `docs/state/DECISIONS.md` | **Append** one line per decision | Decision, date, link to ADR. Architectural decision without an ADR ⇒ write the ADR first. |
