@@ -65,3 +65,58 @@ until actual lifecycle, authorization, or discovery requirements justify separat
 
 **Left open:** CI has not yet executed; Phase 0 GitHub labels/milestones/protection still
 need review. Q1–Q5 remain unanswered. ADR-0002/0003 are not started.
+
+---
+
+## 2026-08-31 — Documentation audit + AGENT_HANDOFF (dev-munna)
+
+**Did:** Full repository and git audit per `docs/agents/DOCUMENTATION_GOVERNANCE.md`.
+Found 12 contradictions (C1–C12). CI confirmed running (was incorrectly reported as
+pending). Stale branch references corrected. Created `docs/state/AGENT_HANDOFF.md` — a
+compact, token-efficient session context file for agent handoffs. Wired it into CLAUDE.md
+and AGENTS.md as the mandatory first read at session start. Committed to `dev-munna`
+(rolling-state exception, PM-approved).
+
+**Why:** `[P§25]`, `[P§35]` — agent continuity across model switches was failing because
+no compact session-context document existed. Each new agent re-derived findings from scratch,
+wasting tokens and risking re-introducing contradictions.
+
+**Broke:** Nothing — no source code touched.
+
+**Learned:** STATUS.md accuracy is the Phase 0 exit test. Stale STATUS.md = failed exit
+test. Must rewrite it at the close of every session without exception.
+
+**Left open:** Q5–Q14 unanswered. ADR-0002 through ADR-0013 not started.
+GitHub labels/milestones/branch protections not verified.
+
+---
+
+## 2026-08-31 — Phase structure redesign + documentation execution (dev-munna)
+
+**Did:** Redesigned the project's phase model from interleaved (ADR+impl per phase) to
+three explicit tiers: (1) Architecture Complete — all ADRs + Q1–Q14 answered +
+Implementation_Status.md; (2) Skeleton — demo/mock at every layer, E2E provable;
+(3) Feature implementation — real features one at a time. Rewrote ROADMAP.md with new
+phase definitions and exit tests. Answered Q1–Q4 (project unit deferred, location-agnostic,
+approvals must persist, first target = prison escape detection). Merged two duplicate
+development model docs into `docs/development/DEVELOPMENT_MODEL.md`. Moved
+`CV Engineering Agent.md` to `docs/ORIGINAL_BRIEF.md` with non-canonical header and
+deleted root copy. Created `Implementation_Status.md` as implementation ledger. Updated
+CLAUDE.md §5 with skeleton definition. Rewrote all rolling state files for this session.
+
+**Why:** D-007 through D-013 — the original interleaved phase model risked premature
+implementation before the full architecture picture was settled. The three-tier model
+ensures every architectural decision is made before any skeleton code is written, and
+every layer of skeleton is complete before real feature implementation begins.
+
+**Broke:** Nothing — CLAUDE.md §5 architecture gate and §6 implementation loop are
+unchanged in principle; only the skeleton definition was clarified.
+
+**Learned:** The user's instinct to separate documentation, skeleton, and real
+implementation into explicit phases is sound for a system with 13+ ADRs and multiple
+unresolved open questions. Implementing before the architecture is complete risks
+cascading rewrites.
+
+**Left open:** Q5–Q14 still need answers (will drive ADR-0002 through ADR-0013).
+GitHub scaffolding (labels, milestones, branch protections) not yet verified.
+

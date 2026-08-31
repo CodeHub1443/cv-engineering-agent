@@ -1,4 +1,10 @@
+> **ORIGINAL BRIEF — not canonical.** This is the PM's original project definition document.
+> The authoritative, frozen copy is [`docs/PROJECT.md`](./PROJECT.md). Do not edit either file.
+
+---
+
 **CV Engineering Agent — Project Definition**
+
 
 This should become the **master project description** from which we derive AGENTS.md, CLAUDE.md, architecture docs, roadmap, memory files, and implementation specs.
 

@@ -84,6 +84,14 @@ the system toward any of these, flag it.
 - ADRs live in `docs/architecture/adr/`, numbered, from `ADR-0000-template.md`.
 - When acting as architect: produce the ADR and **interface stubs only** — types and
   signatures, no bodies. Implementation is a separate session.
+- **Skeleton (Phase 2) definition:** every architecture layer present in code with a
+  working **demo/mock** implementation — not just type stubs. Each layer must be
+  connected to adjacent layers, invokable with demo data, and testable. Real LLM
+  providers, real NVIDIA tools, real training execution, and real RAG retrieval are
+  **not** part of the skeleton — those are Phase 3+ feature implementations.
+- **No skeleton code begins until Phase 1 is complete** (all 13 ADRs accepted, all
+  Q1–Q14 answered, `Implementation_Status.md` verified).
+
 
 ## 6. Implementation loop — per issue
 

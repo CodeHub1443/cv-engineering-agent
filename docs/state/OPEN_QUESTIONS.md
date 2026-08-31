@@ -9,22 +9,20 @@
 
 ## Blocking — work cannot proceed until answered
 
-**Q1. What is the unit of a "project"?** `[P§25]`, `[P§33]` — Does the agent handle one
-CV project per repository/workspace, or many projects with isolated memory? This
-determines the shape of project memory and whether experiment IDs are globally or
-project-scoped. *Blocks: ADR-0003, ADR-0004.*
+~~**Q1. What is the unit of a "project"?**~~ — **Answered 2026-08-31 (D-012):** Deferred to
+implementation. ADR-0003 and ADR-0004 will keep this as an open parameter and decide when
+memory/ledger scope is implemented. `[P§25]`, `[P§33]`
 
-**Q2. Where does the agent run, and where does training run?** `[P§10]`, `[P§13]`,
-`[P§24]` — Local workstation, remote GPU box, cloud, or all three? Does the agent submit
-jobs or execute them in-process? *Blocks: ADR-0003 (state/checkpointing), ADR-0010.*
+~~**Q2. Where does the agent run, and where does training run?**~~ — **Answered 2026-08-31
+(D-013):** The substrate must support all three (local, remote GPU, cloud) without location
+assumptions. The ADR must not hard-code a deployment location. `[P§10]`, `[P§13]`, `[P§24]`
 
-**Q3. What is the human-approval transport?** `[P§24]` — CLI prompt only, or must
-approvals survive process restart (a queued request answered hours later)? The latter
-makes approvals a persisted entity, not an interrupt. *Blocks: ADR-0003.*
+~~**Q3. What is the human-approval transport?**~~ — **Answered 2026-08-31 (D-009):** Approvals
+must survive process restart. They are persisted entities (file or DB), not in-process
+interrupts. `[P§24]`
 
-**Q4. Is the first target a real project or a reference project?** `[P§30]` — Building
-against the prison/garment examples as a real deliverable versus as a test fixture
-changes Phase-1 scope substantially. *Blocks: ROADMAP Phase 1 exit test.*
+~~**Q4. Is the first target a real project or a reference project?**~~ — **Answered 2026-08-31
+(D-010):** Real project — prison escape detection. `[P§30]`
 
 **Q5. Which NVIDIA capabilities are actually installed and invocable today?** `[P§15]` —
 The design says "discover and invoke, do not duplicate." Discovery mechanism depends on
@@ -61,3 +59,16 @@ not.
 ~~**Q0.** Should the canonical document be edited into the repository docs, or kept
 verbatim?~~ — **Answered 2026-08-30:** kept verbatim and frozen as `docs/PROJECT.md`;
 derived files cite it as `[P§n]`. See D-001.
+
+~~**Q1.** Unit of a "project."~~ — **Answered 2026-08-31:** Deferred to ADR-0003/0004 as an
+open parameter. See D-012.
+
+~~**Q2.** Where does agent/training run?~~ — **Answered 2026-08-31:** Location-agnostic; substrate
+must support all three. See D-013.
+
+~~**Q3.** Human-approval transport.~~ — **Answered 2026-08-31:** Persisted entities — survive
+process restart. See D-009.
+
+~~**Q4.** Real project or reference/fixture?~~ — **Answered 2026-08-31:** Real project — prison
+escape detection. See D-010.
+

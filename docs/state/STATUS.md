@@ -3,38 +3,41 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-08-30 · **Phase:** 0 — Foundation & governance · **Health:** green
+**Updated:** 2026-08-31 · **Phase:** 0 complete → Phase 1 (Architecture Complete) beginning · **Health:** green
 
 ## Where we are
 
-Phase 0 governance is substantially scaffolded. `docs/PROJECT.md` remains frozen canon.
-Baseline cleanup and governance reconciliation are in progress on issue #10 and branch
-`fix/phase-0-baseline-governance`. The capability registry and package-resource loader
-have been corrected; ADR-0001 has been reconciled with the existing typed-registry
-implementation and accepted. CI validation has been added but has not yet run in GitHub.
+Phase 0 governance is complete. `docs/PROJECT.md` remains frozen canon.
+CI runs on `dev-munna`; 89/89 tests pass. The project has adopted a new **3-tier model**:
+
+- **Phase 1 — Architecture Complete:** All ADRs 0001–0013 written and accepted; all Q1–Q14
+  answered; `Implementation_Status.md` verified. No skeleton code until this is done.
+- **Phase 2 — Skeleton:** Every architecture layer present with working demo/mock
+  implementations; prison escape detection flows E2E; CI green; PM confirms output.
+- **Phase 3+ — Feature Implementation:** Real features one at a time, each fully done
+  and confirmed before the next begins.
 
 ## In flight
 
-| Item | Issue | State |
-|---|---|---|
-| Baseline cleanup + ADR-0001 reconciliation | #10 | PR preparation |
-| GitHub validation (ruff/mypy/pytest/build/audit) | #10 | added; CI pending |
-| Phase 0 governance completion | #10 | pending review |
+| Item | State |
+|---|---|
+| Phase 1 start — answer Q5–Q14, write ADR-0002 first | next action |
+| `Implementation_Status.md` creation | pending (approved) |
+| GitHub labels/milestones/branch protections | not yet verified |
 
 ## Next 3 actions
 
-1. Run/inspect CI for issue #10 and fix only failures caused by this change set.
-2. Complete Phase 0 GitHub scaffolding review: labels, milestones, branch protections, and
-   PR workflow consistency.
-3. Answer blocking Q1–Q5 in `OPEN_QUESTIONS.md`; then proceed to ADR-0002 and ADR-0003 in
-   dependency order.
+1. Answer Q5 (NVIDIA), Q6 (cost thresholds), Q7 (LLM providers with keys) — these directly
+   unblock ADR-0002.
+2. Write ADR-0002 (LLM gateway) — first architecture decision of Phase 1.
+3. Create `Implementation_Status.md` as the Phase 1 implementation ledger.
 
 ## Blockers
 
-- Q1–Q5 remain unanswered and block ADR-0003 / ADR-0004 or NVIDIA integration where stated.
-- ADR-0002 LLM gateway is the next architecture decision after Phase 0 review.
+- Q5–Q14 must be answered before the relevant ADRs can be written.
+- ADR-0002 is the first ADR needed; it unblocks the skeleton LLM gateway layer.
 
 ## Do not start yet
 
-Stage workflows `[P§6]`, RAG `[P§19]`, training execution `[P§10]`, and NVIDIA skill
-integration `[P§15]`. These require the approved substrate and their stated blockers.
+Skeleton code, real LLM provider implementations, NVIDIA tool integration, RAG/retrieval,
+training execution. None of these begin until Phase 1 (all ADRs + all Qs answered) is done.
