@@ -34,12 +34,18 @@ whether these are MCP servers, CLI tools, Python SDKs, or agent skills.
 **Q6.** What are the default cost thresholds for approval gates (GPU-hours, $, dataset
 mutation scope)? `docs/APPROVALS.md` has placeholders. `[P§24]`
 
-**Q7.** Which LLM providers are actually available with keys, and what is the routing
-policy per task class? `[P§20]`
+~~**Q7. Which LLM provider classes are architecturally supported, and what is the gateway
+routing/fallback policy?**~~ — **Answered 2026-08-31 (D-016):** Accepted Q7 decision:
+Gateway defines support for Anthropic, OpenAI, and Local/Ollama classes with
+configuration-driven routing and sequential transient-failure fallback (fast-fail on auth,
+schema, and context-length errors). Runtime credentials, API keys, and endpoint availability
+remain deployment configuration concerns. Formalized by ADR-0002 (currently Draft /
+Awaiting approval). `[P§20]`
 
-**Q8.** What is the persistence backend for project memory and the experiment ledger —
-files in-repo, SQLite, or a service? Reproducibility `[P§29.5]` favors in-repo; scale
-favors otherwise.
+~~**Q8. What is the persistence backend for project memory and the experiment ledger —
+files in-repo, SQLite, or a service?**~~ — **Answered 2026-08-31 (D-017):** Accepted Q8
+persistence strategy: Dual-layer (Git-tracked structured state for project memory +
+SQLite for experiment ledger). To be formally specified by ADR-0004. `[P§25]`, `[P§29.5]`
 
 **Q9.** LinkedIn as a research source `[P§17]` — what is the actual access mechanism, and
 what are the terms-of-service constraints? The requirement is clear; the mechanism is

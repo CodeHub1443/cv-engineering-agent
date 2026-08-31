@@ -13,10 +13,10 @@
 |---|---|
 | **Last updated** | 2026-08-31 |
 | **Updated by** | AJ + agent (Claude Sonnet 4.6) |
-| **Active branch** | `dev-munna` |
-| **Phase** | Phase 1 — Architecture Complete (beginning) |
-| **CI** | ✅ green on dev-munna; 89/89 tests pass |
-| **Worktree** | clean (after commit this session) |
+| **Active branch** | `docs/issue-11-adr-0002-llm-gateway` (Target: `dev-munna`) |
+| **Phase** | Phase 1 — Architecture & ADR Specification |
+| **Testing & CI** | Local: ✅ 95/95 tests pass; Remote CI: runs on PR to `dev-munna` |
+| **Worktree** | uncommitted changes on short-lived branch |
 | **Python env** | `uv run --extra dev` or `.venv/bin/python` |
 
 ---
@@ -57,6 +57,9 @@ Tier 2+: FEATURES (Phase 3–10)
 | A-15 | LLM gateway must be location-agnostic (local/remote/cloud) | D-013 |
 | A-16 | No skeleton code until all 13 ADRs accepted + Q1–Q14 answered | CLAUDE.md §5 |
 | A-17 | **Show changes to AJ first — await approval — then commit and push.** Never push without showing changes and receiving explicit approval. | D-014 |
+| A-18 | Short-lived branch rule applies to all work types; 6-file rolling state exception only | D-015 |
+| A-19 | Accepted Q7 decision: LLM gateway supports Anthropic, OpenAI, Local/Ollama with config routing & transient fallback (formalized by ADR-0002, currently Draft / Awaiting approval) | D-016 |
+| A-20 | Accepted Q8 persistence strategy: Dual-layer (Git structured state + SQLite experiment ledger; to be formally specified by ADR-0004) | D-017 |
 
 ---
 
@@ -68,8 +71,8 @@ None from previous sessions. Next session's items will appear here.
 |---|---|---|---|
 | Q-D1 | Q5: Which NVIDIA tools are installed and invocable? | List them | ADR-0005, ADR-0007 |
 | Q-D2 | Q6: Default cost thresholds? | $ / GPU-hours / wall-clock | `docs/APPROVALS.md` |
-| Q-D3 | Q7: Which LLM providers have keys? Routing policy? | List providers + policy | ADR-0002 |
-| Q-D4 | Q8: Persistence backend for memory + approvals? | Files / SQLite / service | ADR-0003/0004 |
+| Q-D3 | Q7: LLM provider classes & routing policy | Resolved (D-016 → ADR-0002 Draft) | — |
+| Q-D4 | Q8: Persistence backend for memory & ledger | Resolved (D-017 → ADR-0004 pending) | — |
 | Q-D5 | Q9: LinkedIn access mechanism? | Describe access | ADR-0006 |
 | Q-D6 | Q10: Dataset storage/versioning? | DVC / Git LFS / object store | ADR-0009 |
 | Q-D7 | Q11–Q14: Multi-camera, monitoring backend, fine-tuning, multi-user? | Answers | Various ADRs |
@@ -83,7 +86,7 @@ Answer these and ADR-0002 can be written immediately.
 | ADR | Topic | Status | Blocks |
 |---|---|---|---|
 | ADR-0001 | Capability model (typed registry) | ✅ Accepted | — |
-| ADR-0002 | LLM gateway | ❌ Not written | Needs Q7 answer |
+| ADR-0002 | LLM gateway | 📋 Draft / Awaiting approval | — |
 | ADR-0003 | Orchestration state + approval interrupts | ❌ Not written | Q1 deferred (open param) |
 | ADR-0004 | Project memory + experiment ledger | ❌ Not written | — |
 | ADR-0005 | Tool/MCP boundary | ❌ Not written | Needs Q5 answer |
@@ -122,13 +125,13 @@ Answer these and ADR-0002 can be written immediately.
 |---|---|---|
 | Q5 | ❌ unanswered | ADR-0005, ADR-0007 |
 | Q6 | ❌ unanswered | `docs/APPROVALS.md` thresholds |
-| Q7 | ❌ unanswered | ADR-0002 |
-| Q8 | ❌ unanswered | ADR-0003, ADR-0004 |
+| Q7 | ✅ Answered (D-016 → ADR-0002 Draft) | — |
+| Q8 | ✅ Answered (D-017 → ADR-0004 pending) | — |
 | Q9 | ❌ unanswered | ADR-0006 |
 | Q10 | ❌ unanswered | ADR-0009 |
 | Q11–Q14 | ❌ unanswered | Various ADRs |
 
-Q1–Q4 answered. See `OPEN_QUESTIONS.md` for full context.
+Q1–Q4, Q7, Q8 answered. See `OPEN_QUESTIONS.md` for full context.
 
 ---
 

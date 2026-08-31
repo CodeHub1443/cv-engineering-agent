@@ -21,6 +21,10 @@
 | D-012 | 2026-08-31 | Q1 (unit of a project) deferred to implementation — ADR-0003/0004 keep it as an open parameter | `[P§25]`, `[P§33]` | ADR-0003 (pending) | accepted |
 | D-013 | 2026-08-31 | LLM gateway substrate (ADR-0002) must support any deployment location — local, remote GPU box, cloud — without location assumptions | `[P§20]` | ADR-0002 (pending) | accepted |
 | D-014 | 2026-08-31 | After any file is written, edited, or modified — show the changes to AJ first, await explicit approval, then commit and push. Never push without showing and getting approval. | — | — | accepted |
+| D-015 | 2026-08-31 | Short-lived branch rule applies to all work types (ADRs, docs, skeleton, features); rolling-state-only commits on dev-munna limited to the 6 state files with explicit PM approval | — | — | accepted |
+| D-016 | 2026-08-31 | Accepted Q7 decision: initial LLM gateway supports Anthropic, OpenAI, and Local/Ollama with configuration-driven routing, transient-failure fallback, and fast-fail on auth/context/schema errors; formalized by ADR-0002 (currently Draft / Awaiting approval) | `[P§20]` | ADR-0002 (Draft) | accepted |
+| D-017 | 2026-08-31 | Accepted Q8 persistence strategy: dual-layer persistence (Git-tracked structured files for project memory + SQLite in `.cv_agent/state/experiments.sqlite` for experiment ledger); to be formally specified by ADR-0004 | `[P§25]`, `[P§29.5]` | ADR-0004 (pending) | accepted |
+
 
 
 
