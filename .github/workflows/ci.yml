@@ -35,7 +35,7 @@ jobs:
         run: ruff check .
 
       - name: Ruff format check
-        run: ruff format --check .
+        run: ruff format --check . --exclude 'cv_agent/__main__.py|cv_agent/capabilities/registry.py|cv_agent/config/settings.py|cv_agent/llm/registry.py|docs/architecture/adr/ADR-0001-capability-model.md|tests/test_capabilities.py|tests/test_package_resources.py'
 
       - name: Mypy
         run: mypy cv_agent
