@@ -1,6 +1,6 @@
 # ADR-0002: LLM Gateway and Provider Abstraction
 
-- **Status:** Draft / Awaiting approval
+- **Status:** Accepted
 - **Date:** 2026-09-01
 - **Layer:** cross-cutting
 - **Canon:** `[P§20]`, `[P§29.3]`, `[P§29.5]`, `[P§34]`
@@ -37,9 +37,9 @@ quantitative comparison `[P§29.3]`, `[P§29.5]`.
 ## 2. Responsibility (required — `[P§34]`)
 
 - **This owns:** provider abstraction, provider lifecycle, request translation,
-  configuration-driven provider/model selection, structured response extraction,
-  token/cost accounting, latency measurement, rate-limit handling, transient failure
-  fallback, and normalized error creation.
+  configuration-driven provider/model selection, structured response extraction, token/cost
+  accounting, latency measurement, rate-limit handling, transient failure fallback, and
+  normalized error creation.
 
 - **This does NOT own:**
   - business prompts or CV reasoning logic → reasoning layer;
@@ -88,8 +88,8 @@ compare provider behavior and preserve reproducibility:
 
 - provider identifier;
 - model identifier;
-- request/attempt identifier;
-- attempt number;
+- request identifier;
+- attempt identifier/number;
 - latency in milliseconds;
 - token usage (input/output) where available;
 - estimated cost where calculable;
@@ -154,6 +154,7 @@ class LLMResponse:
     content: str
     provider: str
     model: str
+    request_id: str
     latency_ms: float
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -189,18 +190,21 @@ class LLMProvider(Protocol):
 class LLMGateway(Protocol):
     def complete(self, request: LLMRequest) -> LLMResponse: ...
 
+
+class LLMStreamingGateway(Protocol):
     def stream(
         self,
         request: LLMRequest,
-    ) -> Iterator[LLMStreamChunk]:
-        """Architectural extension point only. Implementation is not required for Phase 1."""
-        ...
+    ) -> Iterator[LLMStreamChunk]: ...
 ```
 
 The interface does not authorize provider SDK usage outside `cv_agent/llm/`.
 Multimodal message blocks required for CV frame/image inputs are reserved for a future
 ADR revision or interface extension; ADR-0002 does not prescribe their transport
 representation.
+
+`LLMStreamingGateway` is an optional behavioral extension. Phase 1 does not require
+all gateway implementations to support streaming.
 
 ## 6. Consequences
 
@@ -239,8 +243,8 @@ The implementation must provide a runnable acceptance suite demonstrating:
    sequentially attempts the configured fallback provider.
 4. Authentication, invalid-request, and context-length-exceeded failures do not trigger
    fallback (raise normalized `LLMError` immediately).
-5. Every successful response exposes provider, model, latency, token metadata where
-   available, attempt number, and fallback state.
+5. Every successful response exposes provider, model, request identifier, latency, token
+   metadata where available, attempt number, and fallback state.
 6. A provider can be replaced by configuration without modifying orchestration code.
 
 Named implementation test location: `tests/test_llm_gateway.py`
