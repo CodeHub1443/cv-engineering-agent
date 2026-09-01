@@ -12,22 +12,22 @@ development flow: `main` → `dev-munna` → short-lived branches. `dev-munna` i
 integration branch; `main` remains the official integration/release branch and is
 promoted from `dev-munna` by the Official PM.
 
-The frozen project definition is `docs/PROJECT.md`. ADR-0001 (capability model) has been
-reviewed and accepted. ADR-0002 (LLM gateway) has been critically reviewed but remains
-draft pending resolution of interface-contract gaps identified during acceptance review.
+The frozen project definition is `docs/PROJECT.md`. ADR-0001 (capability model) and
+ADR-0002 (LLM gateway) have been reviewed and accepted. Their interfaces are now the
+architectural baseline for the remaining Phase 1 decisions.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| ADR-0002 LLM gateway contract refinement | #11 | draft / revision required |
 | Q1–Q5 PM decisions | #— | blocking |
+| ADR-0003 / ADR-0004 architecture | #— | blocked pending Q1–Q3 / Q1–Q2 |
 
 ## Next 3 actions
 
-1. Refine ADR-0002 and complete its acceptance review.
-2. Resolve Q1–Q5 with the PM; record each decision before drafting blocked ADRs.
-3. Draft ADR-0003 / ADR-0004 only after their blocking questions are settled.
+1. Resolve Q1–Q5 with the PM; record each decision before drafting blocked ADRs.
+2. Draft ADR-0003 (orchestration state) after Q1–Q3 are settled.
+3. Draft ADR-0004 (project memory / experiment ledger) after Q1–Q2 are settled.
 
 ## Blockers
 
