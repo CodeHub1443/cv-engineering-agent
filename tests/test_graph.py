@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
 from cv_agent.graph.builder import build_graph
 from cv_agent.graph.state import AgentState
 from cv_agent.runtime.agent import CVAgent
+
+import pytest
 
 
 @pytest.fixture()
