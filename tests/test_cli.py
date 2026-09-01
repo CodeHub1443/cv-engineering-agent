@@ -15,6 +15,7 @@ class TestCLISmoke:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
 
     def test_cli_exits_with_zero_or_one(self) -> None:
@@ -53,7 +54,6 @@ class TestCLISmoke:
     def test_cli_no_stderr_on_success(self) -> None:
         result = self._run_cli()
         if result.returncode == 0:
-            # No errors should appear on stdout for a healthy run
             assert "STARTUP FAILURE" not in result.stdout
 
     def test_step_two_command_name_is_rejected_until_implemented(self) -> None:
@@ -62,6 +62,7 @@ class TestCLISmoke:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
 
         assert result.returncode == 2

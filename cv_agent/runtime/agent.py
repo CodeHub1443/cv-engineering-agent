@@ -18,7 +18,7 @@ kept out of this class and belong in their respective modules.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from cv_agent.capabilities.registry import CapabilityRegistry
 from cv_agent.config.settings import AgentConfig, load_config
@@ -29,14 +29,9 @@ from cv_agent.llm.registry import get_provider
 
 
 class CVAgent:
-    """
-    CV Engineering Agent — top-level orchestrator.
+    """CV Engineering Agent — top-level orchestrator."""
 
-    Instantiate with an optional AgentConfig; if omitted, config is loaded
-    from the default TOML file (config/default.toml).
-    """
-
-    def __init__(self, config: Optional[AgentConfig] = None) -> None:
+    def __init__(self, config: AgentConfig | None = None) -> None:
         self._config: AgentConfig = config or load_config()
         self._llm: LLMProvider = get_provider(
             self._config.llm.provider,
@@ -46,8 +41,6 @@ class CVAgent:
             self._config.registry_path
         )
         self._graph: Any = build_graph()
-
-    # ── Properties ────────────────────────────────────────────────────────
 
     @property
     def config(self) -> AgentConfig:
@@ -61,27 +54,14 @@ class CVAgent:
     def registry(self) -> CapabilityRegistry:
         return self._registry
 
-    # ── Core operations ───────────────────────────────────────────────────
-
     def run(
         self,
-        task: Optional[str] = None,
+        task: str | None = None,
         *,
-        session_id: Optional[str] = None,
-        task_type: Optional[str] = None,
+        session_id: str | None = None,
+        task_type: str | None = None,
     ) -> AgentState:
-        """
-        Execute a single agent session through the graph.
-
-        Args:
-            task:       Natural-language task description.
-            session_id: Reuse an existing session ID to resume a paused run.
-                        A new UUID is generated if omitted.
-            task_type:  Structured task type tag for capability selection.
-
-        Returns:
-            Final AgentState after graph execution completes.
-        """
+        """Execute a single agent session through the graph."""
         sid = session_id or str(uuid.uuid4())
         initial_state: AgentState = {
             "session_id": sid,
@@ -101,30 +81,16 @@ class CVAgent:
         return result
 
     def health_check(self) -> dict[str, Any]:
-        """
-        Return a structured health summary.
-
-        Checks:
-            - LangGraph availability and version
-            - Capability registry loadability and count
-            - Configured provider and model
-
-        Returns:
-            dict with keys: status, provider, model, capability_count,
-            langgraph_available, langgraph_version, registry_ok.
-        """
-        # LangGraph check
+        """Return a structured health summary."""
         try:
             from importlib.metadata import version
-            
+
             lg_version: str = version("langgraph")
-            import langgraph  # noqa: PLC0415
             lg_ok = True
         except Exception as exc:  # noqa: BLE001
             lg_version = str(exc)
             lg_ok = False
 
-        # Registry check
         try:
             self._registry.load()
             cap_count = self._registry.capability_count

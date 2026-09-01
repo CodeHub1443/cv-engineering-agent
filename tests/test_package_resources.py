@@ -25,6 +25,7 @@ def test_copied_package_loads_default_resources_outside_repository(
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

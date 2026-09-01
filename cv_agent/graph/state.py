@@ -11,7 +11,8 @@ add interrupt nodes without restructuring the state schema.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
+
 from typing_extensions import TypedDict
 
 
@@ -25,14 +26,14 @@ class AgentState(TypedDict, total=False):
     status: str
     """Lifecycle status: initializing | ready | running | paused | done | error."""
 
-    error: Optional[str]
+    error: str | None
     """Error message if status is 'error', otherwise None."""
 
     # ── Task context ──────────────────────────────────────────────────────
-    task: Optional[str]
+    task: str | None
     """Natural-language description of the task being executed."""
 
-    task_type: Optional[str]
+    task_type: str | None
     """Structured task type tag (matches capability applicable_task_types)."""
 
     # ── LLM context ───────────────────────────────────────────────────────
@@ -51,8 +52,8 @@ class AgentState(TypedDict, total=False):
     """Ordered log of node actions taken during this run."""
 
     # ── Human-in-the-loop (reserved for future steps) ─────────────────────
-    pending_human_input: Optional[str]
+    pending_human_input: str | None
     """Prompt for the human reviewer when the graph is paused."""
 
-    human_feedback: Optional[str]
+    human_feedback: str | None
     """Response provided by the human reviewer after an interrupt."""

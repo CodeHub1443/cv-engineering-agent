@@ -7,34 +7,22 @@ predictable responses.  It is the default provider in config/default.toml.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
 
 
 class FakeLLMProvider(LLMProvider):
-    """
-    Deterministic fake LLM provider.
-
-    Args:
-        model:          Model name string (arbitrary; default 'fake-1').
-        fixed_response: If set, every call returns this string as content.
-                        Otherwise a templated response is generated from
-                        the request prompt prefix.
-    """
+    """Deterministic fake LLM provider."""
 
     PROVIDER_NAME: str = "mock"
 
     def __init__(
         self,
         model: str = "fake-1",
-        fixed_response: Optional[str] = None,
+        fixed_response: str | None = None,
     ) -> None:
         self._model = model
         self._fixed_response = fixed_response
         self._call_count: int = 0
-
-    # ── LLMProvider interface ─────────────────────────────────────────────
 
     @property
     def provider_name(self) -> str:
@@ -65,13 +53,9 @@ class FakeLLMProvider(LLMProvider):
             },
         )
 
-    # ── Test helpers ──────────────────────────────────────────────────────
-
     @property
     def call_count(self) -> int:
-        """Number of times complete() has been called."""
         return self._call_count
 
     def reset(self) -> None:
-        """Reset call counter (useful between test cases)."""
         self._call_count = 0

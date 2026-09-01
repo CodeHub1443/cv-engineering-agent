@@ -231,7 +231,6 @@ class TestRegistryItems:
         assert all(i.item_type == "knowledge_source" for i in sources)
         assert len(sources) > 0
 
-
     def test_cross_type_ids_do_not_collide(self, registry: CapabilityRegistry) -> None:
         """The same ID may legitimately exist for different registry entity types."""
         skill = registry.describe_item("skill", "cuda-agent")
@@ -321,4 +320,8 @@ class TestCrossTypeRegistryItems:
         # binding (status="planned"), so it must not be selected.
         assert [cap.id for cap in selected] == []
         assert all(isinstance(cap, Capability) for cap in selected)
-        assert "cv.benchmarking" in {c.id for c in registry.list() if "benchmarking" in c.applicable_task_types}
+        assert "cv.benchmarking" in {
+            c.id
+            for c in registry.list()
+            if "benchmarking" in c.applicable_task_types
+        }
