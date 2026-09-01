@@ -9,17 +9,17 @@ implement or invoke those capabilities.
 
 from __future__ import annotations
 
+import builtins
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-try:
-    from importlib.resources.abc import Traversable  # Python 3.12+
-except ImportError:  # pragma: no cover - exercised on Python < 3.12
-    from importlib.abc import Traversable  # Python 3.10-3.11
+from importlib.abc import Traversable
 
-CapabilityStatus = Literal["planned", "available", "partial", "experimental", "unavailable"]
+CapabilityStatus = Literal[
+    "planned", "available", "partial", "experimental", "unavailable"
+]
 RiskLevel = Literal["low", "medium", "high"]
 ItemType = Literal["skill", "tool", "agent", "knowledge_source"]
 
@@ -27,6 +27,7 @@ ItemType = Literal["skill", "tool", "agent", "knowledge_source"]
 @dataclass(frozen=True)
 class InputSpec:
     """Specification for a capability input parameter."""
+
     name: str
     type: str
     description: str
@@ -35,6 +36,7 @@ class InputSpec:
 @dataclass(frozen=True)
 class OutputSpec:
     """Specification for a capability output."""
+
     name: str
     type: str
     description: str
@@ -43,6 +45,7 @@ class OutputSpec:
 @dataclass(frozen=True)
 class Capability:
     """A single CV engineering capability entry."""
+
     id: str
     name: str
     category: str
@@ -66,6 +69,7 @@ class Capability:
 @dataclass(frozen=True)
 class RegistryItem:
     """A supporting entity referenced by capabilities."""
+
     id: str
     item_type: ItemType
     name: str
@@ -75,7 +79,9 @@ class RegistryItem:
 
 def _parse_capability(data: dict[str, Any]) -> Capability:
     return Capability(
-        id=data["id"], name=data["name"], category=data["category"],
+        id=data["id"],
+        name=data["name"],
+        category=data["category"],
         description=data["description"],
         required_inputs=tuple(InputSpec(**s) for s in data.get("required_inputs", [])),
         outputs=tuple(OutputSpec(**s) for s in data.get("outputs", [])),
@@ -93,7 +99,9 @@ def _parse_capability(data: dict[str, Any]) -> Capability:
 def _parse_item(data: dict[str, Any], item_type: ItemType) -> RegistryItem:
     core_keys = {"id", "name", "description"}
     return RegistryItem(
-        id=data["id"], item_type=item_type, name=data["name"],
+        id=data["id"],
+        item_type=item_type,
+        name=data["name"],
         description=data["description"],
         metadata={k: v for k, v in data.items() if k not in core_keys},
     )
@@ -112,7 +120,9 @@ class CapabilityRegistry:
     def load(self) -> None:
         """Load the registry from the configured path/resource."""
         if not self._path.is_file():
-            raise FileNotFoundError(f"Capability registry resource could not be loaded: {self._path}")
+            raise FileNotFoundError(
+                f"Capability registry resource could not be loaded: {self._path}"
+            )
 
         with self._path.open("r", encoding="utf-8") as fh:
             raw: dict[str, Any] = json.load(fh)
@@ -125,7 +135,9 @@ class CapabilityRegistry:
 
         self._items = {}
         type_map: dict[str, ItemType] = {
-            "skills": "skill", "tools": "tool", "agents": "agent",
+            "skills": "skill",
+            "tools": "tool",
+            "agents": "agent",
             "knowledge_sources": "knowledge_source",
         }
         for json_key, item_type in type_map.items():
@@ -139,7 +151,9 @@ class CapabilityRegistry:
         if not self._loaded:
             self.load()
 
-    def list(self, *, category: str | None = None, status: str | None = None) -> list[Capability]:
+    def list(
+        self, *, category: str | None = None, status: str | None = None
+    ) -> builtins.list[Capability]:
         self._ensure_loaded()
         caps = list(self._capabilities.values())
         if category is not None:
@@ -152,28 +166,45 @@ class CapabilityRegistry:
         self._ensure_loaded()
         if capability_id not in self._capabilities:
             available = ", ".join(sorted(self._capabilities))
-            raise KeyError(f"Unknown capability {capability_id!r}. Registered: {available}")
+            raise KeyError(
+                f"Unknown capability {capability_id!r}. Registered: {available}"
+            )
         return self._capabilities[capability_id]
 
     def check(self, capability_id: str) -> dict[str, Any]:
         self._ensure_loaded()
         cap = self.describe(capability_id)
-        missing_prereqs = [p for p in cap.prerequisites if p in self._capabilities and not self._capabilities[p].is_available]
+        missing_prereqs = [
+            p
+            for p in cap.prerequisites
+            if p in self._capabilities and not self._capabilities[p].is_available
+        ]
         reason = (
             f"Executable binding verified (status={cap.status!r})."
             if cap.is_available
             else f"No executable binding: status={cap.status!r}."
         )
-        return {"capability_id": capability_id, "declared": True,
-                "executable": cap.is_available, "status": cap.status,
-                "risk_level": cap.risk_level, "reason": reason,
-                "missing_prerequisites": missing_prereqs}
+        return {
+            "capability_id": capability_id,
+            "declared": True,
+            "executable": cap.is_available,
+            "status": cap.status,
+            "risk_level": cap.risk_level,
+            "reason": reason,
+            "missing_prerequisites": missing_prereqs,
+        }
 
-    def select(self, task_type: str, *, category: str | None = None) -> list[Capability]:
+    def select(
+        self, task_type: str, *, category: str | None = None
+    ) -> builtins.list[Capability]:
         self._ensure_loaded()
-        results = [c for c in self._capabilities.values()
-                   if task_type in c.applicable_task_types and c.is_available
-                   and (category is None or c.category == category)]
+        results = [
+            c
+            for c in self._capabilities.values()
+            if task_type in c.applicable_task_types
+            and c.is_available
+            and (category is None or c.category == category)
+        ]
         return sorted(results, key=lambda c: c.id)
 
     def list_items(self, item_type: ItemType | None = None) -> list[RegistryItem]:
@@ -188,7 +219,9 @@ class CapabilityRegistry:
         self._ensure_loaded()
         key = (item_type, item_id)
         if key not in self._items:
-            available = ", ".join(sorted(i.id for i in self._items.values() if i.item_type == item_type))
+            available = ", ".join(
+                sorted(i.id for i in self._items.values() if i.item_type == item_type)
+            )
             raise KeyError(f"Unknown {item_type} {item_id!r}. Registered: {available}")
         return self._items[key]
 
