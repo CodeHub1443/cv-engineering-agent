@@ -138,7 +138,8 @@ MessageRole = Literal[
 
 class Message(TypedDict):
     role: MessageRole
-    content: str  # Multimodal message blocks are deferred to a future interface revision.
+    # Multimodal message blocks are deferred to a future interface revision.
+    content: str
 
 
 @dataclass(frozen=True)
