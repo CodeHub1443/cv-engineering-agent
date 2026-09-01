@@ -206,7 +206,9 @@ class CapabilityRegistry:
         ]
         return sorted(results, key=lambda c: c.id)
 
-    def list_items(self, item_type: ItemType | None = None) -> list[RegistryItem]:
+    def list_items(
+        self, item_type: ItemType | None = None
+    ) -> builtins.list[RegistryItem]:
         self._ensure_loaded()
         items = list(self._items.values())
         if item_type is not None:
