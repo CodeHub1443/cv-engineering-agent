@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from cv_agent.capabilities.registry import (
     Capability,
     CapabilityRegistry,
     RegistryItem,
 )
+
+import pytest
 
 # Use the committed registry file so tests reflect real data
 _REGISTRY_PATH = Path(__file__).parent.parent / "spec" / "capability_registry.json"
