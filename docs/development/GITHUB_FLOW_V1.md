@@ -1,14 +1,12 @@
 # CV Engineering Agent — GitHub Development & Delivery Flow
 
 **Status:** Approved Working Process
-**Version:** V1.1 — supersedes the two-trunk (`main` / `dev-munna`) model in V1.0
+**Version:** V1.2
 **Repository:** `CodeHub1443/cv-engineering-agent`
 
-> **V1.1 change:** V1.0 of this document specified a permanent `dev-munna` development
-> trunk with a two-stage PM approval gate. That model is retired. `dev-munna` is not a
-> mandatory or permanent branch. The current model is a single trunk (`main`) with
-> short-lived feature branches integrated by PR, reviewed and merged by the project
-> owner. See `docs/state/DECISIONS.md` for the decision record.
+> Current project flow: `main` → `dev-munna` → short-lived branches. `dev-munna` is the
+> PM integration branch. Short-lived work is reviewed and CI-validated before merging
+> into `dev-munna`. The Official PM reviews and promotes `dev-munna` to `main`.
 
 ## 1. Purpose
 
@@ -17,352 +15,178 @@ merged through GitHub.
 
 The project follows:
 
-- Trunk-based development on a single trunk, `main`
-- Short-lived feature branches
-- Pull requests, reviewed before merge
-- Mandatory CI/CD validation
-- Project owner performs final integration into `main`
-- Small, isolated feature increments
-- One feature at a time (default)
-
----
+- protected `main` as official integration/release baseline;
+- `dev-munna` as the PM integration branch;
+- short-lived work branches for each issue/work item;
+- mandatory CI/CD validation;
+- PM review before merge to `dev-munna`;
+- Official PM review before promotion to `main`;
+- small, isolated feature increments.
 
 ## 2. Branching Model
 
 ```text
-main
-    = verified integration baseline (protected, no direct commits)
-
-feature/<owner>/<work>
-    = short-lived development branch, one per feature/fix
-```
-
-Flow:
-
-```text
-feature/<owner>/<work>
-      |
-      v
-   Pull Request
-      |
-      v
-     CI/CD
-      |
-      v
-  Review + project owner approval
-      |
-      v
-     main
+                         main
+                          ▲
+                          │ Official PM review + merge
+                          │
+                      dev-munna
+                          ▲
+                          │ PM review + CI
+                          │
+             short-lived work branch
 ```
 
 ### Rules
 
-1. `main` is never used for day-to-day development and never receives direct commits or
-   pushes.
-2. All work happens on a short-lived `feature/<owner>/<work>` branch cut from `main`.
-3. A PR targets `main` directly. There is no intermediate integration trunk.
-4. The **project owner performs final integration into `main`** — i.e. approves and
-   merges the PR, after CI is green and review is complete.
-5. Branches are deleted after merge.
+1. `main` receives no direct development commits or pushes.
+2. `dev-munna` receives no direct development commits or pushes.
+3. Short-lived branches are cut from `dev-munna`.
+4. PRs from short-lived branches target `dev-munna`.
+5. CI and PM review are required before merging a work branch into `dev-munna`.
+6. The Official PM promotes `dev-munna` to `main` through a separate PR/review gate.
+7. Short-lived branches are deleted after merge.
+8. Never force-push `main` or `dev-munna`.
 
-There is no permanent development trunk distinct from `main`. A long-lived integration
-branch (e.g. for a large multi-PR effort) may be created ad hoc when explicitly agreed,
-but it is the exception, not the default model, and does not replace this section.
-
----
-
-## 3. One Feature at a Time
+## 3. One Work Item at a Time
 
 ```text
-Feature A
-   |
-   v
-feature/<owner>/<work>
-   |
-   v
-implementation + local tests
-   |
-   v
-PR -> main
-   |
-   v
-CI/CD
-   |
-   v
-review + owner approval
-   |
-   v
-merge to main
-   |
-   v
-Feature B
+Issue
+  ↓
+short-lived branch from dev-munna
+  ↓
+implementation + tests
+  ↓
+PR → dev-munna
+  ↓
+CI + PM review
+  ↓
+dev-munna
+  ↓
+Promotion PR → main
+  ↓
+Official PM review + merge
 ```
 
-We do not start unrelated feature branches unless there is a clear dependency or
-project-management reason. If a feature becomes too large, split it into smaller
-features (CLAUDE.md §6: diffs stay under ~400 lines).
-
----
+Keep diffs reviewable; if a change is too large, split the issue.
 
 ## 4. Branch Naming
 
 ```text
-feature/<owner>/<work>      # e.g. feature/tanvir/llm-gateway
-fix/<owner>/<work>          # bug fixes
-docs/<owner>/<work>         # documentation-only changes
-ci/<owner>/<work>           # CI/CD changes
-hotfix/<owner>/<work>       # urgent fixes, see §12
+feature/<owner>/<work>
+fix/<owner>/<work>
+docs/<owner>/<work>
+ci/<owner>/<work>
+hotfix/<owner>/<work>
 ```
 
-`<owner>` is the person or agent session doing the work; `<work>` is a short slug for
-what it does. This matches `CLAUDE.md` §6 and `AGENTS.md`'s branch-naming rule — keep
-all three in sync if this changes. Traceability to a GitHub issue is carried in the PR
-description (§5), not the branch name.
-
-Target branch lifetime:
-
-```text
-Ideal:       < 1 day
-Acceptable:  1–3 days
-Exceptional: > 3 days
-```
-
----
+Branches should normally live less than three days. Longer-lived work requires an
+explicit project-management reason.
 
 ## 5. Pull Request Requirements
 
 Every PR must contain:
 
-- problem statement
-- scope
-- implementation summary
-- architecture impact
-- tests performed
-- acceptance criteria
-- risks
-- dependencies
-- documentation impact
-- screenshots/logs where useful
-
-Recommended PR structure:
-
-```markdown
-## Problem
-
-## Scope
-
-## Changes
-
-## Architecture Impact
-
-## Tests
-
-## Risks
-
-## Dependencies
-
-## Acceptance Criteria
-```
-
----
+- problem statement;
+- scope;
+- implementation summary;
+- architecture impact;
+- tests performed;
+- acceptance criteria;
+- risks and dependencies;
+- documentation impact where applicable.
 
 ## 6. CI/CD Gate
 
 Every PR must pass automated validation before merge.
 
-Minimum pipeline:
-
 ```text
-Pull Request
-     |
-     v
-Formatting
-     |
-     v
-Linting
-     |
-     v
-Type Checking
-     |
-     v
-Unit Tests
-     |
-     v
-Integration Tests
-     |
-     v
-Security Checks
-     |
-     v
-Package Build
-     |
-     v
-Architecture / Spec Checks
+Formatting → Linting → Type Checking → Unit Tests → Integration Tests
+→ Security Checks → Package Build → Architecture / Spec Checks
 ```
 
-GPU-specific CI (CUDA, TensorRT, DeepStream, GPU integration) is added when GPU
-infrastructure is available. CPU CI must remain capable of validating the core software
-architecture without it.
+GPU-specific validation is added when GPU infrastructure is available. CPU CI must
+remain capable of validating the core architecture without GPU infrastructure.
 
----
+## 7. Local Validation
 
-## 7. Local Validation Before Push
-
-Before opening a PR, run the local equivalent of the CI checks:
-
-```bash
-pytest tests/ -v
-```
-
-plus the project's configured formatting, linting, typing, and build commands. A PR
-should not be the first place an obvious failure is discovered.
-
----
+Before opening a PR, run the local equivalent of configured formatting, linting,
+type-checking, tests, and build checks. The PR should not be the first place an obvious
+failure is discovered.
 
 ## 8. Review and Merge
 
-### Technical review
+### PM review
 
-Every PR is reviewed for:
+The PM reviews work-branch PRs for correctness, architecture consistency, tests,
+security, performance implications, API compatibility, and documentation.
 
-- correctness
-- maintainability
-- architecture consistency
-- tests
-- security
-- performance implications
-- API compatibility
+### Official PM promotion
 
-### Project owner approval
-
-The project owner reviews and merges every PR into `main`. There is no second,
-separate promotion step — technical review and the owner's merge approval together are
-the single integration gate.
+The Official PM reviews promotion PRs from `dev-munna` to `main` and performs the
+final merge into `main`.
 
 ### Merge strategy
 
-Squash merge feature branches so `main` contains meaningful commits rather than noisy
-fix-up history.
-
----
+Prefer squash merging short-lived branches so `dev-munna` retains meaningful history.
 
 ## 9. Keeping Branches Current
 
-Before opening or merging a PR:
+Before opening or merging a PR, synchronize the work branch with the current
+`dev-munna` state. Never force-push `main` or `dev-munna`.
 
-```bash
-git fetch origin
-git rebase origin/main
-```
-
-If a force push is needed after rebasing a feature branch:
-
-```bash
-git push --force-with-lease
-```
-
-Never force-push `main`.
-
----
-
-## 10. Feature Completion Definition
-
-A feature is complete only when:
+## 10. Work Completion
 
 ```text
+[ ] Issue identified
+[ ] Acceptance criteria defined
 [ ] Implementation complete
-[ ] Unit tests complete
-[ ] Integration tests complete where required
+[ ] Tests complete
 [ ] Documentation updated
-[ ] Configuration updated where required
-[ ] Security considerations reviewed
 [ ] Local validation passes
 [ ] CI passes
-[ ] Technical review complete
-[ ] Project owner approval received
-[ ] PR merged to main
+[ ] PM review complete
+[ ] PR merged to dev-munna
+[ ] Promotion PR reviewed by Official PM
+[ ] dev-munna merged to main
 [ ] Post-merge main CI passes
-[ ] Branch deleted
+[ ] Short-lived branch deleted
 ```
 
-A feature is not complete merely because its code works locally.
-
----
-
-## 11. Workstream Distribution
-
-The project is divided into engineering workstreams for organizing branch names; these
-are not long-lived branches.
+## 11. Workstreams
 
 | Workstream | Branch prefix | Owns |
 |---|---|---|
-| Architecture & Documentation | `docs/*` | architecture, lifecycle, contracts, safety, approval policy, development standards |
-| Core Runtime | `feature/*/runtime-*` | LangGraph, state, sessions, checkpointing, interrupts, resume, retries |
-| LLM Gateway | `feature/*/llm-*`, `feature/*/provider-*` | provider abstraction, model routing, structured output, streaming, tool calling, retries, fallbacks |
-| Knowledge / RAG | `feature/*/knowledge-*`, `feature/*/rag-*` | retrieval, embeddings, reranking, provenance, freshness |
-| Research Engine | `feature/*/research-*` | web/GitHub/paper research, evidence verification |
-| MCP / Tools | `feature/*/mcp-*`, `feature/*/tool-*` | typed execution boundaries for research, datasets, training, evaluation, benchmarking, GPU profiling, TensorRT, DeepStream |
-| CV Intelligence | `feature/*/requirement-*`, `feature/*/*-agent-*` | the CV reasoning layer |
-| Training / Experimentation | `feature/*/experiment-*`, `feature/*/training-*` | experiment registry, dataset lineage, training launcher, artifact tracking |
-| Evaluation / Benchmarking | `feature/*/evaluation-*`, `feature/*/benchmark-*` | accuracy evaluation, runtime benchmarking, failure analysis |
-| NVIDIA / Edge | `feature/*/nvidia-*`, `feature/*/tensorrt-*`, `feature/*/deepstream-*`, `feature/*/jetson-*` | CUDA, TensorRT, DeepStream, Jetson, quantization, kernel optimization |
-| Deployment | `feature/*/deployment-*`, `feature/*/monitoring-*` | packaging, production deployment, validation, rollback, monitoring |
+| Architecture & Documentation | `docs/*` | ADRs, architecture, lifecycle, contracts, governance |
+| Core Runtime | `feature/*/runtime-*` | LangGraph, state, sessions, checkpoints, interrupts |
+| LLM Gateway | `feature/*/llm-*`, `feature/*/provider-*` | provider abstraction, routing, structured output, streaming, fallbacks |
+| Knowledge / RAG | `feature/*/knowledge-*`, `feature/*/rag-*` | retrieval, provenance, freshness |
+| Research Engine | `feature/*/research-*` | web/GitHub/paper research and evidence verification |
+| MCP / Tools | `feature/*/mcp-*`, `feature/*/tool-*` | typed execution boundaries |
+| CV Intelligence | `feature/*/requirement-*`, `feature/*/*-agent-*` | CV reasoning layer |
+| Training / Experimentation | `feature/*/experiment-*`, `feature/*/training-*` | experiments, datasets, training launchers |
+| Evaluation / Benchmarking | `feature/*/evaluation-*`, `feature/*/benchmark-*` | metrics, benchmarks, failure analysis |
+| NVIDIA / Edge | `feature/*/nvidia-*`, `feature/*/tensorrt-*`, `feature/*/deepstream-*`, `feature/*/jetson-*` | CUDA, TensorRT, DeepStream, Jetson |
+| Deployment | `feature/*/deployment-*`, `feature/*/monitoring-*` | packaging, deployment, rollback, monitoring |
 
-None of these workstreams are implemented yet — see `docs/state/STATUS.md` for what
-currently exists.
-
----
-
-## 12. Hotfix Flow
-
-Critical fixes to `main` follow the same single-trunk model, just expedited:
+## 12. Non-Negotiable Rules
 
 ```text
-main
-  |
-  v
-hotfix/<owner>/<work>
-  |
-  v
-CI
-  |
-  v
-review + project owner approval
-  |
-  v
-main
+1. No direct development commits to main or dev-munna.
+2. Short-lived work branches start from dev-munna.
+3. Every work PR requires CI and PM review.
+4. Promotion to main requires Official PM review.
+5. No force-push to main or dev-munna.
+6. Expensive/destructive CV-agent operations remain subject to docs/APPROVALS.md.
+7. Documentation and tests are part of feature completion.
 ```
 
----
-
-## 13. Non-Negotiable Rules
+## 13. Current Operating State
 
 ```text
-1. main is never used for day-to-day development.
-2. No direct commits or pushes to main.
-3. Feature work uses short-lived feature/<owner>/<work> branches.
-4. One feature at a time is the default.
-5. Every PR requires CI.
-6. Every PR requires technical review.
-7. Every PR requires project owner approval before merge to main.
-8. No force push to main.
-9. Expensive/destructive CV-agent operations remain subject to docs/APPROVALS.md,
-   independent of this git workflow.
-10. Documentation and tests are part of feature completion.
-11. main must remain reproducible at every commit.
-```
-
----
-
-## 14. Current Operating State
-
-```text
-Trunk:
-main
-
-Integration model:
-feature/<owner>/<work> -> PR -> review -> project owner merges to main
-
-Current implementation milestone:
-Runtime Foundation (see docs/state/STATUS.md)
+Integration baseline: main
+PM integration branch: dev-munna
+Work branches: short-lived branches cut from dev-munna
+Promotion: dev-munna -> main via Official PM PR
+Current milestone: Phase 1 — Architecture & ADR Specification
 ```
