@@ -7,30 +7,27 @@
 
 ## Where we are
 
-Phase 0 governance is complete. The repository is now operating with the agreed
-three-level development flow: `main` → `dev-munna` → short-lived branches. `dev-munna`
-is the PM integration branch for this project; short-lived branches are used for each
-work item and are merged back into `dev-munna` after review. `main` remains the official
-integration/release branch and is promoted from `dev-munna` by the Official PM.
+Phase 0 governance is complete. The repository operates with the agreed three-level
+development flow: `main` → `dev-munna` → short-lived branches. `dev-munna` is the PM
+integration branch; `main` remains the official integration/release branch and is
+promoted from `dev-munna` by the Official PM.
 
-The frozen project definition is `docs/PROJECT.md`. The capability model seed
-(ADR-0001) exists but remains proposed. The LLM gateway decision was previously drafted
-as ADR-0002 and is being restored into the current `dev-munna` state so Phase 1 can
-continue without losing the accepted Q7/Q8 work.
+The frozen project definition is `docs/PROJECT.md`. ADR-0001 (capability model) and
+ADR-0002 (LLM gateway) have been reviewed and accepted. Their interfaces are now the
+architectural baseline for the remaining Phase 1 decisions.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| Gitflow reconciliation (`main → dev-munna → short-lived`) | #— | in progress |
-| ADR-0001 capability model | #— | proposed / awaiting acceptance |
-| ADR-0002 LLM gateway | #11 | draft / awaiting acceptance |
+| Q1–Q5 PM decisions | #— | blocking |
+| ADR-0003 / ADR-0004 architecture | #— | blocked pending Q1–Q3 / Q1–Q2 |
 
 ## Next 3 actions
 
-1. Reconcile and accept the repository Gitflow/state contract on the current branch.
-2. Review and accept or revise ADR-0001, then accept/revise ADR-0002.
-3. Resolve blocking Q1–Q5 before ADR-0003/ADR-0004 design proceeds.
+1. Resolve Q1–Q5 with the PM; record each decision before drafting blocked ADRs.
+2. Draft ADR-0003 (orchestration state) after Q1–Q3 are settled.
+3. Draft ADR-0004 (project memory / experiment ledger) after Q1–Q2 are settled.
 
 ## Blockers
 
@@ -40,4 +37,5 @@ continue without losing the accepted Q7/Q8 work.
 ## Do not start yet
 
 Stage workflows, RAG, training execution, SkillSource/skill discovery, or
-CapabilityResolver. These depend on the registry, gateway, state model, and memory.
+CapabilityResolver implementation. These depend on the accepted registry/gateway,
+state model, and memory architecture.

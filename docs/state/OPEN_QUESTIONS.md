@@ -9,22 +9,30 @@
 
 ## Blocking — work cannot proceed until answered
 
-**Q1. What is the unit of a "project"?** `[P§25]`, `[P§33]` — Does the agent handle one
-CV project per repository/workspace, or many projects with isolated memory? This
-determines the shape of project memory and whether experiment IDs are globally or
-project-scoped. *Blocks: ADR-0003, ADR-0004.*
+~~**Q1. What is the unit of a "project"?** `[P§25]`, `[P§33]` — Does the agent handle one
+CV project per repository/workspace, or many projects with isolated memory? This determines
+the shape of project memory and whether experiment IDs are globally or project-scoped.~~
+**Answered 2026-09-01:** one CV Engineering Agent project per repository/workspace;
+project memory and experiment records are isolated to that project, with experiment
+identifiers scoped to the project.
 
-**Q2. Where does the agent run, and where does training run?** `[P§10]`, `[P§13]`,
+~~**Q2. Where does the agent run, and where does training run?** `[P§10]`, `[P§13]`,
 `[P§24]` — Local workstation, remote GPU box, cloud, or all three? Does the agent submit
-jobs or execute them in-process? *Blocks: ADR-0003 (state/checkpointing), ADR-0010.*
+jobs or execute them in-process?~~ **Answered 2026-09-01:** the agent runs on the local
+workstation. Training is submitted as an external job to a configured execution target
+(local, remote, or cloud GPU) and is not executed in-process by the agent.
 
-**Q3. What is the human-approval transport?** `[P§24]` — CLI prompt only, or must
+~~**Q3. What is the human-approval transport?** `[P§24]` — CLI prompt only, or must
 approvals survive process restart (a queued request answered hours later)? The latter
-makes approvals a persisted entity, not an interrupt. *Blocks: ADR-0003.*
+makes approvals a persisted entity, not an interrupt.~~ **Answered 2026-09-01:** human
+approvals are persistent workflow entities. The initial interaction surface may be CLI-based,
+but approval requests and state survive process restarts and support asynchronous approval.
 
-**Q4. Is the first target a real project or a reference project?** `[P§30]` — Building
-against the prison/garment examples as a real deliverable versus as a test fixture
-changes Phase-1 scope substantially. *Blocks: ROADMAP Phase 1 exit test.*
+~~**Q4. Is the first target a real project or a reference project?** `[P§30]` — Building
+against the prison/garment examples as a real deliverable versus as a test fixture changes
+Phase-1 scope substantially.~~ **Answered 2026-09-01:** Phase 1 architecture targets a
+real CV project. The prison/garment examples are reference workloads and validation
+fixtures, not the architectural scope itself.
 
 **Q5. Which NVIDIA capabilities are actually installed and invocable today?** `[P§15]` —
 The design says "discover and invoke, do not duplicate." Discovery mechanism depends on
