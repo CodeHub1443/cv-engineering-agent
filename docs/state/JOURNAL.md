@@ -100,3 +100,28 @@ still duplicate each other substantially (by design — one is the procedural
 reference, one the executive summary — but they should be watched for drift the same
 way the capability registry copies were). Q1–Q5 in `OPEN_QUESTIONS.md` remain
 unanswered and still block ADR-0003. No commit or push was made — see git status.
+
+---
+
+## 2026-09-01 — Phase 1 state reconciliation (docs/reconcile-dev-munna-phase1-state)
+
+**Did:** Reconciled the project state onto the agreed `main` → `dev-munna` → short-lived
+branch workflow; restored the Phase 1 status, restored ADR-0002 as a draft, recorded the
+Q7/Q8 decisions as D-016/D-017, and added the current `AGENT_HANDOFF.md`.
+
+**Why:** The active `dev-munna` state had reverted to Phase 0 wording and still described
+the retired single-trunk workflow, while the project is continuing Phase 1 architecture
+work. The repository state must describe the actual operating model before more ADR work
+proceeds.
+
+**Broke:** The existing `DECISIONS.md` update repeatedly returned a GitHub contents API
+409 despite the blob SHA matching the fetched file. No overwrite or force update was made
+to that file through the API; its existing content therefore remains unchanged on this
+branch until it can be updated safely.
+
+**Learned:** The prior ADR-0002 draft still exists on the historical short-lived branch
+`docs/issue-11-adr-0002-llm-gateway` and can be recovered without reconstructing it from
+memory.
+
+**Left open:** `DECISIONS.md` still needs D-008 marked superseded and D-015–D-018 appended.
+Q1–Q5 remain unanswered and therefore continue to block the dependent ADRs.

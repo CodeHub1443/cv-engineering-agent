@@ -3,48 +3,41 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-09-01 · **Phase:** 0 — Foundation & governance · **Health:** green
+**Updated:** 2026-09-01 · **Phase:** 1 — Architecture & ADR Specification · **Health:** green
 
 ## Where we are
 
-Documentation consistency pass complete: authority hierarchy fixed (D-006), `spec/`
-duplication/conflicts retired or reduced to canon-citing elaborations (D-007), git
-workflow unified on single-trunk `main` + `feature/<owner>/<work>` (D-008), and
-capability registry semantics corrected (D-009). `docs/PROJECT.md` is frozen canon.
-The pre-existing code baseline `[P§32]` — package, config, LLM abstraction, mock
-provider, LangGraph runtime, agent state, capability registry, CLI, tests — is present
-but **not yet governed by ADRs**. No intelligence layers exist yet.
+Phase 0 governance is complete. The repository is now operating with the agreed
+three-level development flow: `main` → `dev-munna` → short-lived branches. `dev-munna`
+is the PM integration branch for this project; short-lived branches are used for each
+work item and are merged back into `dev-munna` after review. `main` remains the official
+integration/release branch and is promoted from `dev-munna` by the Official PM.
 
-**Step 2 is NOT implemented.** None of the following exist in code: `SkillSource`,
-skill discovery (global/local), metadata extraction, `CapabilityResolver`, real
-executable-availability detection, a `skills` CLI, a `resolve` CLI, RAG, MCP
-integration, a research subsystem, autonomous training, experiment execution,
-optimization workflows, production deployment, or production monitoring. Every
-capability in `spec/capability_registry.json` is `status: "planned"` (declared, no
-executable binding) — none is `"available"`. Do not build any of the above without a
-GitHub issue and, where architectural, an ADR.
+The frozen project definition is `docs/PROJECT.md`. The capability model seed
+(ADR-0001) exists but remains proposed. The LLM gateway decision was previously drafted
+as ADR-0002 and is being restored into the current `dev-munna` state so Phase 1 can
+continue without losing the accepted Q7/Q8 work.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| Governance docs committed & reviewed | #— | in progress |
-| GitHub scaffolding (labels, templates, CI, milestones) | #— | not started |
-| ADR-0001 capability model — seed written, needs review | #— | proposed |
+| Gitflow reconciliation (`main → dev-munna → short-lived`) | #— | in progress |
+| ADR-0001 capability model | #— | proposed / awaiting acceptance |
+| ADR-0002 LLM gateway | #11 | draft / awaiting acceptance |
 
 ## Next 3 actions
 
-1. Human review of `CLAUDE.md` and `docs/architecture/OVERVIEW.md`; accept or amend.
-2. Create GitHub labels, issue/PR templates, CI, and Phase-1 milestone with issues.
-3. Accept or revise ADR-0001, then write ADR-0002 (LLM gateway) `[P§20]`.
+1. Reconcile and accept the repository Gitflow/state contract on the current branch.
+2. Review and accept or revise ADR-0001, then accept/revise ADR-0002.
+3. Resolve blocking Q1–Q5 before ADR-0003/ADR-0004 design proceeds.
 
 ## Blockers
 
-- `docs/state/OPEN_QUESTIONS.md` Q1–Q5 are **blocking**: they must be answered before
-  ADR-0003 (orchestration state) can be written.
+- Q1–Q5 in `docs/state/OPEN_QUESTIONS.md` remain blocking for ADR-0003/ADR-0004 and,
+  for Q5, ADR-0005/ADR-0007.
 
 ## Do not start yet
 
-Stage workflows `[P§6]`, RAG `[P§19]`, training execution `[P§10]`, SkillSource/skill
-discovery, `CapabilityResolver`. These depend on the registry, gateway, state model,
-and memory. Building them first is the failure mode `[P§34]` warns about.
+Stage workflows, RAG, training execution, SkillSource/skill discovery, or
+CapabilityResolver. These depend on the registry, gateway, state model, and memory.

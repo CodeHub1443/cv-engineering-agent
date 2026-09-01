@@ -33,15 +33,21 @@ whether these are MCP servers, CLI tools, Python SDKs, or agent skills.
 
 ## Soon — needed within one or two phases
 
+~~**Q7.** Which LLM providers are actually available with keys, and what is the routing
+policy per task class? `[P§20]`~~ — **Answered 2026-09-01:** initial gateway provider
+classes are Anthropic, OpenAI, and Local/Ollama; routing is configuration-driven;
+transient rate-limit/server/timeout failures may fall back sequentially; authentication,
+invalid-request, context-length, and unsupported-model failures fail fast. See D-016 /
+ADR-0002.
+
+~~**Q8.** What is the persistence backend for project memory and the experiment ledger —
+files in-repo, SQLite, or a service? Reproducibility `[P§29.5]` favors in-repo; scale
+favors otherwise.~~ — **Answered 2026-09-01:** dual-layer persistence: Git-tracked
+structured project memory plus local SQLite at `.cv_agent/state/experiments.sqlite`
+for high-volume experiment rows. See D-017 / ADR-0004.
+
 **Q6.** What are the default cost thresholds for approval gates (GPU-hours, $, dataset
 mutation scope)? `docs/APPROVALS.md` has placeholders. `[P§24]`
-
-**Q7.** Which LLM providers are actually available with keys, and what is the routing
-policy per task class? `[P§20]`
-
-**Q8.** What is the persistence backend for project memory and the experiment ledger —
-files in-repo, SQLite, or a service? Reproducibility `[P§29.5]` favors in-repo; scale
-favors otherwise.
 
 **Q9.** LinkedIn as a research source `[P§17]` — what is the actual access mechanism, and
 what are the terms-of-service constraints? The requirement is clear; the mechanism is
@@ -53,7 +59,7 @@ not.
 
 **Q11.** Multi-camera / multi-stream orchestration model. `[P§9]`
 **Q12.** Monitoring backend and alerting surface. `[P§28]`
-**Q13.** Does the agent ever fine-tune or serve its own models, or only orchestrate? 
+**Q13.** Does the agent ever fine-tune or serve its own models, or only orchestrate?
 **Q14.** Multi-user / team usage, or single-operator? Affects memory and approvals.
 
 ## Answered
