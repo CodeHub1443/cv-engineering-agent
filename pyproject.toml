@@ -36,6 +36,7 @@ required-version = ">=0.16,<0.17"
 
 [tool.ruff.lint.isort]
 known-first-party = ["cv_agent"]
+section-order = ["future", "standard-library", "first-party", "third-party", "local-folder"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["cv_agent"]
