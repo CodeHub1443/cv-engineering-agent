@@ -1,4 +1,9 @@
-**CV Engineering Agent — Project Definition**
+> **Superseded.** This is the original raw brain-dump `docs/PROJECT.md` was derived
+> from. It is kept only for historical reference — it is **not** canon, **not**
+> maintained, and must never be cited (`[P§n]`) or read at session start. For the
+> frozen, authoritative project definition, see `docs/PROJECT.md`.
+
+**CV Engineering Agent — Project Definition (draft, superseded)**
 
 This should become the **master project description** from which we derive AGENTS.md, CLAUDE.md, architecture docs, roadmap, memory files, and implementation specs.
 

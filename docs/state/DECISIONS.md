@@ -12,6 +12,7 @@
 | D-003 | 2026-08-30 | No implementation code without an issue; no architectural code without an ADR | `[P§34]` | — | accepted |
 | D-004 | 2026-08-30 | Design order fixed: registry → gateway → orchestration state → memory → tools → knowledge → skills → stages → execution | `[P§33]`, `[P§34]` | — | accepted |
 | D-005 | 2026-08-30 | Capability / skill / tool / agent kept as four distinct typed registries | `[P§23]` | ADR-0001 | **proposed** |
+| D-006 | 2026-08-30 | Two independent canons, not one chain: `docs/PROJECT.md` (knowledge) and `CLAUDE.md` (instructions, mirrored by `AGENTS.md`). Raw pre-canon draft moved from repo root to `docs/archive/PROJECT_SOURCE_DRAFT.md`, marked superseded and non-authoritative | `[P§35]` | — | accepted |
 
 ## Reversals
 

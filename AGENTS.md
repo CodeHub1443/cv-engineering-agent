@@ -1,8 +1,13 @@
 # AGENTS.md — Tool-neutral operating contract
 
 This is the same contract as `CLAUDE.md`, for any coding agent (Codex, Cursor, Aider,
-Copilot Workspace, an in-repo agent, or a human). `CLAUDE.md` is the authoritative copy;
-if the two ever diverge, `CLAUDE.md` wins and this file must be updated in the same PR.
+Copilot Workspace, an in-repo agent, or a human). `CLAUDE.md` is the authoritative copy
+of *this instructions contract*; if the two ever diverge, `CLAUDE.md` wins and this file
+must be updated in the same PR.
+
+This file governs how an agent works. It does not define what the project is — that is
+`docs/PROJECT.md` (§1–§35), an independent, frozen knowledge canon that this contract
+answers to on project facts but does not itself own. See `CLAUDE.md` §0.
 
 ## Canon
 `docs/PROJECT.md` (§1–§35) is frozen and authoritative. Cite it as `[P§n]` in every

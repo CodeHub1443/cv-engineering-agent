@@ -9,6 +9,18 @@ engineering, not one that merely knows computer vision.
 
 ---
 
+## 0. Two canons, not one chain
+
+This repo has two independent authorities, scoped to different things:
+
+- **Knowledge canon:** `docs/PROJECT.md` — what the project *is* (§1–§35).
+- **Instructions canon:** this file, `CLAUDE.md` — how an agent *works*.
+  `AGENTS.md` is a tool-neutral mirror of this file for non-Claude agents; if the
+  two diverge, `CLAUDE.md` wins and `AGENTS.md` must be updated in the same PR.
+
+Neither canon defers to the other — `docs/PROJECT.md` does not govern *how* you
+work, and `CLAUDE.md` does not define *what the project is*.
+
 ## 1. Canon
 
 `docs/PROJECT.md` is the frozen, authoritative project definition, numbered §1–§35.
@@ -119,3 +131,16 @@ Before every commit, and at the end of every session:
 - Package-safe resource loading; explicit dependencies `[P§32]`.
 - Docstrings state the responsibility the unit owns.
 - No `TODO` without a corresponding GitHub issue number.
+
+## 9. Commands
+
+```
+pip install -e ".[dev]"   # install package + pytest
+pytest                    # full test suite (testpaths = tests/)
+pytest tests/test_x.py::test_name   # single test
+python -m cv_agent         # CLI health check (or: cv-agent, once installed)
+```
+
+`ruff` and `mypy` are required clean per §8 but are not yet in `pyproject.toml`
+dev-dependencies — installing and running them is part of closing that gap, not a
+sign they should be skipped.
