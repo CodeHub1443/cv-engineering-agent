@@ -9,14 +9,14 @@
 - **Integration branch:** `dev-munna`
 - **Release/integration branch:** `main`
 - **Work pattern:** `main` ← `dev-munna` ← short-lived work branches
-- **Current architecture gate:** ADR-0001 acceptance, then ADR-0002 acceptance.
+- **Current architecture gate:** ADR-0001 accepted; ADR-0002 under final contract review.
 
 ## ADR status
 
 | ADR | State |
 |---|---|
-| ADR-0001 — Capability model | Proposed / awaiting acceptance |
-| ADR-0002 — LLM Gateway | Draft / awaiting acceptance |
+| ADR-0001 — Capability model | **Accepted** |
+| ADR-0002 — LLM Gateway | Draft / revision required |
 | ADR-0003 — Orchestration state | Blocked by Q1–Q3 |
 | ADR-0004 — Project memory / experiment ledger | Blocked by Q1–Q2 |
 | ADR-0005 — Tools / MCP | Blocked by Q5 |
@@ -31,6 +31,8 @@
 
 ## Agreed decisions
 
+- **D-010:** three-level development flow: short-lived work branches → `dev-munna` → final PR → `main`; `dev-munna` is the PM development/integration trunk and `main` is the Official PM integration/release trunk.
+- **D-011:** ADR-0001 capability model accepted; four registry identities are semantic/type boundaries, not a requirement for independent storage backends.
 - **A-18 / D-016:** Q7 — initial LLM provider classes are Anthropic, OpenAI, and Local/Ollama; routing is configuration-driven; transient failures may fall back sequentially; request/configuration failures fail fast; metadata is preserved. See ADR-0002.
 - **A-19 / D-017:** Q8 — dual-layer persistence: Git-tracked structured project memory plus local SQLite at `.cv_agent/state/experiments.sqlite` for high-volume experiment rows. See ADR-0004.
 
@@ -41,6 +43,6 @@ Q1–Q3 block ADR-0003; Q1–Q2 block ADR-0004; Q5 blocks ADR-0005 and ADR-0007.
 
 ## Next session
 
-1. Review/accept or revise ADR-0001.
-2. Review/accept or revise ADR-0002.
-3. Resolve Q1–Q5 with the PM before drafting the blocked ADRs.
+1. Resolve the identified ADR-0002 contract gaps and complete acceptance.
+2. Resolve Q1–Q5 with the PM and record the decisions.
+3. Draft ADR-0003 / ADR-0004 only after their blocking questions are settled.
