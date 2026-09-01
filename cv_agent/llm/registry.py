@@ -8,18 +8,16 @@ get_provider(); it never imports a concrete adapter directly.
 
 from __future__ import annotations
 
-from typing import Type
-
 from cv_agent.llm.base import LLMProvider
 from cv_agent.llm.mock import FakeLLMProvider
 
 # Internal registry: provider name → concrete class
-_REGISTRY: dict[str, Type[LLMProvider]] = {
+_REGISTRY: dict[str, type[LLMProvider]] = {
     FakeLLMProvider.PROVIDER_NAME: FakeLLMProvider,
 }
 
 
-def register_provider(name: str, cls: Type[LLMProvider]) -> None:
+def register_provider(name: str, cls: type[LLMProvider]) -> None:
     """
     Register a new LLM provider adapter.
 
