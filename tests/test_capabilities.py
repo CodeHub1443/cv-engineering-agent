@@ -128,17 +128,29 @@ class TestCapabilityCheck:
     def test_check_keys(self, registry: CapabilityRegistry) -> None:
         result = registry.check("cv.evaluation")
         assert "capability_id" in result
-        assert "available" in result
+        assert "declared" in result
+        assert "executable" in result
         assert "status" in result
         assert "risk_level" in result
         assert "reason" in result
         assert "missing_prerequisites" in result
 
-    def test_available_capability_returns_true(
+    def test_declared_capability_is_always_true(
         self, registry: CapabilityRegistry
     ) -> None:
+        """Any capability check() can describe is declared, regardless of status."""
         result = registry.check("cv.evaluation")
-        assert result["available"] is True
+        assert result["declared"] is True
+
+    def test_planned_capability_is_not_executable(
+        self, registry: CapabilityRegistry
+    ) -> None:
+        """DECLARED CAPABILITY != EXECUTABLE CAPABILITY: no skill/tool binding exists
+        for cv.evaluation yet, so it must not be reported as executable merely
+        because it is declared in the registry."""
+        result = registry.check("cv.evaluation")
+        assert result["status"] == "planned"
+        assert result["executable"] is False
 
     def test_capability_id_matches(self, registry: CapabilityRegistry) -> None:
         result = registry.check("cv.research")
@@ -158,9 +170,25 @@ class TestCapabilitySelect:
         caps = registry.select("planning")
         assert isinstance(caps, list)
 
-    def test_select_all_are_available(self, registry: CapabilityRegistry) -> None:
+    def test_select_all_are_executable(self, registry: CapabilityRegistry) -> None:
         caps = registry.select("model_training")
         assert all(c.is_available for c in caps)
+
+    def test_select_excludes_planned_capabilities(
+        self, registry: CapabilityRegistry
+    ) -> None:
+        """DECLARED CAPABILITY != EXECUTABLE CAPABILITY: select() must not return a
+        capability just because it's declared for this task type — cv.training.design
+        applies to model_training but has no executable binding, so it must not be
+        selected even though registry.list() can describe it."""
+        applicable = [
+            c
+            for c in registry.list(status="planned")
+            if "model_training" in c.applicable_task_types
+        ]
+        assert len(applicable) > 0  # sanity: the fixture data isn't empty
+        selected_ids = {c.id for c in registry.select("model_training")}
+        assert selected_ids.isdisjoint({c.id for c in applicable})
 
     def test_select_matches_task_type(self, registry: CapabilityRegistry) -> None:
         caps = registry.select("deployment")
@@ -206,10 +234,10 @@ class TestRegistryItems:
 
     def test_cross_type_ids_do_not_collide(self, registry: CapabilityRegistry) -> None:
         """The same ID may legitimately exist for different registry entity types."""
-        skill = registry.describe_item("cuda-agent", item_type="skill")
-        agent = registry.describe_item("cuda-agent", item_type="agent")
-        triton_skill = registry.describe_item("triton-perf-analyzer", item_type="skill")
-        triton_tool = registry.describe_item("triton-perf-analyzer", item_type="tool")
+        skill = registry.describe_item("skill", "cuda-agent")
+        agent = registry.describe_item("agent", "cuda-agent")
+        triton_skill = registry.describe_item("skill", "triton-perf-analyzer")
+        triton_tool = registry.describe_item("tool", "triton-perf-analyzer")
 
         assert skill.item_type == "skill"
         assert agent.item_type == "agent"
@@ -245,7 +273,7 @@ class TestCrossTypeRegistryItems:
         self, registry: CapabilityRegistry
     ) -> None:
         assert len(registry.list_items("skill")) == 27
-        assert len(registry.list_items("tool")) == 13
+        assert len(registry.list_items("tool")) == 21
         assert len(registry.list_items("agent")) == 3
 
         cuda_skill = registry.describe_item("skill", "cuda-agent")
@@ -268,13 +296,29 @@ class TestCrossTypeRegistryItems:
         assert registry.check_item("skill", "cuda-agent") == {
             "item_id": "cuda-agent",
             "item_type": "skill",
-            "available": True,
+            "declared": True,
+            "executable": False,
+            "reason": "no executable binding or discovery mechanism implemented",
         }
+
+    def test_check_item_never_claims_executable(
+        self, registry: CapabilityRegistry
+    ) -> None:
+        """DECLARED CAPABILITY != EXECUTABLE CAPABILITY, at the item level too: no
+        skill/tool/agent/knowledge-source has a real invocation binding yet, so
+        check_item() must report executable=False for every registered item."""
+        for item in registry.list_items():
+            result = registry.check_item(item.item_type, item.id)
+            assert result["declared"] is True
+            assert result["executable"] is False
 
     def test_capability_selection_returns_only_capabilities(
         self, registry: CapabilityRegistry
     ) -> None:
         selected = registry.select("benchmarking")
 
-        assert [cap.id for cap in selected] == ["cv.benchmarking"]
+        # cv.benchmarking is declared for this task type but has no executable
+        # binding (status="planned"), so it must not be selected.
+        assert [cap.id for cap in selected] == []
         assert all(isinstance(cap, Capability) for cap in selected)
+        assert "cv.benchmarking" in {c.id for c in registry.list() if "benchmarking" in c.applicable_task_types}

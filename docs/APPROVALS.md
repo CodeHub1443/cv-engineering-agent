@@ -27,10 +27,27 @@ comparing against EXP-…" is.
 | Model promotion to "recommended" | ⛔ always | benchmark table vs. baseline |
 | External API spend above threshold | ⛔ always | $ |
 | Writing to any path outside the workspace | ⛔ always | paths |
+| Install/upgrade system drivers or GPU runtime | ⛔ always | what changes, rollback path |
+| Change power/thermal/performance mode | ⛔ always | current vs. target mode, why |
+| Modify system packages or kernel/runtime configuration | ⛔ always | packages/settings affected |
 | Long-running profiling on shared hardware | ⚠️ notify + proceed | duration |
 | Read-only research, retrieval, analysis | ✅ free | — |
 | Code, docs, config, tests inside the repo | ✅ free (still via PR) | — |
 | Dry-run / cost-estimation of any gated action | ✅ free | — |
+
+### Platform-sensitive actions
+
+System-level installation, driver, and performance changes must use a verified
+platform profile (OS, architecture, GPU, driver/runtime state). The agent must not
+execute Linux-specific or Jetson-specific commands on another platform. This applies
+in addition to the approval gates above, not instead of them.
+
+### Data and privacy
+
+The agent must minimize sensitive project-data exposure. Do not send project data to
+an external provider (LLM API, research tool, third-party service) unless the
+operation is authorized, the provider is permitted, and the data-handling policy
+allows it.
 
 ## Thresholds
 

@@ -44,7 +44,7 @@
         "project_kickoff"
       ],
       "prerequisites": [],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -93,7 +93,7 @@
       "prerequisites": [
         "cv.requirements.analysis"
       ],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -149,7 +149,7 @@
       "prerequisites": [
         "cv.requirements.analysis"
       ],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -210,7 +210,7 @@
         "cv.model.selection",
         "cv.dataset.audit"
       ],
-      "status": "available",
+      "status": "planned",
       "risk_level": "medium"
     },
     {
@@ -264,7 +264,7 @@
       "prerequisites": [
         "cv.training.design"
       ],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -325,7 +325,7 @@
       "prerequisites": [
         "cv.evaluation"
       ],
-      "status": "available",
+      "status": "planned",
       "risk_level": "medium"
     },
     {
@@ -374,7 +374,7 @@
         "interpretability"
       ],
       "prerequisites": [],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -451,7 +451,7 @@
         "cv.evaluation",
         "cv.benchmarking"
       ],
-      "status": "available",
+      "status": "planned",
       "risk_level": "high"
     },
     {
@@ -507,7 +507,7 @@
         "planning"
       ],
       "prerequisites": [],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -543,7 +543,7 @@
       "prerequisites": [
         "cv.requirements.analysis"
       ],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -577,7 +577,7 @@
         "planning"
       ],
       "prerequisites": [],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -614,7 +614,7 @@
       "prerequisites": [
         "cv.research"
       ],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -646,7 +646,7 @@
         "execution"
       ],
       "prerequisites": [],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "medium"
     },
     {
@@ -683,7 +683,7 @@
       "prerequisites": [
         "cv.training.design"
       ],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "medium"
     },
     {
@@ -721,7 +721,7 @@
       "prerequisites": [
         "cv.evaluation"
       ],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "medium"
     },
     {
@@ -757,7 +757,7 @@
       "prerequisites": [
         "cv.evaluation"
       ],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -800,7 +800,7 @@
         "cv.benchmarking",
         "cv.deployment.optimization"
       ],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "high"
     },
     {
@@ -829,7 +829,7 @@
         "deployment"
       ],
       "prerequisites": [],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -865,7 +865,7 @@
       "prerequisites": [
         "platform.detect"
       ],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "medium"
     },
     {
@@ -910,7 +910,7 @@
         "platform.detect",
         "cv.baseline.establishment"
       ],
-      "status": "partial",
+      "status": "planned",
       "risk_level": "high"
     }
   ],

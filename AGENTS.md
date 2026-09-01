@@ -39,8 +39,11 @@ normative statement. Never edit or summarize it. Gaps go to
 - Architect sessions produce ADR + interface stubs only.
 
 ## Workflow
-One issue → one branch (`<type>/<n>-<slug>`) → one PR. Never commit to `main`.
-Acceptance test written first and shown failing. Diffs under ~400 lines.
+One issue → one branch (`feature/<owner>/<work>`, or `fix/`/`docs/`/`ci/`/`hotfix/`) →
+one PR targeting `main` directly. Never commit to `main`. There is no intermediate
+development trunk (`dev-munna` is retired); the project owner reviews and merges.
+Full process: `docs/development/GITHUB_FLOW_V1.md`. Acceptance test written first and
+shown failing. Diffs under ~400 lines.
 
 ## Rolling state (before every commit)
 Rewrite `STATUS.md` (≤60 lines, present tense). Append to `JOURNAL.md`, `DECISIONS.md`,

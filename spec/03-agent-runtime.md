@@ -1,11 +1,22 @@
 # CV Engineering Agent — Agent Runtime
 
-**Version:** V1.0  
-**Status:** Foundational specification
+**Version:** V1.1
+**Status:** Technical elaboration of `docs/PROJECT.md` (frozen canon, cited as
+`[P§n]`) and `docs/architecture/OVERVIEW.md`'s Orchestration layer (ADR-0003, not
+yet written). This file does not restate the canon's vision, philosophy, or lifecycle
+diagram — see `docs/PROJECT.md` §6 for those. It elaborates the *runtime execution
+contract* that a future ADR-0003 must formalize.
+
+> **Implementation status:** none of this is built yet. The actual runtime today is
+> `cv_agent/graph/builder.py` — a two-node `START → initialize → END` LangGraph stub.
+> See `docs/state/STATUS.md`. Do not read this file as a description of current
+> behavior.
 
 ## Purpose
 
-Define the execution contract for stateful CV engineering workflows.
+Define the execution contract for stateful CV engineering workflows, for a future
+ADR-0003 (orchestration state + approval interrupts, per `docs/roadmap/ROADMAP.md`
+Phase 1) to formalize.
 
 ## Runtime Model
 
@@ -14,7 +25,7 @@ Request
   ↓
 Load / Create Project State
   ↓
-Discover required lifecycle stages
+Discover required lifecycle stages   [P§6]
   ↓
 LangGraph Workflow
   ↓
@@ -30,19 +41,8 @@ Agent Node
 State + Artifacts + Decision Trace
 ~~~
 
-## Adaptive Lifecycle
-
-The runtime must not assume that every CV project follows every lifecycle stage. It should determine the required stages from project requirements, constraints, evidence, current state, and approved scope.
-
-The canonical product lifecycle is:
-
-~~~text
-DISCOVER → DEFINE → RESEARCH → DESIGN → DATA → BASELINE
-→ TRAIN → EVALUATE → DIAGNOSE → OPTIMIZE → BENCHMARK
-→ DEPLOY → MONITOR → ITERATE
-~~~
-
-The runtime may branch, skip non-required stages, revisit prior stages, pause for information or approval, and resume from checkpoints.
+The lifecycle stages referenced above are `docs/PROJECT.md` §6's canonical sequence
+(elaborated per-stage in `docs/GLOSSARY.md`'s stage table) — not redefined here.
 
 ## State Domains
 

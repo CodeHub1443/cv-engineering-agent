@@ -43,6 +43,12 @@ work, and `CLAUDE.md` does not define *what the project is*.
 Do **not** bulk-read `docs/`. If `STATUS.md` contradicts the repository, stop and say so
 rather than guessing which is right.
 
+Two more trees exist and are not part of this read order — consult them only when the
+task needs them: `spec/*.md` (technical elaborations of specific canon areas — see
+README's document map for which spec file covers what; none describe anything
+implemented except `10-capability-registry.md`) and `docs/development/` (the git
+workflow — read before opening a branch or PR).
+
 ## 3. Hard rules — non-negotiable
 
 Derived from `[P§29]`. If a request conflicts with these, say so and stop. Do not comply
@@ -97,7 +103,10 @@ the system toward any of these, flag it.
 
 1. Read the issue and its governing ADR. No ADR + architectural change ⇒ stop.
 2. Plan first: files, interfaces, tests, and explicitly what you will **not** change.
-3. Branch `<type>/<issue-number>-<slug>`. **Never commit to `main`.**
+3. Branch `feature/<owner>/<work>` (or `fix/`, `docs/`, `ci/`, `hotfix/` — see
+   `docs/development/GITHUB_FLOW_V1.md` §4). **Never commit to `main`.** PRs target
+   `main` directly; the project owner reviews and merges — there is no intermediate
+   development trunk.
 4. Write the acceptance test first, from the issue's acceptance criteria. Show it
    failing.
 5. Implement the minimum that makes it pass. No speculative abstraction. No unrelated

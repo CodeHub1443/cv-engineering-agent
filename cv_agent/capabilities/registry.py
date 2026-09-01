@@ -9,8 +9,15 @@ implement or invoke those capabilities.
 Public interface:
     registry.list()          → list[Capability]
     registry.describe(id)    → Capability
-    registry.check(id)       → dict  (availability report)
-    registry.select(task)    → list[Capability]  (available, matching task type)
+    registry.check(id)       → dict  (declared vs. executable status report)
+    registry.select(task)    → list[Capability]  (executable only, matching task type)
+
+DECLARED CAPABILITY != EXECUTABLE CAPABILITY. Every capability/skill/tool/agent
+returned by list()/describe()/describe_item() is declared — it exists in the JSON
+catalogue. None of that implies it can be invoked. Executability is reported
+separately by check()/check_item() and is currently False/status!="available" for
+everything, because no skill discovery, binding, or resolution mechanism is
+implemented yet (see docs/state/STATUS.md).
 """
 
 from __future__ import annotations
@@ -19,9 +26,31 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Optional
-from importlib.resources.abc import Traversable
 
-CapabilityStatus = Literal["available", "partial", "experimental", "unavailable"]
+try:
+    from importlib.resources.abc import Traversable  # Python 3.12+
+except ImportError:  # pragma: no cover - exercised on Python < 3.12
+    from importlib.abc import Traversable  # Python 3.10-3.11
+
+CapabilityStatus = Literal["planned", "available", "partial", "experimental", "unavailable"]
+"""
+DECLARED CAPABILITY != EXECUTABLE CAPABILITY.
+
+Every entry parsed from the registry JSON is *declared* — it exists in the catalogue
+regardless of status. `status` answers a separate question: does an executable
+binding actually exist?
+
+    planned      — specified (inputs/outputs/relationships declared), but NO
+                   executable skill/tool binding exists in code. This is the
+                   correct status for a capability that is only designed, not built.
+    available    — specified AND has a verified, executable binding end-to-end.
+    partial      — some but not all required bindings are executable.
+    experimental — an executable binding exists but is unverified/unstable.
+    unavailable  — specified but currently broken, blocked, or removed.
+
+Only `available` counts as executable (see `Capability.is_available`). A capability
+must not be reported as executable merely because it is declared in this registry.
+"""
 RiskLevel = Literal["low", "medium", "high"]
 ItemType = Literal["skill", "tool", "agent", "knowledge_source"]
 
@@ -62,7 +91,15 @@ class Capability:
 
     @property
     def is_available(self) -> bool:
-        return self.status in ("available", "partial")
+        """
+        True only if a verified, executable binding exists (status == "available").
+
+        "partial", "experimental", "planned", and "unavailable" are all NOT
+        executable — a capability being declared (present in this registry with
+        skills/tools listed) is not the same as it being invocable. See the
+        CapabilityStatus docstring above.
+        """
+        return self.status == "available"
 
 
 @dataclass(frozen=True)
@@ -158,12 +195,25 @@ class CapabilityRegistry:
         return self._capabilities[capability_id]
 
     def check(self, capability_id: str) -> dict[str, Any]:
+        """
+        Report a capability's declared status and executable availability.
+
+        DECLARED CAPABILITY != EXECUTABLE CAPABILITY: `declared` is always True for
+        any ID this method returns (it exists in the registry). `executable` is
+        True only when `status == "available"` — a verified binding exists. Do not
+        treat `declared` as a signal that the capability can be invoked.
+        """
         self._ensure_loaded()
         cap = self.describe(capability_id)
         missing_prereqs = [p for p in cap.prerequisites if p in self._capabilities and not self._capabilities[p].is_available]
-        return {"capability_id": capability_id, "available": cap.is_available,
-                "status": cap.status, "risk_level": cap.risk_level,
-                "reason": f"Registry status is {cap.status!r}.",
+        reason = (
+            f"Executable binding verified (status={cap.status!r})."
+            if cap.is_available
+            else f"No executable binding: status={cap.status!r}."
+        )
+        return {"capability_id": capability_id, "declared": True,
+                "executable": cap.is_available, "status": cap.status,
+                "risk_level": cap.risk_level, "reason": reason,
                 "missing_prerequisites": missing_prereqs}
 
     def select(self, task_type: str, *, category: Optional[str] = None) -> list[Capability]:
@@ -180,8 +230,8 @@ class CapabilityRegistry:
             items = [i for i in items if i.item_type == item_type]
         return sorted(items, key=lambda i: (i.item_type, i.id))
 
-    def describe_item(self, item_id: str, *, item_type: ItemType) -> RegistryItem:
-        """Return a supporting registry item using type-aware identity."""
+    def describe_item(self, item_type: ItemType, item_id: str) -> RegistryItem:
+        """Return a supporting item using its type-safe registry identity."""
         self._ensure_loaded()
         key = (item_type, item_id)
         if key not in self._items:
@@ -189,26 +239,24 @@ class CapabilityRegistry:
             raise KeyError(f"Unknown {item_type} {item_id!r}. Registered: {available}")
         return self._items[key]
 
-    def check_item(self, item_id: str, *, item_type: ItemType) -> dict[str, Any]:
-        """Return metadata and availability information for a supporting item."""
-        item = self.describe_item(item_id, item_type=item_type)
-        return {"item_id": item.id, "item_type": item.item_type, "available": True, "name": item.name}
-
-    def describe_item(self, item_type: ItemType, item_id: str) -> RegistryItem:
-        """Return a supporting item using its type-safe registry identity."""
-        self._ensure_loaded()
-        key = (item_type, item_id)
-        if key not in self._items:
-            raise KeyError(f"Unknown {item_type} {item_id!r}.")
-        return self._items[key]
-
     def check_item(self, item_type: ItemType, item_id: str) -> dict[str, Any]:
-        """Report the presence of a typed registry item without probing it."""
+        """
+        Report whether a registered skill/tool/agent/knowledge-source is executable.
+
+        Being present in the registry means the item is *declared* — the catalogue
+        knows about it. It does NOT mean the item is *executable*: no discovery or
+        binding mechanism exists yet to invoke a skill, run a tool, or dispatch to
+        an agent (that is SkillSource / CapabilityResolver territory, not built).
+        This method must not claim `executable=True` for an item merely because it
+        has a registry entry.
+        """
         item = self.describe_item(item_type, item_id)
         return {
             "item_id": item.id,
             "item_type": item.item_type,
-            "available": True,
+            "declared": True,
+            "executable": False,
+            "reason": "no executable binding or discovery mechanism implemented",
         }
 
     @property

@@ -83,6 +83,26 @@ Each capability should define:
 - `status`
 - `risk_level`
 
+### `status` semantics — DECLARED CAPABILITY != EXECUTABLE CAPABILITY
+
+Every entry in this registry is **declared**: it exists in the catalogue with a
+schema-complete description (inputs, outputs, relevant skills/tools/agents). That is
+a statement about specification, not about runnability. `status` answers a separate
+question — does an executable binding actually exist — and only one value counts as
+executable:
+
+| Status | Meaning | Executable? |
+|---|---|---|
+| `planned` | Specified, but no executable skill/tool binding exists in code. The correct status for a capability that is designed but not built. | No |
+| `available` | Specified **and** has a verified, executable binding end-to-end. | **Yes** |
+| `partial` | Some but not all required bindings are executable. | No |
+| `experimental` | An executable binding exists but is unverified/unstable. | No |
+| `unavailable` | Specified but currently broken, blocked, or removed. | No |
+
+A capability must never be reported or treated as executable merely because it has a
+registry entry. As of this writing, every capability in `capability_registry.json`
+is `planned` — none has an executable binding. See `docs/state/STATUS.md`.
+
 ## Capability Families
 
 ### Planning

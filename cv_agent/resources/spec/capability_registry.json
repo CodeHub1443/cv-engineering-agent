@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "description": "CV Engineering Agent â€” Capability Registry. Machine-readable source. Keep consistent with spec/10-capability-registry.md.",
+  "description": "CV Engineering Agent — Capability Registry. Machine-readable source. Keep consistent with spec/10-capability-registry.md.",
   "capabilities": [
     {
       "id": "cv.requirements.analysis",
@@ -8,20 +8,43 @@
       "category": "planning",
       "description": "Analyse a Computer Vision problem statement to produce structured requirements: task type, performance targets, hardware constraints, dataset requirements, and deployment context.",
       "required_inputs": [
-        {"name": "problem_statement", "type": "string", "description": "Natural language description of the CV problem"},
-        {"name": "hardware_targets", "type": "list[string]", "description": "Target deployment hardware (e.g., A100, Jetson Orin, edge)"}
+        {
+          "name": "problem_statement",
+          "type": "string",
+          "description": "Natural language description of the CV problem"
+        },
+        {
+          "name": "hardware_targets",
+          "type": "list[string]",
+          "description": "Target deployment hardware (e.g., A100, Jetson Orin, edge)"
+        }
       ],
       "outputs": [
-        {"name": "requirements_doc", "type": "document", "description": "Structured requirements: task type, KPIs, constraints"},
-        {"name": "feasibility_notes", "type": "document", "description": "Initial feasibility observations"}
+        {
+          "name": "requirements_doc",
+          "type": "document",
+          "description": "Structured requirements: task type, KPIs, constraints"
+        },
+        {
+          "name": "feasibility_notes",
+          "type": "document",
+          "description": "Initial feasibility observations"
+        }
       ],
-      "relevant_skills": ["problem-decomposition", "constraint-analysis"],
+      "relevant_skills": [
+        "problem-decomposition",
+        "constraint-analysis"
+      ],
       "relevant_tools": [],
-      "relevant_agents": ["claude-code"],
+      "relevant_agents": [],
       "knowledge_sources": [],
-      "applicable_task_types": ["planning", "scoping", "project_kickoff"],
+      "applicable_task_types": [
+        "planning",
+        "scoping",
+        "project_kickoff"
+      ],
       "prerequisites": [],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -30,20 +53,47 @@
       "category": "data",
       "description": "Inspect and characterise a Computer Vision dataset: class distribution, image quality, annotation consistency, coverage gaps, and data-leakage risks.",
       "required_inputs": [
-        {"name": "dataset_path", "type": "path", "description": "Path or URI to the dataset"},
-        {"name": "annotation_format", "type": "string", "description": "Annotation format (COCO, VOC, YOLO, custom)"}
+        {
+          "name": "dataset_path",
+          "type": "path",
+          "description": "Path or URI to the dataset"
+        },
+        {
+          "name": "annotation_format",
+          "type": "string",
+          "description": "Annotation format (COCO, VOC, YOLO, custom)"
+        }
       ],
       "outputs": [
-        {"name": "audit_report", "type": "document", "description": "Dataset statistics, quality issues, and recommendations"},
-        {"name": "split_summary", "type": "table", "description": "Train/val/test split statistics and class balance"}
+        {
+          "name": "audit_report",
+          "type": "document",
+          "description": "Dataset statistics, quality issues, and recommendations"
+        },
+        {
+          "name": "split_summary",
+          "type": "table",
+          "description": "Train/val/test split statistics and class balance"
+        }
       ],
-      "relevant_skills": ["dataset-analysis", "label-quality-assessment"],
-      "relevant_tools": ["nvidia-dali-inspect"],
-      "relevant_agents": ["claude-code"],
+      "relevant_skills": [
+        "dataset-analysis",
+        "label-quality-assessment"
+      ],
+      "relevant_tools": [
+        "nvidia-dali-inspect"
+      ],
+      "relevant_agents": [],
       "knowledge_sources": [],
-      "applicable_task_types": ["data_preparation", "data_quality", "dataset_review"],
-      "prerequisites": ["cv.requirements.analysis"],
-      "status": "available",
+      "applicable_task_types": [
+        "data_preparation",
+        "data_quality",
+        "dataset_review"
+      ],
+      "prerequisites": [
+        "cv.requirements.analysis"
+      ],
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -52,21 +102,54 @@
       "category": "modeling",
       "description": "Evaluate and recommend CV model architectures for a given task, considering accuracy/latency trade-offs, hardware targets, and available training data volume.",
       "required_inputs": [
-        {"name": "task_type", "type": "string", "description": "CV task (detection, segmentation, classification, pose, OCR, etc.)"},
-        {"name": "requirements", "type": "document", "description": "Structured requirements from cv.requirements.analysis"},
-        {"name": "data_volume", "type": "integer", "description": "Approximate number of labelled training samples"}
+        {
+          "name": "task_type",
+          "type": "string",
+          "description": "CV task (detection, segmentation, classification, pose, OCR, etc.)"
+        },
+        {
+          "name": "requirements",
+          "type": "document",
+          "description": "Structured requirements from cv.requirements.analysis"
+        },
+        {
+          "name": "data_volume",
+          "type": "integer",
+          "description": "Approximate number of labelled training samples"
+        }
       ],
       "outputs": [
-        {"name": "architecture_shortlist", "type": "table", "description": "Ranked architectures with trade-off summary"},
-        {"name": "recommendation", "type": "document", "description": "Recommended model and justification"}
+        {
+          "name": "architecture_shortlist",
+          "type": "table",
+          "description": "Ranked architectures with trade-off summary"
+        },
+        {
+          "name": "recommendation",
+          "type": "document",
+          "description": "Recommended model and justification"
+        }
       ],
-      "relevant_skills": ["architecture-survey", "benchmark-comparison", "transfer-learning"],
+      "relevant_skills": [
+        "architecture-survey",
+        "benchmark-comparison",
+        "transfer-learning"
+      ],
       "relevant_tools": [],
-      "relevant_agents": ["claude-code"],
-      "knowledge_sources": ["paperswithcode-cv", "nvidia-model-zoo"],
-      "applicable_task_types": ["model_selection", "architecture_review", "planning"],
-      "prerequisites": ["cv.requirements.analysis"],
-      "status": "available",
+      "relevant_agents": [],
+      "knowledge_sources": [
+        "paperswithcode-cv",
+        "nvidia-model-zoo"
+      ],
+      "applicable_task_types": [
+        "model_selection",
+        "architecture_review",
+        "planning"
+      ],
+      "prerequisites": [
+        "cv.requirements.analysis"
+      ],
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -75,21 +158,59 @@
       "category": "modeling",
       "description": "Design a training pipeline: data augmentation strategy, loss functions, optimiser, LR schedule, mixed-precision settings, and distributed training topology.",
       "required_inputs": [
-        {"name": "model_architecture", "type": "string", "description": "Selected model architecture or checkpoint"},
-        {"name": "dataset_info", "type": "document", "description": "Dataset audit summary"},
-        {"name": "compute_budget", "type": "document", "description": "Available GPU hours, memory, and parallelism"}
+        {
+          "name": "model_architecture",
+          "type": "string",
+          "description": "Selected model architecture or checkpoint"
+        },
+        {
+          "name": "dataset_info",
+          "type": "document",
+          "description": "Dataset audit summary"
+        },
+        {
+          "name": "compute_budget",
+          "type": "document",
+          "description": "Available GPU hours, memory, and parallelism"
+        }
       ],
       "outputs": [
-        {"name": "training_config", "type": "config", "description": "Complete training configuration (YAML/TOML)"},
-        {"name": "pipeline_code", "type": "code", "description": "Training script skeleton with annotated decision points"}
+        {
+          "name": "training_config",
+          "type": "config",
+          "description": "Complete training configuration (YAML/TOML)"
+        },
+        {
+          "name": "pipeline_code",
+          "type": "code",
+          "description": "Training script skeleton with annotated decision points"
+        }
       ],
-      "relevant_skills": ["pytorch-training", "nvidia-dali", "apex-amp", "distributed-training"],
-      "relevant_tools": ["nvidia-nsight-systems", "pytorch-profiler"],
-      "relevant_agents": ["claude-code", "codex"],
-      "knowledge_sources": ["pytorch-docs", "nvidia-training-guides"],
-      "applicable_task_types": ["model_training", "pipeline_design", "experiment_setup"],
-      "prerequisites": ["cv.model.selection", "cv.dataset.audit"],
-      "status": "available",
+      "relevant_skills": [
+        "pytorch-training",
+        "nvidia-dali",
+        "apex-amp",
+        "distributed-training"
+      ],
+      "relevant_tools": [
+        "nvidia-nsight-systems",
+        "pytorch-profiler"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [
+        "pytorch-docs",
+        "nvidia-training-guides"
+      ],
+      "applicable_task_types": [
+        "model_training",
+        "pipeline_design",
+        "experiment_setup"
+      ],
+      "prerequisites": [
+        "cv.model.selection",
+        "cv.dataset.audit"
+      ],
+      "status": "planned",
       "risk_level": "medium"
     },
     {
@@ -98,21 +219,52 @@
       "category": "evaluation",
       "description": "Evaluate a trained CV model against a held-out test set. Compute task-appropriate metrics (mAP, mIoU, top-k accuracy, FPS) and produce per-class breakdowns, confusion analysis, and failure-case summaries.",
       "required_inputs": [
-        {"name": "model_checkpoint", "type": "path", "description": "Path to trained model checkpoint"},
-        {"name": "test_dataset", "type": "path", "description": "Path to held-out test dataset"},
-        {"name": "metric_config", "type": "config", "description": "Metrics to compute and their thresholds"}
+        {
+          "name": "model_checkpoint",
+          "type": "path",
+          "description": "Path to trained model checkpoint"
+        },
+        {
+          "name": "test_dataset",
+          "type": "path",
+          "description": "Path to held-out test dataset"
+        },
+        {
+          "name": "metric_config",
+          "type": "config",
+          "description": "Metrics to compute and their thresholds"
+        }
       ],
       "outputs": [
-        {"name": "metrics_report", "type": "document", "description": "Metric values, per-class breakdown, and comparison to baseline"},
-        {"name": "failure_analysis", "type": "document", "description": "Failure cases, confusion matrix, and error patterns"}
+        {
+          "name": "metrics_report",
+          "type": "document",
+          "description": "Metric values, per-class breakdown, and comparison to baseline"
+        },
+        {
+          "name": "failure_analysis",
+          "type": "document",
+          "description": "Failure cases, confusion matrix, and error patterns"
+        }
       ],
-      "relevant_skills": ["metric-computation", "error-analysis"],
-      "relevant_tools": ["nvidia-nsight-systems"],
-      "relevant_agents": ["claude-code"],
+      "relevant_skills": [
+        "metric-computation",
+        "error-analysis"
+      ],
+      "relevant_tools": [
+        "nvidia-nsight-systems"
+      ],
+      "relevant_agents": [],
       "knowledge_sources": [],
-      "applicable_task_types": ["model_evaluation", "performance_analysis", "qa"],
-      "prerequisites": ["cv.training.design"],
-      "status": "available",
+      "applicable_task_types": [
+        "model_evaluation",
+        "performance_analysis",
+        "qa"
+      ],
+      "prerequisites": [
+        "cv.training.design"
+      ],
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -121,21 +273,59 @@
       "category": "evaluation",
       "description": "Run controlled performance benchmarks across hardware targets: throughput, latency percentiles, memory footprint, and power consumption.",
       "required_inputs": [
-        {"name": "model_artifact", "type": "path", "description": "Model file (checkpoint, ONNX, or TRT engine)"},
-        {"name": "hardware_targets", "type": "list[string]", "description": "Target hardware to benchmark on"},
-        {"name": "benchmark_config", "type": "config", "description": "Batch sizes, precision modes, warmup settings"}
+        {
+          "name": "model_artifact",
+          "type": "path",
+          "description": "Model file (checkpoint, ONNX, or TRT engine)"
+        },
+        {
+          "name": "hardware_targets",
+          "type": "list[string]",
+          "description": "Target hardware to benchmark on"
+        },
+        {
+          "name": "benchmark_config",
+          "type": "config",
+          "description": "Batch sizes, precision modes, warmup settings"
+        }
       ],
       "outputs": [
-        {"name": "benchmark_report", "type": "document", "description": "Latency (p50/p95/p99), throughput, memory, power per target"},
-        {"name": "comparison_table", "type": "table", "description": "Cross-hardware performance comparison"}
+        {
+          "name": "benchmark_report",
+          "type": "document",
+          "description": "Latency (p50/p95/p99), throughput, memory, power per target"
+        },
+        {
+          "name": "comparison_table",
+          "type": "table",
+          "description": "Cross-hardware performance comparison"
+        }
       ],
-      "relevant_skills": ["trt-profiling", "triton-perf-analyzer", "jetson-power-measurement"],
-      "relevant_tools": ["trt-profile", "triton-perf-analyzer", "nvidia-smi", "tegrastats"],
-      "relevant_agents": ["claude-code", "cuda-agent"],
-      "knowledge_sources": ["tensorrt-docs", "triton-inference-server-docs"],
-      "applicable_task_types": ["benchmarking", "performance_analysis", "hardware_evaluation"],
-      "prerequisites": ["cv.evaluation"],
-      "status": "available",
+      "relevant_skills": [
+        "trt-profiling",
+        "triton-perf-analyzer",
+        "jetson-power-measurement"
+      ],
+      "relevant_tools": [
+        "trt-profile",
+        "triton-perf-analyzer",
+        "nvidia-smi",
+        "tegrastats"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [
+        "tensorrt-docs",
+        "triton-inference-server-docs"
+      ],
+      "applicable_task_types": [
+        "benchmarking",
+        "performance_analysis",
+        "hardware_evaluation"
+      ],
+      "prerequisites": [
+        "cv.evaluation"
+      ],
+      "status": "planned",
       "risk_level": "medium"
     },
     {
@@ -144,20 +334,47 @@
       "category": "analysis",
       "description": "Inspect model internals: parameter counts, layer structure, FLOPs, activation statistics, gradient flow, and interpretability visualisations (GradCAM, feature maps, attention maps).",
       "required_inputs": [
-        {"name": "model_checkpoint", "type": "path", "description": "Path to model checkpoint or ONNX file"},
-        {"name": "sample_input", "type": "tensor", "description": "Representative input tensor for shape inference"}
+        {
+          "name": "model_checkpoint",
+          "type": "path",
+          "description": "Path to model checkpoint or ONNX file"
+        },
+        {
+          "name": "sample_input",
+          "type": "tensor",
+          "description": "Representative input tensor for shape inference"
+        }
       ],
       "outputs": [
-        {"name": "model_profile", "type": "document", "description": "Parameter count, FLOPs, layer breakdown, memory estimate"},
-        {"name": "visualisations", "type": "artifacts", "description": "Feature maps, GradCAM, attention visualisations"}
+        {
+          "name": "model_profile",
+          "type": "document",
+          "description": "Parameter count, FLOPs, layer breakdown, memory estimate"
+        },
+        {
+          "name": "visualisations",
+          "type": "artifacts",
+          "description": "Feature maps, GradCAM, attention visualisations"
+        }
       ],
-      "relevant_skills": ["model-surgery", "gradcam", "flop-counting"],
-      "relevant_tools": ["pytorch-summary", "netron"],
-      "relevant_agents": ["claude-code"],
+      "relevant_skills": [
+        "model-surgery",
+        "gradcam",
+        "flop-counting"
+      ],
+      "relevant_tools": [
+        "pytorch-summary",
+        "netron"
+      ],
+      "relevant_agents": [],
       "knowledge_sources": [],
-      "applicable_task_types": ["model_analysis", "debugging", "interpretability"],
+      "applicable_task_types": [
+        "model_analysis",
+        "debugging",
+        "interpretability"
+      ],
       "prerequisites": [],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
     },
     {
@@ -166,23 +383,75 @@
       "category": "deployment",
       "description": "Optimise a trained CV model for target deployment: TensorRT engine building, quantisation (INT8/FP16), pruning, kernel fusion, and DeepStream pipeline integration.",
       "required_inputs": [
-        {"name": "model_artifact", "type": "path", "description": "ONNX or framework checkpoint to optimise"},
-        {"name": "target_hardware", "type": "string", "description": "Deployment target (e.g., A100, Jetson Orin AGX)"},
-        {"name": "precision_mode", "type": "string", "description": "FP32 / FP16 / INT8"},
-        {"name": "calibration_dataset", "type": "path", "description": "Calibration data for INT8 quantisation (if applicable)"}
+        {
+          "name": "model_artifact",
+          "type": "path",
+          "description": "ONNX or framework checkpoint to optimise"
+        },
+        {
+          "name": "target_hardware",
+          "type": "string",
+          "description": "Deployment target (e.g., A100, Jetson Orin AGX)"
+        },
+        {
+          "name": "precision_mode",
+          "type": "string",
+          "description": "FP32 / FP16 / INT8"
+        },
+        {
+          "name": "calibration_dataset",
+          "type": "path",
+          "description": "Calibration data for INT8 quantisation (if applicable)"
+        }
       ],
       "outputs": [
-        {"name": "trt_engine", "type": "artifact", "description": "Optimised TensorRT engine file"},
-        {"name": "optimization_report", "type": "document", "description": "Speedup, accuracy delta, and configuration details"},
-        {"name": "deepstream_config", "type": "config", "description": "DeepStream pipeline configuration (if applicable)"}
+        {
+          "name": "trt_engine",
+          "type": "artifact",
+          "description": "Optimised TensorRT engine file"
+        },
+        {
+          "name": "optimization_report",
+          "type": "document",
+          "description": "Speedup, accuracy delta, and configuration details"
+        },
+        {
+          "name": "deepstream_config",
+          "type": "config",
+          "description": "DeepStream pipeline configuration (if applicable)"
+        }
       ],
-      "relevant_skills": ["tensorrt", "deepstream", "nvidia-model-optimizer", "cuda-agent", "jetson"],
-      "relevant_tools": ["trt-build", "trt-profile", "deepstream-runtime", "nvidia-profiling-tools", "tao-toolkit"],
-      "relevant_agents": ["claude-code", "cuda-agent"],
-      "knowledge_sources": ["tensorrt-docs", "deepstream-docs", "jetson-developer-guide"],
-      "applicable_task_types": ["deployment", "optimization", "quantization", "edge_deployment"],
-      "prerequisites": ["cv.evaluation", "cv.benchmarking"],
-      "status": "available",
+      "relevant_skills": [
+        "tensorrt",
+        "deepstream",
+        "nvidia-model-optimizer",
+        "cuda-agent",
+        "jetson"
+      ],
+      "relevant_tools": [
+        "trt-build",
+        "trt-profile",
+        "deepstream-runtime",
+        "nvidia-profiling-tools",
+        "tao-toolkit"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [
+        "tensorrt-docs",
+        "deepstream-docs",
+        "jetson-developer-guide"
+      ],
+      "applicable_task_types": [
+        "deployment",
+        "optimization",
+        "quantization",
+        "edge_deployment"
+      ],
+      "prerequisites": [
+        "cv.evaluation",
+        "cv.benchmarking"
+      ],
+      "status": "planned",
       "risk_level": "high"
     },
     {
@@ -191,85 +460,781 @@
       "category": "research",
       "description": "Survey the research literature for a given CV problem: identify state-of-the-art methods, summarise key papers, compare approaches, and produce a structured literature review with implementation links.",
       "required_inputs": [
-        {"name": "research_query", "type": "string", "description": "Topic or problem to survey"},
-        {"name": "recency_window", "type": "string", "description": "How recent the papers should be (e.g., '2 years')"}
+        {
+          "name": "research_query",
+          "type": "string",
+          "description": "Topic or problem to survey"
+        },
+        {
+          "name": "recency_window",
+          "type": "string",
+          "description": "How recent the papers should be (e.g., '2 years')"
+        }
       ],
       "outputs": [
-        {"name": "literature_review", "type": "document", "description": "Structured survey of methods, results, and comparisons"},
-        {"name": "sota_table", "type": "table", "description": "State-of-the-art benchmark results table"},
-        {"name": "implementation_links", "type": "list", "description": "Links to reference implementations and pretrained models"}
+        {
+          "name": "literature_review",
+          "type": "document",
+          "description": "Structured survey of methods, results, and comparisons"
+        },
+        {
+          "name": "sota_table",
+          "type": "table",
+          "description": "State-of-the-art benchmark results table"
+        },
+        {
+          "name": "implementation_links",
+          "type": "list",
+          "description": "Links to reference implementations and pretrained models"
+        }
       ],
-      "relevant_skills": ["arxiv-search", "paperswithcode-search", "citation-analysis"],
+      "relevant_skills": [
+        "arxiv-search",
+        "paperswithcode-search",
+        "citation-analysis"
+      ],
       "relevant_tools": [],
-      "relevant_agents": ["claude-code"],
-      "knowledge_sources": ["arxiv-cv", "paperswithcode-cv", "semantic-scholar"],
-      "applicable_task_types": ["research", "literature_review", "sota_analysis", "planning"],
+      "relevant_agents": [],
+      "knowledge_sources": [
+        "arxiv-cv",
+        "paperswithcode-cv",
+        "semantic-scholar"
+      ],
+      "applicable_task_types": [
+        "research",
+        "literature_review",
+        "sota_analysis",
+        "planning"
+      ],
       "prerequisites": [],
-      "status": "available",
+      "status": "planned",
       "risk_level": "low"
+    },
+    {
+      "id": "cv.problem.formulation",
+      "name": "CV Problem Formulation",
+      "category": "planning",
+      "description": "Translate business requirements into an explicit CV problem formulation and system-level event definition.",
+      "required_inputs": [
+        {
+          "name": "requirements",
+          "type": "document",
+          "description": "Structured requirements and unknowns"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "problem_formulation",
+          "type": "document",
+          "description": "Chosen CV formulation with alternatives, assumptions and rationale"
+        }
+      ],
+      "relevant_skills": [
+        "problem-decomposition",
+        "architecture-survey"
+      ],
+      "relevant_tools": [],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "planning",
+        "problem_formulation"
+      ],
+      "prerequisites": [
+        "cv.requirements.analysis"
+      ],
+      "status": "planned",
+      "risk_level": "low"
+    },
+    {
+      "id": "cv.knowledge.retrieval",
+      "name": "CV Knowledge Retrieval",
+      "category": "knowledge",
+      "description": "Retrieve grounded project, technology and research knowledge with provenance and freshness metadata.",
+      "required_inputs": [
+        {
+          "name": "query",
+          "type": "string",
+          "description": "Task-specific knowledge query"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "evidence_set",
+          "type": "document",
+          "description": "Ranked evidence records with provenance"
+        }
+      ],
+      "relevant_skills": [],
+      "relevant_tools": [
+        "knowledge.search"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "research",
+        "architecture_review",
+        "planning"
+      ],
+      "prerequisites": [],
+      "status": "planned",
+      "risk_level": "low"
+    },
+    {
+      "id": "cv.research.verify",
+      "name": "CV Research Verification",
+      "category": "research",
+      "description": "Verify material claims using authoritative or primary evidence and record verification status.",
+      "required_inputs": [
+        {
+          "name": "claims",
+          "type": "document",
+          "description": "Candidate claims and source references"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "verification_report",
+          "type": "document",
+          "description": "Verified, partially verified, contradicted and unverified claims"
+        }
+      ],
+      "relevant_skills": [
+        "citation-analysis"
+      ],
+      "relevant_tools": [
+        "research.fetch"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "research",
+        "sota_analysis"
+      ],
+      "prerequisites": [
+        "cv.research"
+      ],
+      "status": "planned",
+      "risk_level": "low"
+    },
+    {
+      "id": "cv.skill.resolution",
+      "name": "Capability and Skill Resolution",
+      "category": "orchestration",
+      "description": "Resolve a selected capability into applicable installed skills, tools, workers and knowledge sources.",
+      "required_inputs": [
+        {
+          "name": "task",
+          "type": "document",
+          "description": "Task context and selected capability"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "execution_plan",
+          "type": "document",
+          "description": "Resolved skills, tools, workers, prerequisites and policy requirements"
+        }
+      ],
+      "relevant_skills": [],
+      "relevant_tools": [],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "orchestration",
+        "planning",
+        "execution"
+      ],
+      "prerequisites": [],
+      "status": "planned",
+      "risk_level": "medium"
+    },
+    {
+      "id": "cv.experiment.management",
+      "name": "CV Experiment Management",
+      "category": "experimentation",
+      "description": "Create, track, compare and lineage-link reproducible CV experiments and decisions.",
+      "required_inputs": [
+        {
+          "name": "experiment_definition",
+          "type": "document",
+          "description": "Experiment objective, hypothesis, configuration and budget"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "experiment_record",
+          "type": "document",
+          "description": "Persistent experiment record with lineage and results"
+        }
+      ],
+      "relevant_skills": [],
+      "relevant_tools": [
+        "experiment.create",
+        "experiment.compare"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "experiment_setup",
+        "training",
+        "optimization"
+      ],
+      "prerequisites": [
+        "cv.training.design"
+      ],
+      "status": "planned",
+      "risk_level": "medium"
+    },
+    {
+      "id": "cv.baseline.establishment",
+      "name": "CV Baseline Establishment",
+      "category": "evaluation",
+      "description": "Create a reproducible baseline configuration and measurement record before optimization.",
+      "required_inputs": [
+        {
+          "name": "evaluation_definition",
+          "type": "document",
+          "description": "Task metrics and evaluation protocol"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "baseline_record",
+          "type": "document",
+          "description": "Immutable reference configuration and measurements"
+        }
+      ],
+      "relevant_skills": [
+        "metric-computation"
+      ],
+      "relevant_tools": [
+        "pytorch-profiler"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "baseline",
+        "benchmarking",
+        "optimization"
+      ],
+      "prerequisites": [
+        "cv.evaluation"
+      ],
+      "status": "planned",
+      "risk_level": "medium"
+    },
+    {
+      "id": "cv.failure.analysis",
+      "name": "CV Failure Analysis",
+      "category": "evaluation",
+      "description": "Classify model and system failures, identify probable causes and generate targeted follow-up experiments.",
+      "required_inputs": [
+        {
+          "name": "evaluation_results",
+          "type": "document",
+          "description": "Metrics and failure cases"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "failure_analysis",
+          "type": "document",
+          "description": "Failure taxonomy, root-cause hypotheses and remediation proposals"
+        }
+      ],
+      "relevant_skills": [
+        "error-analysis"
+      ],
+      "relevant_tools": [],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "failure_analysis",
+        "debugging",
+        "optimization"
+      ],
+      "prerequisites": [
+        "cv.evaluation"
+      ],
+      "status": "planned",
+      "risk_level": "low"
+    },
+    {
+      "id": "cv.deployment.validation",
+      "name": "CV Deployment Validation",
+      "category": "deployment",
+      "description": "Validate a deployed CV system against functional, performance, reliability and operational acceptance criteria.",
+      "required_inputs": [
+        {
+          "name": "deployment_artifact",
+          "type": "path",
+          "description": "Deployment package or runtime artifact"
+        },
+        {
+          "name": "acceptance_criteria",
+          "type": "document",
+          "description": "Production acceptance criteria"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "deployment_validation",
+          "type": "document",
+          "description": "Validation results and release recommendation"
+        }
+      ],
+      "relevant_skills": [
+        "trt-profiling"
+      ],
+      "relevant_tools": [
+        "deployment.validate"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "deployment",
+        "production_validation"
+      ],
+      "prerequisites": [
+        "cv.benchmarking",
+        "cv.deployment.optimization"
+      ],
+      "status": "planned",
+      "risk_level": "high"
+    },
+    {
+      "id": "platform.detect",
+      "name": "Platform Detection",
+      "category": "platform",
+      "description": "Detect operating system, architecture, CPU, GPU/accelerator, drivers, runtimes and Jetson-specific platform metadata.",
+      "required_inputs": [],
+      "outputs": [
+        {
+          "name": "platform_profile",
+          "type": "document",
+          "description": "Structured verified platform profile"
+        }
+      ],
+      "relevant_skills": [],
+      "relevant_tools": [
+        "platform.detect"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "platform_detection",
+        "installation",
+        "training",
+        "deployment"
+      ],
+      "prerequisites": [],
+      "status": "planned",
+      "risk_level": "low"
+    },
+    {
+      "id": "platform.verify",
+      "name": "Platform Verification",
+      "category": "platform",
+      "description": "Verify that required drivers, runtimes, toolkits and framework accelerator backends are installed, compatible and usable.",
+      "required_inputs": [
+        {
+          "name": "platform_profile",
+          "type": "document",
+          "description": "Detected platform profile"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "compatibility_report",
+          "type": "document",
+          "description": "Verified compatibility and missing/incompatible components"
+        }
+      ],
+      "relevant_skills": [],
+      "relevant_tools": [
+        "platform.verify"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "installation",
+        "compatibility",
+        "deployment"
+      ],
+      "prerequisites": [
+        "platform.detect"
+      ],
+      "status": "planned",
+      "risk_level": "medium"
+    },
+    {
+      "id": "platform.optimization",
+      "name": "Platform Optimization",
+      "category": "platform",
+      "description": "Select and validate platform-specific acceleration, precision, profiling, resource and runtime optimizations against measured constraints.",
+      "required_inputs": [
+        {
+          "name": "platform_profile",
+          "type": "document",
+          "description": "Verified platform profile"
+        },
+        {
+          "name": "baseline",
+          "type": "document",
+          "description": "Baseline measurements"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "optimization_profile",
+          "type": "document",
+          "description": "Platform-specific optimization plan and measured result"
+        }
+      ],
+      "relevant_skills": [
+        "trt-profiling",
+        "jetson-power-measurement"
+      ],
+      "relevant_tools": [
+        "platform.optimize"
+      ],
+      "relevant_agents": [],
+      "knowledge_sources": [],
+      "applicable_task_types": [
+        "optimization",
+        "benchmarking",
+        "deployment"
+      ],
+      "prerequisites": [
+        "platform.detect",
+        "cv.baseline.establishment"
+      ],
+      "status": "planned",
+      "risk_level": "high"
     }
   ],
   "skills": [
-    {"id": "problem-decomposition", "name": "Problem Decomposition", "description": "Break a high-level CV problem into structured sub-tasks and requirements."},
-    {"id": "constraint-analysis", "name": "Constraint Analysis", "description": "Identify hardware, latency, memory, and accuracy constraints from a problem statement."},
-    {"id": "dataset-analysis", "name": "Dataset Analysis", "description": "Statistical characterisation of image datasets including class balance, quality, and splits."},
-    {"id": "label-quality-assessment", "name": "Label Quality Assessment", "description": "Detect annotation errors, inconsistencies, and coverage gaps in labelled datasets."},
-    {"id": "architecture-survey", "name": "Architecture Survey", "description": "Systematic comparison of CV model architectures for a target task and hardware."},
-    {"id": "benchmark-comparison", "name": "Benchmark Comparison", "description": "Compare model performance across published benchmarks (ImageNet, COCO, ADE20K, etc.)."},
-    {"id": "transfer-learning", "name": "Transfer Learning", "description": "Apply pretrained weights and fine-tuning strategies for downstream CV tasks."},
-    {"id": "pytorch-training", "name": "PyTorch Training", "description": "Design and execute PyTorch training loops with callbacks, logging, and checkpointing."},
-    {"id": "nvidia-dali", "name": "NVIDIA DALI", "description": "High-performance GPU data loading and augmentation pipeline using NVIDIA DALI."},
-    {"id": "apex-amp", "name": "Apex AMP / torch.cuda.amp", "description": "Mixed-precision training using NVIDIA Apex or native PyTorch AMP."},
-    {"id": "distributed-training", "name": "Distributed Training", "description": "Multi-GPU and multi-node training with DDP, FSDP, or DeepSpeed."},
-    {"id": "metric-computation", "name": "Metric Computation", "description": "Compute task-specific CV metrics: mAP, mIoU, top-k accuracy, F1, FPS."},
-    {"id": "error-analysis", "name": "Error Analysis", "description": "Systematic analysis of model failure modes, confusion patterns, and edge cases."},
-    {"id": "trt-profiling", "name": "TensorRT Profiling", "description": "Profile TensorRT engines: layer latency, memory, and throughput analysis."},
-    {"id": "triton-perf-analyzer", "name": "Triton Performance Analyzer", "description": "Benchmark Triton Inference Server deployments for throughput and latency."},
-    {"id": "jetson-power-measurement", "name": "Jetson Power Measurement", "description": "Measure power consumption on NVIDIA Jetson using tegrastats and jtop."},
-    {"id": "model-surgery", "name": "Model Surgery", "description": "Inspect, modify, and analyse model layers, weights, and architecture programmatically."},
-    {"id": "gradcam", "name": "GradCAM / Interpretability", "description": "Generate gradient-based saliency maps and attention visualisations."},
-    {"id": "flop-counting", "name": "FLOPs Counting", "description": "Compute model FLOPs, MACs, and parameter counts for architecture comparison."},
-    {"id": "tensorrt", "name": "TensorRT", "description": "Build and optimise TensorRT engines: precision calibration, plugin development, and engine profiling."},
-    {"id": "deepstream", "name": "DeepStream", "description": "Design and deploy NVIDIA DeepStream pipelines for video analytics at the edge and cloud."},
-    {"id": "nvidia-model-optimizer", "name": "NVIDIA Model Optimizer", "description": "Apply structured pruning, quantisation-aware training, and model compression via NVIDIA Model Optimizer."},
-    {"id": "cuda-agent", "name": "CUDA Agent", "description": "Write and optimise custom CUDA kernels for CV operators."},
-    {"id": "jetson", "name": "Jetson Deployment", "description": "Deploy and optimise CV models on NVIDIA Jetson edge devices."},
-    {"id": "arxiv-search", "name": "arXiv Search", "description": "Search and retrieve relevant computer vision papers from arXiv."},
-    {"id": "paperswithcode-search", "name": "Papers With Code Search", "description": "Find state-of-the-art results and implementations on Papers With Code."},
-    {"id": "citation-analysis", "name": "Citation Analysis", "description": "Identify influential papers and trace research lineage through citation graphs."}
+    {
+      "id": "problem-decomposition",
+      "name": "Problem Decomposition",
+      "description": "Break a high-level CV problem into structured sub-tasks and requirements."
+    },
+    {
+      "id": "constraint-analysis",
+      "name": "Constraint Analysis",
+      "description": "Identify hardware, latency, memory, and accuracy constraints from a problem statement."
+    },
+    {
+      "id": "dataset-analysis",
+      "name": "Dataset Analysis",
+      "description": "Statistical characterisation of image datasets including class balance, quality, and splits."
+    },
+    {
+      "id": "label-quality-assessment",
+      "name": "Label Quality Assessment",
+      "description": "Detect annotation errors, inconsistencies, and coverage gaps in labelled datasets."
+    },
+    {
+      "id": "architecture-survey",
+      "name": "Architecture Survey",
+      "description": "Systematic comparison of CV model architectures for a target task and hardware."
+    },
+    {
+      "id": "benchmark-comparison",
+      "name": "Benchmark Comparison",
+      "description": "Compare model performance across published benchmarks (ImageNet, COCO, ADE20K, etc.)."
+    },
+    {
+      "id": "transfer-learning",
+      "name": "Transfer Learning",
+      "description": "Apply pretrained weights and fine-tuning strategies for downstream CV tasks."
+    },
+    {
+      "id": "pytorch-training",
+      "name": "PyTorch Training",
+      "description": "Design and execute PyTorch training loops with callbacks, logging, and checkpointing."
+    },
+    {
+      "id": "nvidia-dali",
+      "name": "NVIDIA DALI",
+      "description": "High-performance GPU data loading and augmentation pipeline using NVIDIA DALI."
+    },
+    {
+      "id": "apex-amp",
+      "name": "Apex AMP / torch.cuda.amp",
+      "description": "Mixed-precision training using NVIDIA Apex or native PyTorch AMP."
+    },
+    {
+      "id": "distributed-training",
+      "name": "Distributed Training",
+      "description": "Multi-GPU and multi-node training with DDP, FSDP, or DeepSpeed."
+    },
+    {
+      "id": "metric-computation",
+      "name": "Metric Computation",
+      "description": "Compute task-specific CV metrics: mAP, mIoU, top-k accuracy, F1, FPS."
+    },
+    {
+      "id": "error-analysis",
+      "name": "Error Analysis",
+      "description": "Systematic analysis of model failure modes, confusion patterns, and edge cases."
+    },
+    {
+      "id": "trt-profiling",
+      "name": "TensorRT Profiling",
+      "description": "Profile TensorRT engines: layer latency, memory, and throughput analysis."
+    },
+    {
+      "id": "triton-perf-analyzer",
+      "name": "Triton Performance Analyzer",
+      "description": "Benchmark Triton Inference Server deployments for throughput and latency."
+    },
+    {
+      "id": "jetson-power-measurement",
+      "name": "Jetson Power Measurement",
+      "description": "Measure power consumption on NVIDIA Jetson using tegrastats and jtop."
+    },
+    {
+      "id": "model-surgery",
+      "name": "Model Surgery",
+      "description": "Inspect, modify, and analyse model layers, weights, and architecture programmatically."
+    },
+    {
+      "id": "gradcam",
+      "name": "GradCAM / Interpretability",
+      "description": "Generate gradient-based saliency maps and attention visualisations."
+    },
+    {
+      "id": "flop-counting",
+      "name": "FLOPs Counting",
+      "description": "Compute model FLOPs, MACs, and parameter counts for architecture comparison."
+    },
+    {
+      "id": "tensorrt",
+      "name": "TensorRT",
+      "description": "Build and optimise TensorRT engines: precision calibration, plugin development, and engine profiling."
+    },
+    {
+      "id": "deepstream",
+      "name": "DeepStream",
+      "description": "Design and deploy NVIDIA DeepStream pipelines for video analytics at the edge and cloud."
+    },
+    {
+      "id": "nvidia-model-optimizer",
+      "name": "NVIDIA Model Optimizer",
+      "description": "Apply structured pruning, quantisation-aware training, and model compression via NVIDIA Model Optimizer."
+    },
+    {
+      "id": "cuda-agent",
+      "name": "CUDA Agent",
+      "description": "Write and optimise custom CUDA kernels for CV operators."
+    },
+    {
+      "id": "jetson",
+      "name": "Jetson Deployment",
+      "description": "Deploy and optimise CV models on NVIDIA Jetson edge devices."
+    },
+    {
+      "id": "arxiv-search",
+      "name": "arXiv Search",
+      "description": "Search and retrieve relevant computer vision papers from arXiv."
+    },
+    {
+      "id": "paperswithcode-search",
+      "name": "Papers With Code Search",
+      "description": "Find state-of-the-art results and implementations on Papers With Code."
+    },
+    {
+      "id": "citation-analysis",
+      "name": "Citation Analysis",
+      "description": "Identify influential papers and trace research lineage through citation graphs."
+    }
   ],
   "tools": [
-    {"id": "nvidia-dali-inspect", "name": "NVIDIA DALI Inspector", "description": "Inspect and validate NVIDIA DALI pipelines and dataset loading performance."},
-    {"id": "nvidia-nsight-systems", "name": "NVIDIA Nsight Systems", "description": "System-wide GPU and CPU profiler for training and inference pipelines."},
-    {"id": "pytorch-profiler", "name": "PyTorch Profiler", "description": "Built-in PyTorch profiling tool for operator-level performance analysis."},
-    {"id": "trt-build", "name": "TensorRT Build CLI (trtexec)", "description": "Command-line tool to build and validate TensorRT engines from ONNX or UFF models."},
-    {"id": "trt-profile", "name": "TensorRT Profiler", "description": "Layer-level latency and memory profiling for TensorRT engines."},
-    {"id": "triton-perf-analyzer", "name": "Triton Performance Analyzer", "description": "Benchmarking tool for Triton Inference Server: throughput, latency, and concurrency sweeps."},
-    {"id": "nvidia-smi", "name": "nvidia-smi", "description": "NVIDIA System Management Interface for GPU utilisation, memory, and power monitoring."},
-    {"id": "tegrastats", "name": "tegrastats", "description": "Real-time performance and power monitoring tool for NVIDIA Jetson platforms."},
-    {"id": "deepstream-runtime", "name": "DeepStream Runtime", "description": "GStreamer-based DeepStream SDK runtime for streaming video analytics pipelines."},
-    {"id": "nvidia-profiling-tools", "name": "NVIDIA Profiling Suite", "description": "Collection of NVIDIA profiling tools: Nsight Compute, Nsight Systems, CUDA profiler."},
-    {"id": "tao-toolkit", "name": "NVIDIA TAO Toolkit", "description": "Transfer learning and model optimisation toolkit for NVIDIA-optimised CV models."},
-    {"id": "pytorch-summary", "name": "torchsummary / torchinfo", "description": "Model summary tool showing layer shapes, parameter counts, and FLOPs."},
-    {"id": "netron", "name": "Netron", "description": "Visual model inspector for ONNX, TensorFlow, PyTorch, and TensorRT model files."}
+    {
+      "id": "nvidia-dali-inspect",
+      "name": "NVIDIA DALI Inspector",
+      "description": "Inspect and validate NVIDIA DALI pipelines and dataset loading performance."
+    },
+    {
+      "id": "nvidia-nsight-systems",
+      "name": "NVIDIA Nsight Systems",
+      "description": "System-wide GPU and CPU profiler for training and inference pipelines."
+    },
+    {
+      "id": "pytorch-profiler",
+      "name": "PyTorch Profiler",
+      "description": "Built-in PyTorch profiling tool for operator-level performance analysis."
+    },
+    {
+      "id": "trt-build",
+      "name": "TensorRT Build CLI (trtexec)",
+      "description": "Command-line tool to build and validate TensorRT engines from ONNX or UFF models."
+    },
+    {
+      "id": "trt-profile",
+      "name": "TensorRT Profiler",
+      "description": "Layer-level latency and memory profiling for TensorRT engines."
+    },
+    {
+      "id": "triton-perf-analyzer",
+      "name": "Triton Performance Analyzer",
+      "description": "Benchmarking tool for Triton Inference Server: throughput, latency, and concurrency sweeps."
+    },
+    {
+      "id": "nvidia-smi",
+      "name": "nvidia-smi",
+      "description": "NVIDIA System Management Interface for GPU utilisation, memory, and power monitoring."
+    },
+    {
+      "id": "tegrastats",
+      "name": "tegrastats",
+      "description": "Real-time performance and power monitoring tool for NVIDIA Jetson platforms."
+    },
+    {
+      "id": "deepstream-runtime",
+      "name": "DeepStream Runtime",
+      "description": "GStreamer-based DeepStream SDK runtime for streaming video analytics pipelines."
+    },
+    {
+      "id": "nvidia-profiling-tools",
+      "name": "NVIDIA Profiling Suite",
+      "description": "Collection of NVIDIA profiling tools: Nsight Compute, Nsight Systems, CUDA profiler."
+    },
+    {
+      "id": "tao-toolkit",
+      "name": "NVIDIA TAO Toolkit",
+      "description": "Transfer learning and model optimisation toolkit for NVIDIA-optimised CV models."
+    },
+    {
+      "id": "pytorch-summary",
+      "name": "torchsummary / torchinfo",
+      "description": "Model summary tool showing layer shapes, parameter counts, and FLOPs."
+    },
+    {
+      "id": "netron",
+      "name": "Netron",
+      "description": "Visual model inspector for ONNX, TensorFlow, PyTorch, and TensorRT model files."
+    },
+    {
+      "id": "knowledge.search",
+      "name": "Knowledge Search",
+      "description": "Hybrid search over project and technology knowledge with provenance-aware ranking."
+    },
+    {
+      "id": "research.fetch",
+      "name": "Research Fetch",
+      "description": "Fetch a referenced external source for verification and normalization."
+    },
+    {
+      "id": "experiment.create",
+      "name": "Experiment Create",
+      "description": "Create a persistent experiment record and lineage entry."
+    },
+    {
+      "id": "experiment.compare",
+      "name": "Experiment Compare",
+      "description": "Compare experiments using recorded metrics and decision criteria."
+    },
+    {
+      "id": "deployment.validate",
+      "name": "Deployment Validation",
+      "description": "Run deployment acceptance checks and return structured validation results."
+    },
+    {
+      "id": "platform.detect",
+      "name": "Platform Detector",
+      "description": "Detect host OS, architecture, hardware and accelerator state."
+    },
+    {
+      "id": "platform.verify",
+      "name": "Platform Compatibility Checker",
+      "description": "Verify driver, runtime, toolkit and framework compatibility for the detected platform."
+    },
+    {
+      "id": "platform.optimize",
+      "name": "Platform Optimization Planner",
+      "description": "Produce and validate platform-specific performance optimization actions."
+    }
   ],
   "agents": [
-    {"id": "claude-code", "name": "Claude Code", "description": "Anthropic Claude model with coding and reasoning capabilities; primary orchestration agent."},
-    {"id": "codex", "name": "OpenAI Codex / GPT-4o", "description": "OpenAI code generation model for training script and configuration authoring."},
-    {"id": "cuda-agent", "name": "CUDA Agent", "description": "Specialised agent for CUDA kernel development, optimisation, and profiling."}
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "description": "Coding-worker runtime for repository implementation and review tasks."
+    },
+    {
+      "id": "codex",
+      "name": "OpenAI Codex",
+      "description": "OpenAI coding-worker runtime for repository implementation tasks."
+    },
+    {
+      "id": "cuda-agent",
+      "name": "CUDA Agent",
+      "description": "Specialised agent for CUDA kernel development, optimisation, and profiling."
+    }
   ],
   "knowledge_sources": [
-    {"id": "paperswithcode-cv", "name": "Papers With Code â€” Computer Vision", "description": "State-of-the-art benchmark leaderboards and paper implementations for CV tasks.", "url": "https://paperswithcode.com/area/computer-vision"},
-    {"id": "nvidia-model-zoo", "name": "NVIDIA NGC Model Zoo", "description": "Pretrained NVIDIA-optimised models for detection, segmentation, classification, and more.", "url": "https://catalog.ngc.nvidia.com/models"},
-    {"id": "arxiv-cv", "name": "arXiv cs.CV", "description": "Preprint repository for computer vision research papers.", "url": "https://arxiv.org/list/cs.CV/recent"},
-    {"id": "semantic-scholar", "name": "Semantic Scholar", "description": "AI-powered research paper search and citation analysis.", "url": "https://www.semanticscholar.org/"},
-    {"id": "tensorrt-docs", "name": "NVIDIA TensorRT Documentation", "description": "Official TensorRT developer guide, API reference, and best practices.", "url": "https://docs.nvidia.com/deeplearning/tensorrt/"},
-    {"id": "deepstream-docs", "name": "NVIDIA DeepStream Documentation", "description": "DeepStream SDK developer guide and plugin reference.", "url": "https://docs.nvidia.com/metropolis/deepstream/"},
-    {"id": "jetson-developer-guide", "name": "NVIDIA Jetson Developer Guide", "description": "Jetson platform documentation covering deployment, optimisation, and power management.", "url": "https://developer.nvidia.com/embedded/develop/"},
-    {"id": "triton-inference-server-docs", "name": "NVIDIA Triton Inference Server Docs", "description": "Triton server documentation including model configuration and performance tuning.", "url": "https://docs.nvidia.com/deeplearning/triton-inference-server/"},
-    {"id": "pytorch-docs", "name": "PyTorch Documentation", "description": "Official PyTorch documentation including training, distributed, and profiling guides.", "url": "https://pytorch.org/docs/"},
-    {"id": "nvidia-training-guides", "name": "NVIDIA Deep Learning Training Guides", "description": "NVIDIA guides for optimising deep learning training on GPU clusters.", "url": "https://developer.nvidia.com/deep-learning"}
+    {
+      "id": "paperswithcode-cv",
+      "name": "Papers With Code — Computer Vision",
+      "description": "State-of-the-art benchmark leaderboards and paper implementations for CV tasks.",
+      "url": "https://paperswithcode.com/area/computer-vision"
+    },
+    {
+      "id": "nvidia-model-zoo",
+      "name": "NVIDIA NGC Model Zoo",
+      "description": "Pretrained NVIDIA-optimised models for detection, segmentation, classification, and more.",
+      "url": "https://catalog.ngc.nvidia.com/models"
+    },
+    {
+      "id": "arxiv-cv",
+      "name": "arXiv cs.CV",
+      "description": "Preprint repository for computer vision research papers.",
+      "url": "https://arxiv.org/list/cs.CV/recent"
+    },
+    {
+      "id": "semantic-scholar",
+      "name": "Semantic Scholar",
+      "description": "AI-powered research paper search and citation analysis.",
+      "url": "https://www.semanticscholar.org/"
+    },
+    {
+      "id": "tensorrt-docs",
+      "name": "NVIDIA TensorRT Documentation",
+      "description": "Official TensorRT developer guide, API reference, and best practices.",
+      "url": "https://docs.nvidia.com/deeplearning/tensorrt/"
+    },
+    {
+      "id": "deepstream-docs",
+      "name": "NVIDIA DeepStream Documentation",
+      "description": "DeepStream SDK developer guide and plugin reference.",
+      "url": "https://docs.nvidia.com/metropolis/deepstream/"
+    },
+    {
+      "id": "jetson-developer-guide",
+      "name": "NVIDIA Jetson Developer Guide",
+      "description": "Jetson platform documentation covering deployment, optimisation, and power management.",
+      "url": "https://developer.nvidia.com/embedded/develop/"
+    },
+    {
+      "id": "triton-inference-server-docs",
+      "name": "NVIDIA Triton Inference Server Docs",
+      "description": "Triton server documentation including model configuration and performance tuning.",
+      "url": "https://docs.nvidia.com/deeplearning/triton-inference-server/"
+    },
+    {
+      "id": "pytorch-docs",
+      "name": "PyTorch Documentation",
+      "description": "Official PyTorch documentation including training, distributed, and profiling guides.",
+      "url": "https://pytorch.org/docs/"
+    },
+    {
+      "id": "nvidia-training-guides",
+      "name": "NVIDIA Deep Learning Training Guides",
+      "description": "NVIDIA guides for optimising deep learning training on GPU clusters.",
+      "url": "https://developer.nvidia.com/deep-learning"
+    }
   ]
 }
-
-

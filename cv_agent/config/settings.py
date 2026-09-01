@@ -15,9 +15,13 @@ import sys
 from dataclasses import dataclass, field
 from importlib import resources
 from importlib.resources import files as resource_files
-from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Optional
+
+try:
+    from importlib.resources.abc import Traversable  # Python 3.12+
+except ImportError:  # pragma: no cover - exercised on Python < 3.12
+    from importlib.abc import Traversable  # Python 3.10-3.11
 
 if sys.version_info >= (3, 11):
     import tomllib  # stdlib from 3.11+
@@ -25,6 +29,7 @@ else:
     import tomli as tomllib  # type: ignore[no-redef]
 
 _RESOURCE_PACKAGE = "cv_agent.resources"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _resource_path(relative_path: str) -> Path:

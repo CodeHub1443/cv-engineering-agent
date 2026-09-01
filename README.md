@@ -20,6 +20,8 @@ system, a RAG dump, a fixed technique list, or a pile of prompts `[P§31]`.
 | about to make a design choice | `docs/architecture/adr/` + `ADR-0000-template.md` |
 | about to run anything expensive | `docs/APPROVALS.md` |
 | about to claim an improvement | `docs/EVALUATION.md` |
+| about to open a branch or PR | `docs/development/GITHUB_FLOW_V1.md` |
+| looking for a technical elaboration of a spec area | `spec/` (index below) |
 
 ## Document map
 
@@ -43,7 +45,29 @@ docs/
     DECISIONS.md             what is settled (append-only)
     OPEN_QUESTIONS.md        what is unresolved (strike through, never delete)
     EXPERIMENTS.md           reproducible experiment ledger [P§25]
+  development/
+    GITHUB_FLOW_V1.md        full git workflow: branching, PR, CI/CD, review/merge
+    GITHUB_DEVELOPMENT_MODEL.md  executive summary of the same workflow
+  archive/
+    PROJECT_SOURCE_DRAFT.md  historical, non-authoritative, not a session-start read
+spec/                         technical elaborations of specific canon areas — NOT
+                               independent authority; each cites the docs/PROJECT.md
+                               or docs/architecture/OVERVIEW.md section it elaborates
+  03-agent-runtime.md          elaborates the orchestration layer (pre-ADR-0003)
+  04-knowledge-and-research.md elaborates the knowledge/RAG layer (pre-ADR-0006)
+  05-cv-engineering-lifecycle.md  elaborates docs/PROJECT.md §6 per-stage
+  06-tooling-and-mcp.md        elaborates the tools/MCP boundary (pre-ADR-0005)
+  08-training-and-optimization.md elaborates training/optimization (pre-ADR-0010/12)
+  10-capability-registry.md    the ONLY spec file with real code behind it — governs
+                                spec/capability_registry.json, read by
+                                cv_agent/capabilities/registry.py
+  11-platform-detection-and-optimization.md  elaborates platform detection
 ```
+
+None of the `spec/*.md` files (except `10-capability-registry.md`, which has real
+code behind it) describe anything implemented today — each states its implementation
+status at the top. If a `spec/*.md` file conflicts with `docs/PROJECT.md` or an
+accepted ADR, the canon/ADR wins.
 
 ## The three conventions that hold this together
 
@@ -57,8 +81,10 @@ docs/
 
 ## Workflow
 
-One issue → one branch `<type>/<n>-<slug>` → one PR. Never commit to `main`. Acceptance
-test written first and shown failing. Rolling state updated before every commit.
+One issue → one branch `feature/<owner>/<work>` → one PR targeting `main` directly,
+reviewed and merged by the project owner. Never commit to `main`. No intermediate
+development trunk. Acceptance test written first and shown failing. Rolling state
+updated before every commit. Full process: `docs/development/GITHUB_FLOW_V1.md`.
 
 ## Status
 

@@ -1,41 +1,17 @@
 # CV Engineering Agent — CV Engineering Lifecycle
 
-**Version:** V1.0  
-**Status:** Foundational specification
+**Version:** V1.1
+**Status:** Technical elaboration of `docs/PROJECT.md` §6 (frozen canon, cited as
+`[P§n]`) and `docs/GLOSSARY.md`'s stage table. The canonical 14-stage lifecycle
+(`DISCOVER → DEFINE → RESEARCH → DESIGN → DATA → BASELINE → TRAIN → EVALUATE →
+DIAGNOSE → OPTIMIZE → BENCHMARK → DEPLOY → MONITOR → ITERATE`) is defined once, in
+`docs/PROJECT.md` §6 — it is not redefined here. This file elaborates each stage's
+inputs/outputs/decision contract beyond what `docs/GLOSSARY.md`'s one-line-per-stage
+table carries.
 
-## Lifecycle
-
-~~~text
-DISCOVER
-   ↓
-DEFINE
-   ↓
-RESEARCH
-   ↓
-DESIGN
-   ↓
-DATA
-   ↓
-BASELINE
-   ↓
-TRAIN
-   ↓
-EVALUATE
-   ↓
-DIAGNOSE
-   ↓
-OPTIMIZE
-   ↓
-BENCHMARK
-   ↓
-DEPLOY
-   ↓
-MONITOR
-   ↓
-ITERATE
-~~~
-
-This is an adaptive lifecycle, not a rigid one-way pipeline. Not every project requires every stage. The agent determines which stages are necessary and may revisit earlier stages when evidence requires it.
+> **Implementation status:** none of this is built yet. No stage workflow exists in
+> `cv_agent/` today. See `docs/state/STATUS.md`. Do not read this file as a
+> description of current behavior.
 
 ## Stage Contract
 

@@ -105,6 +105,24 @@ class Registry(Protocol):
 - registry identities are type-distinct: passing a `SkillId` where a `CapabilityId` is
   expected fails `mypy`.
 
+## 8a. Interim correction (does not implement this ADR)
+
+The pre-existing `cv_agent/capabilities/registry.py` (predates this ADR, per
+`docs/state/STATUS.md`) does not implement the `Resolution`/`resolve()` design in §5 —
+no `CapabilityResolver`, skill discovery, or binding mechanism exists. It was, however,
+found to violate this ADR's own §3 principle ("known but unavailable" as a first-class
+state): its JSON data marked every capability `status: "available"` with zero
+executable skill/tool bindings behind any of them, and `check_item()` hardcoded
+`available: True` unconditionally.
+
+This was corrected at the data/semantics level only — `status` now distinguishes
+`planned` (declared, no executable binding) from `available` (declared AND a verified
+executable binding exists), and `check_item()` reports `executable: False` honestly.
+Every capability and registry item is currently `planned` / non-executable. This is
+the smallest correction consistent with §3's intent; it does not build the `Resolution`
+type, `resolve()` method, or typed `SkillId`/`ToolId`/`AgentId` this ADR specifies —
+that remains future work under this ADR once accepted.
+
 ## 8. Revisit trigger
 
 If, after the first three stage workflows are built, no capability is ever satisfied by
