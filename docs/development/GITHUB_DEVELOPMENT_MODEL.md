@@ -4,103 +4,74 @@
 **Status:** Approved operating model
 **Repository:** `CodeHub1443/cv-engineering-agent`
 
-> **Supersedes the two-trunk (`main` / `dev-munna`) model.** Earlier versions of this
-> document specified a permanent `dev-munna` development trunk with a two-stage PM
-> approval gate (a Development PM and an Official Project Manager). That model is
-> retired — `dev-munna` is not a mandatory or permanent branch, and there is no
-> two-stage approval. See `docs/state/DECISIONS.md` for the decision record.
->
-> This file is the executive summary. `docs/development/GITHUB_FLOW_V1.md` is the
-> full procedural reference (PR template, CI/CD pipeline, branch naming, workstream
-> list). Keep the two in sync — this file must not restate procedural detail that
-> drifts from it.
+> The project uses a three-level development flow: `main` → `dev-munna` → short-lived
+> branches. `dev-munna` is the PM integration branch; `main` is the official
+> integration/release branch. Short-lived work branches are reviewed and merged into
+> `dev-munna`; the Official PM reviews and promotes `dev-munna` to `main`.
 
 ## 1. Executive Summary
 
-CV Engineering Agent uses trunk-based development on a single trunk, with short-lived
-feature branches.
-
-- **`main`** is the verified integration baseline and the release source.
-- Developers and coding agents never commit directly to `main`.
-- Every change is implemented on a short-lived `feature/<owner>/<work>` branch, opened
-  as a PR against `main`, validated by CI/CD, reviewed, and merged.
-- **The project owner performs final integration into `main`** — there is no separate
-  promotion step or second approval trunk.
-
-This keeps `main` clean, stable, auditable, and always releasable, without the
-overhead of a second permanent integration branch.
-
----
+- **`main`** is the official verified integration/release baseline.
+- **`dev-munna`** is the active PM integration branch.
+- Developers and coding agents never commit directly to `main` or `dev-munna`.
+- Work is performed on short-lived branches cut from `dev-munna`.
+- Every short-lived branch requires CI and review before merge into `dev-munna`.
+- Promotion from `dev-munna` to `main` is a separate Official PM review/merge gate.
 
 ## 2. Branch Roles
 
 ```text
-                 main
-      (verified integration baseline)
-                   ▲
-                   │
-        review + project owner approval
-                   │
-             Pull Request
-                   │
-                   │
-    feature/<owner>/<work>  (short-lived)
+                         main
+                          ▲
+                          │ Official PM review + merge
+                          │
+                      dev-munna
+                          ▲
+                          │ PM review + CI
+                          │
+             short-lived feature/fix/docs/ci branch
 ```
 
 ### `main`
 
-- Protected: no direct commits or pushes.
-- Every change arrives via a reviewed, CI-passing PR.
-- Always represents a working, reproducible state.
+- Official integration and release baseline.
+- No direct commits or pushes.
+- Updated only through the Official PM promotion PR from `dev-munna`.
 
-### `feature/<owner>/<work>`
+### `dev-munna`
 
-- Cut from `main`.
-- One feature or fix per branch.
-- Short-lived (see target lifetimes in `GITHUB_FLOW_V1.md` §4).
-- Deleted after merge.
+- PM integration branch for the current development stream.
+- Receives completed short-lived work after review and green CI.
+- May contain multiple completed increments before promotion to `main`.
+- No direct commits or pushes.
 
-There is no permanent `dev-munna`-style development trunk. A long-lived integration
-branch for an unusually large, explicitly-agreed multi-PR effort may exist temporarily,
-but it is the exception, not part of the default model.
+### Short-lived branches
 
----
+- Cut from `dev-munna`.
+- One issue/work item per branch.
+- Prefixes: `feature/`, `fix/`, `docs/`, `ci/`, `hotfix/`.
+- Deleted after merge into `dev-munna`.
 
 ## 3. Non-Negotiable Rules
 
 ```text
-1. main is never used for development.
-2. No direct commits or pushes to main.
-3. All feature work uses short-lived feature/<owner>/<work> branches.
-4. One feature at a time is the default.
-5. Every PR requires CI, technical review, and project owner approval.
-6. No force push to main.
-7. Expensive/destructive CV-agent operations remain subject to docs/APPROVALS.md,
-   independent of this git workflow.
+1. main is never used for day-to-day development.
+2. dev-munna is never used for direct development commits.
+3. Short-lived work branches start from dev-munna.
+4. Every work branch requires CI and PM review before merge to dev-munna.
+5. Official PM approval is required to promote dev-munna to main.
+6. Never force-push main or dev-munna.
+7. Expensive/destructive CV-agent operations remain subject to docs/APPROVALS.md.
 ```
-
----
 
 ## 4. Pull Request and CI/CD Requirements
 
-See `docs/development/GITHUB_FLOW_V1.md` §5–§8 for the PR template, the CI/CD pipeline
-stages, and the review/merge process. Both documents describe the same gate — do not
-add a second one here.
+See `docs/development/GITHUB_FLOW_V1.md` for the procedural PR template, CI/CD
+requirements, branch naming, and review gates. Both documents must remain consistent.
 
----
+## 5. Development Sequence
 
-## 5. Workstream Model
-
-See `docs/development/GITHUB_FLOW_V1.md` §11 for the current workstream-to-branch-prefix
-mapping. None of the listed workstreams are implemented yet — `docs/state/STATUS.md` is
-authoritative on what currently exists.
-
----
-
-## 6. Development Sequence
-
-The project is implemented in dependency order, matching `docs/roadmap/ROADMAP.md`'s
-phases:
+The project is implemented in dependency order, matching the architecture roadmap:
 
 ```text
 01 Architecture & Specification
@@ -126,67 +97,44 @@ phases:
 21 Full Engineering Loop
 ```
 
-Each item becomes one or more small issues and short-lived branches. This is a
-development-order list, not a claim that any of these exist yet.
-
----
-
-## 7. Traceability
+## 6. Traceability
 
 ```text
 Requirement
    ↓
 GitHub Issue
    ↓
-Short-lived Branch
+Short-lived Branch (from dev-munna)
    ↓
 Commit(s)
    ↓
-Pull Request
+PR → dev-munna
    ↓
-CI/CD
+CI/CD + PM Review
    ↓
-Technical Review
+dev-munna
    ↓
-Project Owner Approval
+Promotion PR → main
+   ↓
+Official PM Review + Merge
    ↓
 main
 ```
 
-ML experiments additionally follow the lineage in `docs/state/EXPERIMENTS.md`
-(requirement → experiment → dataset version → code commit → model/config → metrics →
-benchmark → decision).
-
----
-
-## 8. Releases and Hotfixes
-
-`main` is the sole release source; releases are tagged from approved `main` commits
-(`v0.1.0`, `v0.2.0`, …). Hotfixes follow the same single-trunk model on an expedited
-timeline — see `docs/development/GITHUB_FLOW_V1.md` §12.
-
----
-
-## 9. Operating Principle
+## 7. Completion Definition
 
 ```text
-ONE FEATURE
-     ↓
-ONE SHORT-LIVED BRANCH
-     ↓
-IMPLEMENT
-     ↓
-TEST
-     ↓
-CI
-     ↓
-REVIEW
-     ↓
-PROJECT OWNER APPROVAL
-     ↓
-MERGE TO main
-     ↓
-NEXT FEATURE
+[ ] Implementation complete
+[ ] Tests complete
+[ ] Documentation updated
+[ ] Local validation passes
+[ ] CI passes
+[ ] PM technical review complete
+[ ] PR merged to dev-munna
+[ ] Promotion PR reviewed by Official PM
+[ ] dev-munna merged to main
+[ ] Post-merge main CI passes
+[ ] Short-lived branch deleted
 ```
 
-This is the canonical GitHub development model for CV Engineering Agent.
+This is the canonical GitHub development model for the current project.
