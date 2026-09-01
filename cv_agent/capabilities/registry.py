@@ -12,10 +12,9 @@ from __future__ import annotations
 import builtins
 import json
 from dataclasses import dataclass, field
+from importlib.abc import Traversable
 from pathlib import Path
 from typing import Any, Literal
-
-from importlib.abc import Traversable
 
 CapabilityStatus = Literal[
     "planned", "available", "partial", "experimental", "unavailable"
