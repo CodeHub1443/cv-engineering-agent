@@ -13,29 +13,29 @@ integration branch; `main` remains the official integration/release branch and i
 promoted from `dev-munna` by the Official PM.
 
 The frozen project definition is `docs/PROJECT.md`. ADR-0001 (capability model) and
-ADR-0002 (LLM gateway) have been reviewed and accepted. Their interfaces are now the
-architectural baseline for the remaining Phase 1 decisions.
+ADR-0002 (LLM gateway) are accepted. Decisions Q1–Q4, Q7–Q8 are recorded. ADR-0003
+(orchestration state & checkpointing) is drafted and proposed.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| Q1–Q5 PM decisions | #— | blocking |
-| ADR-0003 / ADR-0004 architecture | #— | blocked pending Q1–Q3 / Q1–Q2 |
+| ADR-0003 architecture | #— | proposed / awaiting PM review |
+| ADR-0004 architecture | #— | unblocked (Q1–Q2, Q8 settled) |
 
 ## Next 3 actions
 
-1. Resolve Q1–Q5 with the PM; record each decision before drafting blocked ADRs.
-2. Draft ADR-0003 (orchestration state) after Q1–Q3 are settled.
-3. Draft ADR-0004 (project memory / experiment ledger) after Q1–Q2 are settled.
+1. Review and accept/revise ADR-0003 (orchestration state).
+2. Draft ADR-0004 (project memory / experiment ledger) using resolved Q1–Q2 & Q8.
+3. Keep Q5 deferred until Phase 1 core architecture ADRs are complete.
 
 ## Blockers
 
-- Q1–Q5 in `docs/state/OPEN_QUESTIONS.md` remain blocking for ADR-0003/ADR-0004 and,
-  for Q5, ADR-0005/ADR-0007.
+- Q5 in `docs/state/OPEN_QUESTIONS.md` is deferred, blocking ADR-0005/ADR-0007.
+- Downstream implementation work is gated on Phase 1 ADR acceptance.
 
 ## Do not start yet
 
 Stage workflows, RAG, training execution, SkillSource/skill discovery, or
-CapabilityResolver implementation. These depend on the accepted registry/gateway,
-state model, and memory architecture.
+CapabilityResolver implementation. These depend on accepted architecture ADRs.
+

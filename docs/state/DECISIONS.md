@@ -23,6 +23,9 @@
 | D-014 | 2026-09-01 | Q2 — the agent runs on the local workstation; training is submitted as an external job to a configured local, remote, or cloud GPU target and is not executed in-process. | `[P§10]`, `[P§13]`, `[P§24]` | ADR-0003 / ADR-0010 | accepted |
 | D-015 | 2026-09-01 | Q3 — human approvals are persistent workflow entities. The initial interaction surface may be CLI-based, but approval requests and state survive process restarts and support asynchronous approval. | `[P§24]` | ADR-0003 | accepted |
 | D-016 | 2026-09-01 | Q4 — Phase 1 architecture targets a real CV project; prison/garment examples are reference workloads and validation fixtures, not the architectural scope itself. | `[P§30]` | — | accepted |
+| D-017 | 2026-09-01 | Q7 — initial LLM provider classes are Anthropic, OpenAI, and Local/Ollama; routing is configuration-driven; transient failures may fall back sequentially; request/configuration failures fail fast; metadata is preserved. | `[P§20]` | ADR-0002 | accepted |
+| D-018 | 2026-09-01 | Q8 — dual-layer persistence: Git-tracked structured project memory plus local SQLite at `.cv_agent/state/experiments.sqlite` for high-volume experiment rows. | `[P§25]` | ADR-0004 | accepted |
+| D-019 | 2026-09-01 | ADR-0003 Orchestration State Machine, Checkpointing, and Persistent Approvals is drafted and proposed: LangGraph StateGraph with SQLite checkpointer at `.cv_agent/state/checkpoints.sqlite`, persistent approval interrupts, and asynchronous external job handles. | `[P§21]`, `[P§24]`, `[P§25]`, `[P§34]` | ADR-0003 | proposed |
 
 ## Reversals
 

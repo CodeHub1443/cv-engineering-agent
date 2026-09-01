@@ -9,7 +9,7 @@
 - **Integration branch:** `dev-munna`
 - **Release/integration branch:** `main`
 - **Work pattern:** `main` ← `dev-munna` ← short-lived work branches
-- **Current architecture gate:** ADR-0001 accepted; ADR-0002 accepted.
+- **Current architecture gate:** ADR-0001 accepted; ADR-0002 accepted; ADR-0003 proposed.
 
 ## ADR status
 
@@ -17,14 +17,14 @@
 |---|---|
 | ADR-0001 — Capability model | **Accepted** |
 | ADR-0002 — LLM Gateway | **Accepted** |
-| ADR-0003 — Orchestration state | Blocked by Q1–Q3 |
-| ADR-0004 — Project memory / experiment ledger | Blocked by Q1–Q2 |
+| ADR-0003 — Orchestration state | **Proposed** / awaiting acceptance |
+| ADR-0004 — Project memory / experiment ledger | Unblocked (Q1–Q2, Q8 settled) |
 | ADR-0005 — Tools / MCP | Blocked by Q5 |
 | ADR-0006 — Knowledge / RAG | Not started |
 | ADR-0007 — Skills | Blocked by Q5 |
 | ADR-0008 — Reasoning | Not started |
 | ADR-0009 — Dataset subsystem | Not started |
-| ADR-0010 — Training | Blocked by Q2 |
+| ADR-0010 — Training | Unblocked (Q2 settled) |
 | ADR-0011 — Evaluation | Not started |
 | ADR-0012 — Optimization / deployment | Not started |
 | ADR-0013 — Monitoring | Not started |
@@ -40,15 +40,16 @@
 - **D-016:** Q4 — Phase 1 architecture targets a real CV project; prison/garment examples are reference workloads and validation fixtures, not the architectural scope itself.
 - **D-017:** Q7 — initial LLM provider classes are Anthropic, OpenAI, and Local/Ollama; routing is configuration-driven; transient failures may fall back sequentially; request/configuration failures fail fast; metadata is preserved. See ADR-0002.
 - **D-018:** Q8 — dual-layer persistence: Git-tracked structured project memory plus local SQLite at `.cv_agent/state/experiments.sqlite` for high-volume experiment rows. See ADR-0004.
+- **D-019:** ADR-0003 orchestration state, checkpointing, and persistent approvals proposed; SQLite-backed state persistence, approval interrupts, and asynchronous external job handles defined.
 
 ## Blocking questions
 
-Q5 remains unanswered in `docs/state/OPEN_QUESTIONS.md`. Do not invent the installed/invocable NVIDIA capability inventory.
+Q5 remains deferred in `docs/state/OPEN_QUESTIONS.md`. Do not invent the installed/invocable NVIDIA capability inventory.
 
-Q1–Q3 are resolved and unblock ADR-0003. Q1–Q2 are resolved and unblock ADR-0004. Q5 continues to block ADR-0005 and ADR-0007.
+Q1–Q4, Q7–Q8 are resolved. Q5 continues to block ADR-0005 and ADR-0007.
 
 ## Next session
 
-1. Perform the final consistency/validation check for ADR-0002 and the PM decisions.
-2. Draft ADR-0003 (orchestration state) using the resolved Q1–Q3 constraints.
-3. Draft ADR-0004 (project memory / experiment ledger) using the resolved Q1–Q2 and Q8 constraints.
+1. Review/accept or revise ADR-0003.
+2. Draft ADR-0004 (project memory / experiment ledger) using the resolved Q1–Q2 and Q8 constraints.
+3. Keep Q5 deferred until core architecture substrate is specified.
