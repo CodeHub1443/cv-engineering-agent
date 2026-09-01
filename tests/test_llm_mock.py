@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
 from cv_agent.llm.mock import FakeLLMProvider
 from cv_agent.llm.registry import get_provider, list_providers, register_provider
-
-import pytest
 
 
 class TestLLMRequest:
