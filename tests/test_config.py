@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 try:
     from importlib.resources.abc import Traversable  # Python 3.12+
 except ImportError:  # pragma: no cover - exercised on Python < 3.12
@@ -81,7 +79,7 @@ class TestLoadConfigFromFile:
 
     def test_default_toml_is_valid(self) -> None:
         """The committed config/default.toml must be parseable."""
-        cfg = load_config()  # uses default path
+        cfg = load_config()
         assert cfg.llm.provider == "mock"
         assert cfg.llm.model == "fake-1"
 
