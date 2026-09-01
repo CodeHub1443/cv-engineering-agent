@@ -29,6 +29,12 @@ lacks:
    metadata without leaking reasoning, domain knowledge, or provider specifics into the
    graph `[P§19]`, `[P§20]`, `[P§34]`.
 
+Furthermore, Q8 / D-018 established a dual-layer persistence model (Git-tracked structured
+project memory plus local SQLite at `.cv_agent/state/experiments.sqlite` for high-volume
+experiment rows). ADR-0003 introduces `.cv_agent/state/checkpoints.sqlite` for orchestration
+state; this document explicitly reconciles these two SQLite persistence roles to prevent
+state leakage or architectural blurring.
+
 Phase 1 requires formalizing the orchestration state schema, checkpointing backend,
 approval interrupt lifecycle, and recovery contracts before downstream stage nodes,
 tool integrations, and memory subsystems are constructed.
@@ -44,7 +50,7 @@ tool integrations, and memory subsystems are constructed.
   - Capability catalogs, type inventories, or skill/tool resolution → Capability Registry (ADR-0001) `[P§23]`;
   - Procedural skill implementations and domain instructions → Skills (ADR-0007) `[P§15]`;
   - Tool execution transport and executable interfaces → Tools/MCP (ADR-0005) `[P§22]`;
-  - Long-term experiment ledger and persistent project domain memory → Project Memory & Ledger (ADR-0004) `[P§25]`, `[P§33]`;
+  - Long-term experiment ledger and persistent project domain memory → Project Memory & Ledger (ADR-0004) `[P§25]`, `[P§33]`, Q8 / D-018;
   - External job submission and training execution on GPU targets → Training Subsystem (ADR-0010) `[P§10]`, `[P§24]`, Q2 / D-014.
 - **Why this responsibility does not belong to an existing component:**
   Reasoning decides *what* should be done; tools determine *how* to invoke capabilities;
@@ -55,10 +61,38 @@ tool integrations, and memory subsystems are constructed.
 
 We define the orchestration layer around a LangGraph `StateGraph(AgentState)` with local
 SQLite-backed checkpoint persistence (`SqliteSaver`) stored at `.cv_agent/state/checkpoints.sqlite`
-scoped to the project repository (Q1 / D-013, Q8 / D-018), with in-memory `MemorySaver`
-retained solely for ephemeral unit tests.
+scoped to the project repository (Q1 / D-013), with in-memory `MemorySaver` retained solely
+for ephemeral unit tests.
 
-The core architecture establishes:
+### 3.1. Dual-SQLite Separation and Persistence Reconciliation (Q8 / D-018, `[P§34]`)
+
+To maintain strict architectural boundaries, the repository maintains two distinct SQLite
+databases under `.cv_agent/state/` with non-overlapping lifecycles and responsibilities:
+
+```
+.cv_agent/state/
+├── checkpoints.sqlite    ← ADR-0003: Orchestration runtime state (ephemeral / medium-term)
+│                           Owns: super-step snapshots, channel values, pending approval tickets.
+│                           Lifecycle: pruneable after session completion / retention expiry.
+└── experiments.sqlite    ← ADR-0004 / D-018: Experiment ledger (permanent / long-term)
+                            Owns: immutable hyperparameters, metrics, dataset refs, artifact paths.
+                            Lifecycle: permanent, reproducible historical record [P§25].
+```
+
+**Non-Negotiable Boundary Rules:**
+1. **No Silent Ledger Creep:** Orchestration checkpoints must **never** silently become the
+   experiment ledger. Node execution snapshots in `checkpoints.sqlite` capture only the
+   in-flight runtime state necessary to resume graph execution.
+2. **Domain Memory Handoff:** When a workflow node finishes an experiment or reaches a
+   milestone, it commits the structured result to the Experiment Ledger (`experiments.sqlite`
+   via ADR-0004) and writes persistent domain insights to Git-tracked project memory.
+   The orchestration state only retains a string reference (`memory_ref` / `experiment_id`).
+3. **Retention & Pruning Independence:** `checkpoints.sqlite` is subject to a configurable
+   retention policy (default 30 days post-completion) and can be vacuumed or pruned without
+   impacting the permanent experiment history in `experiments.sqlite`.
+
+### 3.2. Core Orchestration Mechanisms
+
 1. **Typed State Schema (`AgentState`):** An explicit, typed dictionary containing
    immutable records for lifecycle status, active lifecycle stage, task definition,
    selected capabilities, execution step log, pending approval tickets, external job
@@ -67,25 +101,29 @@ The core architecture establishes:
    cloud provisioning, destructive data mutations, production deployments per `docs/APPROVALS.md`)
    transition state to `AWAITING_APPROVAL`, emit a structured `ApprovalRequest` with cost/risk
    metadata, trigger a LangGraph interrupt/breakpoint, and commit a persistent checkpoint.
-   Resumption is asynchronous via CLI/API by passing an `ApprovalResponse` into the session thread.
+   Resumption is asynchronous via CLI/API by passing an `ApprovalResponse` matching the `request_id`.
 3. **Asynchronous External Job Handles (Q2 / D-014):** Nodes submitting long-running GPU
    training or remote evaluations record an `ActiveJobRef` in state. The graph polls or awaits
    job completion tokens without blocking the main orchestrator in-process.
-4. **Idempotency and Recovery:** Every node update appends an indexed `StepRecord` and
-   mutates a monotonic step counter. Nodes performing external operations must check
-   existing job tokens in state before dispatching to prevent duplicate external actions
-   during checkpoint restoration or node retries.
-5. **Session and Thread Scoping:** Each agent invocation runs under a unique `session_id`
-   mapped directly to LangGraph's `thread_id`. Single-process file locking ensures only
-   one active execution thread modifies a session's state at a time.
+4. **Deterministic Replay and Idempotency:** Every node update appends an indexed `StepRecord` and
+   mutates a monotonic step counter. Nodes performing external operations check existing job
+   tokens in state before dispatching to prevent duplicate external actions during checkpoint
+   restoration or node retries.
+5. **Session and Thread Scoping (Q1 / D-013):** Each agent invocation runs under a unique
+   `session_id` mapped directly to LangGraph's `thread_id`. File-level SQLite locking ensures
+   only one active execution thread modifies a session's state at a time.
+6. **Checkpoint Atomicity & Crash Recovery:** SQLite Write-Ahead Logging (WAL) mode guarantees
+   atomic super-step commits. Uncommitted partial writes during an abrupt crash rollback
+   cleanly, allowing resumption from the last verified super-step snapshot.
 
 ## 4. Alternatives considered
 
 | Alternative | Evidence for | Evidence against | Why not chosen |
 |---|---|---|---|
 | **1. Ephemeral In-Memory Checkpointer (`MemorySaver` only)** | Zero dependencies; trivial setup; already present in Phase 0 prototype. | Fails Q3 / D-015 completely: process termination destroys pending approval state and midway execution traces. Requires re-running entire workflows if interrupted. | Violates persistent approval contract (Q3 / D-015) and reproducibility requirements `[P§25]`. |
-| **2. Custom Finite State Machine (plain Python FSM or Celery/Airflow)** | Full custom control without LangGraph framework constraints; robust DAG scheduling in Airflow. | High implementation overhead; reinvents state graph branching, streaming, and breakpoint interrupts; Airflow/Celery introduces heavy infrastructure dependencies (broker, worker daemons) unsuited for local workstation CLI operation (Q2 / D-014). | `[P§21]` explicitly mandates LangGraph; custom FSMs add unnecessary boilerplate and maintenance burden `[P§34]`. |
-| **3. Client-Server Distributed Checkpointer (PostgreSQL / Redis)** | Concurrent multi-user access; enterprise clustering; horizontal scaling. | Violates Q1 / D-013 (single-project local repository isolation) and Q2 / D-014 (local workstation execution); requires running external services/containers for basic local agent usage. | Over-engineering for a local workstation engineering assistant. Local embedded SQLite provides zero-config persistence with ACID reliability. |
+| **2. Single Consolidated SQLite Database for Checkpoints & Experiments** | Single file to manage under `.cv_agent/state/`. | Violates `[P§34]` separation of concerns; tightly couples ephemeral orchestration runtime serialization (LangGraph pickle/msgpack channels) with permanent, queryable experiment schema (ADR-0004); makes pruning runtime checkpoints risky for permanent experiment retention. | Violates layer separation and makes retention governance fragile. |
+| **3. Custom Finite State Machine (plain Python FSM or Celery/Airflow)** | Full custom control without LangGraph framework constraints; robust DAG scheduling in Airflow. | High implementation overhead; reinvents state graph branching, streaming, and breakpoint interrupts; Airflow/Celery introduces heavy infrastructure dependencies (broker, worker daemons) unsuited for local workstation CLI operation (Q2 / D-014). | `[P§21]` explicitly mandates LangGraph; custom FSMs add unnecessary boilerplate and maintenance burden `[P§34]`. |
+| **4. Client-Server Distributed Checkpointer (PostgreSQL / Redis)** | Concurrent multi-user access; enterprise clustering; horizontal scaling. | Violates Q1 / D-013 (single-project local repository isolation) and Q2 / D-014 (local workstation execution); requires running external services/containers for basic local agent usage. | Over-engineering for a local workstation engineering assistant. Local embedded SQLite provides zero-config persistence with ACID reliability. |
 
 ## 5. Interface
 
@@ -200,7 +238,7 @@ class AgentState(TypedDict, total=False):
     task_type: str | None
     parameters: dict[str, Any]
 
-    # ── Capabilities & Routing ────────────────────────────────────────────
+    # ── Capabilities & Routing (ADR-0001) ─────────────────────────────────
     selected_capabilities: list[str]
     active_skill: str | None
 
@@ -216,9 +254,10 @@ class AgentState(TypedDict, total=False):
     # ── External Asynchronous Jobs (Q2 / D-014) ───────────────────────────
     active_jobs: list[ActiveJobRef]
 
-    # ── Execution History & Memory Snapshot ───────────────────────────────
+    # ── Execution History & Memory Pointer (ADR-0004) ──────────────────────
     steps: list[StepRecord]
     memory_ref: str | None
+    experiment_ref: str | None
 ```
 
 ```python
@@ -243,13 +282,15 @@ class OrchestratorConfig:
     enable_persistence: bool = True
     max_step_limit: int = 100
     checkpoint_retention_days: int = 30
+    wal_mode: bool = True
 
 
 def get_checkpointer(config: OrchestratorConfig) -> BaseCheckpointSaver:
     """
     Instantiate the appropriate LangGraph checkpointer.
     Returns a persistent SqliteSaver targeting config.checkpoint_db_path
-    when enable_persistence is True; otherwise returns MemorySaver.
+    with WAL mode enabled when enable_persistence is True;
+    otherwise returns MemorySaver.
     """
     ...
 
@@ -275,6 +316,18 @@ def resume_session(
     (LangGraph thread_id), applying the human approval response if provided.
     """
     ...
+
+
+def prune_checkpoints(
+    config: OrchestratorConfig,
+    older_than_days: int | None = None,
+) -> int:
+    """
+    Prune completed or expired session checkpoints from checkpoints.sqlite
+    older than the specified retention threshold. Does not touch experiments.sqlite.
+    Returns count of pruned records.
+    """
+    ...
 ```
 
 ## 6. Consequences
@@ -284,7 +337,7 @@ def resume_session(
   - Fully compliant persistent human-in-the-loop approval gates (Q3 / D-015, `[P§24]`);
   - Asynchronous tracking of external GPU training jobs without blocking agent runtime (Q2 / D-014);
   - Complete, reproducible audit trail of node transitions and token usage `[P§25]`;
-  - Clean separation between workflow orchestration and domain reasoning/execution layers `[P§34]`.
+  - Clean separation between ephemeral orchestration state (`checkpoints.sqlite`) and permanent experiment records (`experiments.sqlite`) per `[P§34]`, Q8 / D-018.
 - **Makes harder:**
   - Nodes cannot perform raw ad-hoc mutations outside the `AgentState` schema;
   - State serialization requires all values within `AgentState` to be JSON/msgpack-serializable;
@@ -296,16 +349,40 @@ def resume_session(
   - Replacing the checkpointer backend requires changing `get_checkpointer()` without modifying graph topology;
   - Replacing LangGraph would require rewriting node registration in `cv_agent/graph/builder.py`, but `AgentState` schema and approval semantics remain portable.
 
-## 7. Acceptance test
+## 7. Complete Acceptance Criteria
 
-1. **`tests/test_graph_state_schema.py`**:
-   - Verify `AgentState` validates all fields, enums (`LifecycleStatus`, `StageName`, `ApprovalAction`), and sub-structures (`ApprovalRequest`, `StepRecord`, `ActiveJobRef`).
-2. **`tests/test_checkpoint_persistence.py`**:
-   - Execute a multi-step graph using SQLite checkpointer; kill process/destroy runtime instance; instantiate a fresh `CVAgent`/graph instance and resume by `session_id`; verify state, step history, and lifecycle status are preserved verbatim.
-3. **`tests/test_approval_interrupt_resume.py`**:
-   - Trigger an approval gate node; verify graph pauses and returns `status="awaiting_approval"` with `pending_approval` set; restart process; supply `ApprovalResponse(action=ApprovalAction.APPROVED)`; verify graph resumes and completes execution.
-4. **`tests/test_job_handle_tracking.py`**:
-   - Simulate external training job submission; verify `ActiveJobRef` is recorded and retained across checkpoints without in-process blocking.
+To achieve acceptance, implementation of ADR-0003 must satisfy the following verifiable contracts:
+
+1. **State Transitions & Validation (`tests/test_graph_state_machine.py`):**
+   - Graph enforces valid transitions between lifecycle statuses: `INITIALIZING → PLANNING → AWAITING_APPROVAL → EXECUTING → EVALUATING → COMPLETED/FAILED`.
+   - Invalid direct transitions (e.g. `INITIALIZING → DEPLOYING` without `EVALUATING`) raise explicit validation errors.
+2. **Checkpoint Atomicity & WAL Mode (`tests/test_checkpoint_atomicity.py`):**
+   - Every node completion commits a transactional snapshot to `.cv_agent/state/checkpoints.sqlite` using SQLite WAL mode.
+   - Partial writes or unhandled exceptions mid-node roll back the transaction, leaving the prior checkpoint uncorrupted.
+3. **Deterministic Restart & Resume (`tests/test_checkpoint_persistence.py`):**
+   - A session interrupted by process kill restores identical `AgentState`, step histories, and channel states upon instantiation with the same `session_id`.
+4. **Persistent Approval Interrupts (`tests/test_approval_interrupt.py`):**
+   - Nodes invoking gated operations (`docs/APPROVALS.md`) emit an `ApprovalRequest`, transition status to `AWAITING_APPROVAL`, trigger a LangGraph interrupt, and save a persistent checkpoint.
+   - Graph remains paused across arbitrary process restarts until an explicit approval response is received.
+5. **Approval Resolution Handling (`tests/test_approval_resolution.py`):**
+   - Resuming with `ApprovalAction.APPROVED` transitions status to `EXECUTING` and proceeds with the gated action.
+   - Resuming with `ApprovalAction.REJECTED` gracefully halts or diverts the workflow to alternative planning.
+   - Mismatched `request_id` or malformed responses reject resumption with structured errors.
+6. **External Asynchronous Job Recovery (`tests/test_job_handle_recovery.py`):**
+   - Out-of-process training jobs registered in `active_jobs` retain their handles across restarts; resuming nodes query external job status without re-triggering duplicate training dispatches.
+7. **Idempotency & Replay Protection (`tests/test_graph_idempotency.py`):**
+   - Checkpoint restoration increments step counters monotonically and uses job submission tokens to prevent duplicate side effects during replay.
+8. **Failure Recovery & Error Classification (`tests/test_graph_error_recovery.py`):**
+   - Transient network/timeout errors apply retry policies up to max limits; fatal exceptions capture detailed tracebacks into `error` and mark status `FAILED` without corrupting state.
+9. **Concurrency & Workspace Locking (`tests/test_graph_concurrency.py`):**
+   - SQLite file locks prevent concurrent execution threads from mutating the same session state simultaneously.
+10. **State Corruption Handling (`tests/test_corrupt_checkpoint_recovery.py`):**
+    - Corrupted state records detect checksum/schema mismatches, log diagnostic errors, and fall back safely to the preceding valid super-step.
+11. **Checkpoint Retention & Pruning (`tests/test_checkpoint_pruning.py`):**
+    - Invoking `prune_checkpoints()` deletes expired checkpoint blobs older than `checkpoint_retention_days` without modifying `experiments.sqlite` or Git-tracked memory.
+12. **Boundary Compliance with ADR-0001 & ADR-0002 (`tests/test_adr_layer_boundaries.py`):**
+    - `AgentState` references capability IDs (`ADR-0001`) as pure strings without importing registry resolvers.
+    - `AgentState` captures provider/model strings and token counts (`ADR-0002`) without importing provider SDKs into graph nodes.
 
 ## 8. Revisit trigger
 

@@ -146,6 +146,5 @@ leaking domain reasoning, LLM provider specifics, or tool execution into the gra
 **Learned:** Scoping checkpoints to local workspace SQLite satisfies both Q1 (per-project
 isolation) and Q3 (cross-process restart survival) cleanly without external network services.
 
-**Left open:** ADR-0003 awaiting PM review/acceptance. ADR-0004 (project memory / experiment
-ledger) is unblocked for drafting. Q5 remains deferred.
+**Left open:** ADR-0003 revised with dual-SQLite reconciliation and full acceptance criteria, awaiting PM review/acceptance. ADR-0004 (project memory / experiment ledger) is unblocked for drafting. Q5 remains deferred.
 
