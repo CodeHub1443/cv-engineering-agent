@@ -14,10 +14,9 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from importlib import resources
+from importlib.abc import Traversable
 from importlib.resources import files as resource_files
 from pathlib import Path
-
-from importlib.abc import Traversable
 
 if sys.version_info >= (3, 11):
     import tomllib  # stdlib from 3.11+
