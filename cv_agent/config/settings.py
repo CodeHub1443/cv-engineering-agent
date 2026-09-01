@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from importlib import resources
 from importlib.resources import files as resource_files
 from pathlib import Path
-from typing import Optional
 
 try:
     from importlib.resources.abc import Traversable  # Python 3.12+
@@ -37,8 +36,10 @@ def _resource_path(relative_path: str) -> Path:
     resource = resources.files(_RESOURCE_PACKAGE).joinpath(relative_path)
     return Path(resource)
 
+
 _DEFAULT_CONFIG_RESOURCE = resource_files("cv_agent").joinpath("resources/default.toml")
 _DEFAULT_REGISTRY_RESOURCE = resource_files("cv_agent").joinpath("resources/capability_registry.json")
+
 
 def _default_config_path() -> Path | Traversable:
     return _DEFAULT_CONFIG_RESOURCE if _DEFAULT_CONFIG_RESOURCE.is_file() else _REPO_ROOT / "config" / "default.toml"
@@ -76,7 +77,7 @@ class AgentConfig:
     )
 
 
-def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
+def load_config(path: Path | Traversable | None = None) -> AgentConfig:
     """
     Load agent configuration from a TOML file.
 
@@ -114,7 +115,7 @@ def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
         overrides=overrides,
     )
 
-    registry_path_raw: Optional[str] = raw.get("registry_path")
+    registry_path_raw: str | None = raw.get("registry_path")
     registry_path = (
         Path(registry_path_raw)
         if registry_path_raw
