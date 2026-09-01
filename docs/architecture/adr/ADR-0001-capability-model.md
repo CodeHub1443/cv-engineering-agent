@@ -1,7 +1,6 @@
 # ADR-0001: Capability / Skill / Tool / Agent as four distinct registries
 
-- **Status:** Proposed — *seed ADR, written as a worked example of the required form.
-  Review and accept, amend, or reject before building on it.*
+- **Status:** Accepted
 - **Date:** 2026-08-30
 - **Layer:** cross-cutting
 - **Canon:** `[P§23]`, `[P§15]`, `[P§22]`, `[P§34]`, `[P§32]`
