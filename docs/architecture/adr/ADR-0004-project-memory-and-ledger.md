@@ -1,11 +1,11 @@
 # ADR-0004: Project Memory and Experiment Ledger Persistence
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-02
 - **Layer:** memory
 - **Canon:** `[P§10]`, `[P§12]`, `[P§24]`, `[P§25]`, `[P§26]`, `[P§29.2]`, `[P§29.4]`, `[P§29.5]`, `[P§33]`, `[P§34]`
 - **Supersedes / Superseded by:** —
-- **Issue:** #TBD
+- **Issue:** #19
 
 ## 1. Context
 

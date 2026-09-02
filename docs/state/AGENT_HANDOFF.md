@@ -9,7 +9,7 @@
 - **Integration branch:** `dev-munna`
 - **Release/integration branch:** `main`
 - **Work pattern:** `main` ← `dev-munna` ← short-lived work branches
-- **Current architecture gate:** ADR-0001 accepted; ADR-0002 accepted; ADR-0003 accepted.
+- **Current architecture gate:** ADR-0001 accepted; ADR-0002 accepted; ADR-0003 accepted; ADR-0004 accepted.
 
 ## ADR status
 
@@ -18,7 +18,7 @@
 | ADR-0001 — Capability model | **Accepted** |
 | ADR-0002 — LLM Gateway | **Accepted** |
 | ADR-0003 — Orchestration state | **Accepted** |
-| ADR-0004 — Project memory / experiment ledger | Unblocked (Q1–Q2, Q8 settled) |
+| ADR-0004 — Project memory / experiment ledger | **Accepted** |
 | ADR-0005 — Tools / MCP | Blocked by Q5 |
 | ADR-0006 — Knowledge / RAG | Not started |
 | ADR-0007 — Skills | Blocked by Q5 |
@@ -42,6 +42,7 @@
 - **D-018:** Q8 — dual-layer persistence: Git-tracked structured project memory plus local SQLite at `.cv_agent/state/experiments.sqlite` for high-volume experiment rows. See ADR-0004.
 - **D-019:** ADR-0003 orchestration state, checkpointing, and persistent approvals proposed; SQLite-backed state persistence, approval interrupts, and asynchronous external job handles defined.
 - **D-020:** ADR-0003 Orchestration State Machine, Checkpointing, and Persistent Approvals is accepted; runtime checkpoint persistence at `.cv_agent/state/checkpoints.sqlite` with configurable retention reconciled with D-018 experiment ledger.
+- **D-021:** ADR-0004 Project Memory and Experiment Ledger Persistence is accepted; dual-layer persistence (.cv_agent/memory/ and .cv_agent/state/experiments.sqlite), immutable completed results, explicit lifecycle transitions, relational baseline integrity, and workload-scoped metrics defined.
 
 ## Blocking questions
 
@@ -51,5 +52,5 @@ Q1–Q4, Q7–Q8 are resolved. Q5 continues to block ADR-0005 and ADR-0007.
 
 ## Next session
 
-1. Draft ADR-0004 (project memory / experiment ledger) using the resolved Q1–Q2 and Q8 constraints.
-2. Keep Q5 deferred until core architecture substrate is specified.
+1. Await Official PM review and merge of milestone promotion PR #18 (`dev-munna` -> `main`).
+2. Plan Phase 2 architecture roadmap (ADR-0005 tools/MCP or ADR-0006 knowledge/RAG).

@@ -13,20 +13,21 @@ integration branch; `main` remains the official integration/release branch and i
 promoted from `dev-munna` by the Official PM.
 
 The frozen project definition is `docs/PROJECT.md`. ADR-0001 (capability model),
-ADR-0002 (LLM gateway), and ADR-0003 (orchestration state & checkpointing) are accepted.
-Decisions Q1–Q4, Q7–Q8 are recorded. ADR-0004 is unblocked for drafting.
+ADR-0002 (LLM gateway), ADR-0003 (orchestration state & checkpointing), and
+ADR-0004 (project memory & experiment ledger) are accepted. Phase 1 substrate ADR
+specification is complete. Decisions Q1–Q4, Q7–Q8 are recorded.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| ADR-0004 architecture | #— | unblocked (ready for drafting) |
+| Phase 1 milestone promotion PR #18 | #18 | open (under Official PM review) |
 
 ## Next 3 actions
 
-1. Draft ADR-0004 (project memory / experiment ledger) using resolved Q1–Q2 & Q8.
-2. Keep Q5 deferred until Phase 1 core architecture ADRs are complete.
-3. Prepare tool/MCP boundary architecture pending Q5 resolution.
+1. Await Official PM review and merge of milestone promotion PR #18 (dev-munna -> main).
+2. Assess Q5 (NVIDIA capability inventory) before Phase 2 ADR-0005 (tool/MCP boundary).
+3. Prepare Phase 2 architecture (ADR-0006 knowledge/RAG or Q5 discovery for ADR-0005).
 
 ## Blockers
 
