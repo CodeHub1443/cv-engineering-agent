@@ -1,7 +1,7 @@
 # ADR-0003: Orchestration State Machine, Checkpointing, and Persistent Approvals
 
-- **Status:** Proposed
-- **Date:** 2026-09-01
+- **Status:** Accepted
+- **Date:** 2026-09-02
 - **Layer:** orchestration
 - **Canon:** `[P§6]`, `[P§21]`, `[P§24]`, `[P§25]`, `[P§29.8]`, `[P§33]`, `[P§34]`
 - **Supersedes / Superseded by:** —

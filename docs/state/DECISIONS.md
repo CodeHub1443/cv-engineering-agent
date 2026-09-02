@@ -26,6 +26,7 @@
 | D-017 | 2026-09-01 | Q7 — initial LLM provider classes are Anthropic, OpenAI, and Local/Ollama; routing is configuration-driven; transient failures may fall back sequentially; request/configuration failures fail fast; metadata is preserved. | `[P§20]` | ADR-0002 | accepted |
 | D-018 | 2026-09-01 | Q8 — dual-layer persistence: Git-tracked structured project memory plus local SQLite at `.cv_agent/state/experiments.sqlite` for high-volume experiment rows. | `[P§25]` | ADR-0004 | accepted |
 | D-019 | 2026-09-01 | ADR-0003 Orchestration State Machine, Checkpointing, and Persistent Approvals is drafted and proposed: LangGraph StateGraph with SQLite checkpointer at `.cv_agent/state/checkpoints.sqlite`, persistent approval interrupts, and asynchronous external job handles. | `[P§21]`, `[P§24]`, `[P§25]`, `[P§34]` | ADR-0003 | proposed |
+| D-020 | 2026-09-02 | ADR-0003 Orchestration State Machine, Checkpointing, and Persistent Approvals is accepted: LangGraph StateGraph with runtime checkpoint persistence at `.cv_agent/state/checkpoints.sqlite` with configurable retention, persistent approval interrupts surviving process restarts, and asynchronous external job handles. Reconciled with D-018 to preserve separate experiment ledger. | `[P§21]`, `[P§24]`, `[P§25]`, `[P§34]` | ADR-0003 | accepted |
 
 ## Reversals
 
