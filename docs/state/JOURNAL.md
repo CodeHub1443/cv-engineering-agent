@@ -125,3 +125,26 @@ memory.
 
 **Left open:** `DECISIONS.md` still needs D-008 marked superseded and D-015–D-018 appended.
 Q1–Q5 remain unanswered and therefore continue to block the dependent ADRs.
+
+---
+
+## 2026-09-01 — ADR-0003 Orchestration State & Checkpointing (docs/issue-adr-0003-orchestration-state)
+
+**Did:** Drafted `docs/architecture/adr/ADR-0003-orchestration-state.md` specifying the
+LangGraph orchestration state machine, typed `AgentState` schema, local SQLite checkpointer
+backed persistence at `.cv_agent/state/checkpoints.sqlite` (Q1 / D-013, Q8 / D-018),
+persistent human approval interrupt/resume mechanics surviving process restarts (Q3 / D-015,
+`[P§24]`), and out-of-process asynchronous external job handles (Q2 / D-014). Updated
+`STATUS.md`, `AGENT_HANDOFF.md`, and appended `D-017`, `D-018`, `D-019` to `DECISIONS.md`.
+
+**Why:** `[P§21]`, `[P§24]`, `[P§25]`, `[P§34]` — the orchestration layer must own workflow
+transitions, persistent checkpoints, approval gates, and error recovery contracts without
+leaking domain reasoning, LLM provider specifics, or tool execution into the graph.
+
+**Broke:** Nothing broken. Running tests and static analysis passed.
+
+**Learned:** Scoping checkpoints to local workspace SQLite satisfies both Q1 (per-project
+isolation) and Q3 (cross-process restart survival) cleanly without external network services.
+
+**Left open:** ADR-0003 revised with dual-SQLite reconciliation and full acceptance criteria, awaiting PM review/acceptance. ADR-0004 (project memory / experiment ledger) is unblocked for drafting. Q5 remains deferred.
+
