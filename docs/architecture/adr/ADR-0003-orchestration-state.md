@@ -16,7 +16,7 @@ state, workflow, branching, iteration, human approval, tool execution, retries,
 checkpoints, and multi-step reasoning.
 
 The existing repository contains a minimal prototype (`cv_agent/graph/state.py` and
-`cv_agent/graph/builder.py`) providing an ephemeral `START → initialize → END` graph
+`cv_agent/graph/builder.py`) providing a non-persisted prototype `START → initialize → END` graph
 backed by an in-memory `MemorySaver`. While sufficient for early packaging tests, it
 lacks:
 1. Persistence across process restarts, violating the requirement that human approval
@@ -59,10 +59,10 @@ tool integrations, and memory subsystems are constructed.
 
 ## 3. Decision
 
-We define the orchestration layer around a LangGraph `StateGraph(AgentState)` with local
-SQLite-backed checkpoint persistence (`SqliteSaver`) stored at `.cv_agent/state/checkpoints.sqlite`
-scoped to the project repository (Q1 / D-013), with in-memory `MemorySaver` retained solely
-for ephemeral unit tests.
+We define the orchestration layer around a LangGraph `StateGraph(AgentState)` with runtime
+checkpoint persistence with configurable retention backed by local SQLite (`SqliteSaver`)
+stored at `.cv_agent/state/checkpoints.sqlite` scoped to the project repository (Q1 / D-013),
+with in-memory `MemorySaver` retained solely for isolated, non-persisted unit tests.
 
 ### 3.1. Dual-SQLite Separation and Persistence Reconciliation (Q8 / D-018, `[P§34]`)
 
@@ -71,9 +71,9 @@ databases under `.cv_agent/state/` with non-overlapping lifecycles and responsib
 
 ```
 .cv_agent/state/
-├── checkpoints.sqlite    ← ADR-0003: Orchestration runtime state (ephemeral / medium-term)
+├── checkpoints.sqlite    ← ADR-0003: Runtime checkpoint persistence with configurable retention
 │                           Owns: super-step snapshots, channel values, pending approval tickets.
-│                           Lifecycle: pruneable after session completion / retention expiry.
+│                           Lifecycle: survives process termination; retained per configured retention policy; pruneable after session completion.
 └── experiments.sqlite    ← ADR-0004 / D-018: Experiment ledger (permanent / long-term)
                             Owns: immutable hyperparameters, metrics, dataset refs, artifact paths.
                             Lifecycle: permanent, reproducible historical record [P§25].
@@ -81,15 +81,16 @@ databases under `.cv_agent/state/` with non-overlapping lifecycles and responsib
 
 **Non-Negotiable Boundary Rules:**
 1. **No Silent Ledger Creep:** Orchestration checkpoints must **never** silently become the
-   experiment ledger. Node execution snapshots in `checkpoints.sqlite` capture only the
-   in-flight runtime state necessary to resume graph execution.
+   experiment ledger. Checkpoints survive process termination and capture the runtime execution
+   state necessary to pause and resume the graph; they are not permanent experiment records.
 2. **Domain Memory Handoff:** When a workflow node finishes an experiment or reaches a
    milestone, it commits the structured result to the Experiment Ledger (`experiments.sqlite`
    via ADR-0004) and writes persistent domain insights to Git-tracked project memory.
    The orchestration state only retains a string reference (`memory_ref` / `experiment_id`).
 3. **Retention & Pruning Independence:** `checkpoints.sqlite` is subject to a configurable
    retention policy (default 30 days post-completion) and can be vacuumed or pruned without
-   impacting the permanent experiment history in `experiments.sqlite`.
+   impacting the permanent experiment history in `experiments.sqlite`. Completed session checkpoint
+   records may be pruned safely once the session reaches completion or exceeds the retention window.
 
 ### 3.2. Core Orchestration Mechanisms
 
@@ -114,14 +115,14 @@ databases under `.cv_agent/state/` with non-overlapping lifecycles and responsib
    only one active execution thread modifies a session's state at a time.
 6. **Checkpoint Atomicity & Crash Recovery:** SQLite Write-Ahead Logging (WAL) mode guarantees
    atomic super-step commits. Uncommitted partial writes during an abrupt crash rollback
-   cleanly, allowing resumption from the last verified super-step snapshot.
+   cleanly, allowing deterministic resumption from the last verified super-step snapshot.
 
 ## 4. Alternatives considered
 
 | Alternative | Evidence for | Evidence against | Why not chosen |
 |---|---|---|---|
-| **1. Ephemeral In-Memory Checkpointer (`MemorySaver` only)** | Zero dependencies; trivial setup; already present in Phase 0 prototype. | Fails Q3 / D-015 completely: process termination destroys pending approval state and midway execution traces. Requires re-running entire workflows if interrupted. | Violates persistent approval contract (Q3 / D-015) and reproducibility requirements `[P§25]`. |
-| **2. Single Consolidated SQLite Database for Checkpoints & Experiments** | Single file to manage under `.cv_agent/state/`. | Violates `[P§34]` separation of concerns; tightly couples ephemeral orchestration runtime serialization (LangGraph pickle/msgpack channels) with permanent, queryable experiment schema (ADR-0004); makes pruning runtime checkpoints risky for permanent experiment retention. | Violates layer separation and makes retention governance fragile. |
+| **1. In-Memory Checkpointer (`MemorySaver` only)** | Zero dependencies; trivial setup; already present in Phase 0 prototype. | Fails Q3 / D-015 completely: process termination destroys pending approval state and midway execution traces. Requires re-running entire workflows if interrupted. | Violates persistent approval contract (Q3 / D-015) and reproducibility requirements `[P§25]`. |
+| **2. Single Consolidated SQLite Database for Checkpoints & Experiments** | Single file to manage under `.cv_agent/state/`. | Violates `[P§34]` separation of concerns; tightly couples runtime checkpoint state serialization (LangGraph pickle/msgpack channels) with the permanent, queryable experiment schema (ADR-0004); makes pruning runtime checkpoints risky for permanent experiment retention. | Violates layer separation and makes retention governance fragile. |
 | **3. Custom Finite State Machine (plain Python FSM or Celery/Airflow)** | Full custom control without LangGraph framework constraints; robust DAG scheduling in Airflow. | High implementation overhead; reinvents state graph branching, streaming, and breakpoint interrupts; Airflow/Celery introduces heavy infrastructure dependencies (broker, worker daemons) unsuited for local workstation CLI operation (Q2 / D-014). | `[P§21]` explicitly mandates LangGraph; custom FSMs add unnecessary boilerplate and maintenance burden `[P§34]`. |
 | **4. Client-Server Distributed Checkpointer (PostgreSQL / Redis)** | Concurrent multi-user access; enterprise clustering; horizontal scaling. | Violates Q1 / D-013 (single-project local repository isolation) and Q2 / D-014 (local workstation execution); requires running external services/containers for basic local agent usage. | Over-engineering for a local workstation engineering assistant. Local embedded SQLite provides zero-config persistence with ACID reliability. |
 
@@ -337,11 +338,11 @@ def prune_checkpoints(
   - Fully compliant persistent human-in-the-loop approval gates (Q3 / D-015, `[P§24]`);
   - Asynchronous tracking of external GPU training jobs without blocking agent runtime (Q2 / D-014);
   - Complete, reproducible audit trail of node transitions and token usage `[P§25]`;
-  - Clean separation between ephemeral orchestration state (`checkpoints.sqlite`) and permanent experiment records (`experiments.sqlite`) per `[P§34]`, Q8 / D-018.
+  - Clean separation between runtime checkpoint persistence with configurable retention (`checkpoints.sqlite`) and permanent experiment records (`experiments.sqlite`) per `[P§34]`, Q8 / D-018.
 - **Makes harder:**
   - Nodes cannot perform raw ad-hoc mutations outside the `AgentState` schema;
   - State serialization requires all values within `AgentState` to be JSON/msgpack-serializable;
-  - Testing requires managing SQLite test fixtures or explicitly using ephemeral checkpointer mode.
+  - Testing requires managing SQLite test fixtures or explicitly using in-memory checkpointer mode.
 - **Costs:**
   - Local disk I/O on node state transitions (negligible SQLite overhead for typical project state sizes <10MB);
   - Dependency on `langgraph-checkpoint-sqlite` (or `aiosqlite`/built-in SQLite saver).
