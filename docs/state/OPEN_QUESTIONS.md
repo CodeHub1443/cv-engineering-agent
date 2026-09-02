@@ -34,10 +34,11 @@ Phase-1 scope substantially.~~ **Answered 2026-09-01:** Phase 1 architecture tar
 real CV project. The prison/garment examples are reference workloads and validation
 fixtures, not the architectural scope itself.
 
-**Q5. Which NVIDIA capabilities are actually installed and invocable today?** `[P§15]` —
+~~**Q5. Which NVIDIA capabilities are actually installed and invocable today?** `[P§15]` —
 The design says "discover and invoke, do not duplicate." Discovery mechanism depends on
 whether these are MCP servers, CLI tools, Python SDKs, or agent skills.
-*Blocks: ADR-0005, ADR-0007.*
+*Blocks: ADR-0005, ADR-0007.*~~
+**Answered 2026-09-02:** Factual audit confirms: (1) Verified local capabilities: host is macOS arm64 with general development tools only; zero local NVIDIA GPUs, drivers, CUDA toolkits, or NVIDIA Python runtimes exist. (2) Documented/planned capabilities: 20 capabilities reference NVIDIA tools in the registry, all currently `status: "planned"` with no executable bindings wired (D-009). (3) Absent capabilities: all local NVIDIA execution tools (`nvidia-smi`, `nvcc`, `trtexec`, `tegrastats`, TensorRT, Triton) are absent on the host. (4) Remote execution targets: per D-014, GPU workloads require external execution targets, but no remote GPU, cluster, or NVIDIA MCP server is currently configured. NVIDIA capabilities are currently known but unavailable until a compatible execution target is configured; ADR-0005 and ADR-0007 are unblocked. See D-022.
 
 ## Soon — needed within one or two phases
 
