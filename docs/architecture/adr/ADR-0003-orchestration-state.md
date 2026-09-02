@@ -142,6 +142,7 @@ from typing_extensions import TypedDict
 
 class LifecycleStatus(str, Enum):
     """Lifecycle status of the agent orchestration session."""
+
     INITIALIZING = "initializing"
     READY = "ready"
     PLANNING = "planning"
@@ -155,6 +156,7 @@ class LifecycleStatus(str, Enum):
 
 class StageName(str, Enum):
     """Canonical CV engineering lifecycle stages [P§6], [P§35]."""
+
     DISCOVER = "discover"
     DEFINE = "define"
     DEVELOP = "develop"
@@ -165,6 +167,7 @@ class StageName(str, Enum):
 
 class ApprovalAction(str, Enum):
     """Decision submitted by human reviewer [P§24], [P§29.8]."""
+
     APPROVED = "approved"
     REJECTED = "rejected"
     MODIFIED = "modified"
@@ -172,6 +175,7 @@ class ApprovalAction(str, Enum):
 
 class ApprovalRiskLevel(str, Enum):
     """Risk tier for human-in-the-loop approval requests."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -180,6 +184,7 @@ class ApprovalRiskLevel(str, Enum):
 
 class ApprovalRequest(TypedDict, total=False):
     """Persistent human approval ticket (Q3 / D-015, [P§24])."""
+
     request_id: str
     action_type: str
     description: str
@@ -193,6 +198,7 @@ class ApprovalRequest(TypedDict, total=False):
 
 class ApprovalResponse(TypedDict, total=False):
     """Resolved response from human reviewer."""
+
     request_id: str
     action: ApprovalAction
     feedback: str | None
@@ -203,6 +209,7 @@ class ApprovalResponse(TypedDict, total=False):
 
 class ActiveJobRef(TypedDict, total=False):
     """Reference to an external job running out-of-process (Q2 / D-014)."""
+
     job_id: str
     job_type: Literal["training", "profiling", "evaluation", "export"]
     target: Literal["local_gpu", "remote_gpu", "cloud"]
@@ -213,6 +220,7 @@ class ActiveJobRef(TypedDict, total=False):
 
 class StepRecord(TypedDict, total=False):
     """Immutable trace of a single node execution in the graph."""
+
     step_index: int
     node: str
     stage: StageName | None
@@ -278,6 +286,7 @@ from cv_agent.graph.state import AgentState, ApprovalResponse
 @dataclass(frozen=True)
 class OrchestratorConfig:
     """Configuration for constructing the LangGraph orchestration engine."""
+
     workspace_root: Path
     checkpoint_db_path: Path
     enable_persistence: bool = True
