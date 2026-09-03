@@ -224,7 +224,9 @@ class ToolRiskLevel(str, Enum):
 
     READ_ONLY = "read_only"  # Non-mutating inspection, query, or local check
     RESOURCE_INTENSIVE = "resource_intensive"  # Heavy GPU/CPU compute, profiling
-    DESTRUCTIVE = "destructive"  # Data mutations, deletions, system configuration changes
+    DESTRUCTIVE = (
+        "destructive"  # Data mutations, deletions, system configuration changes
+    )
 
 
 class ToolExecutionStatus(str, Enum):
@@ -307,9 +309,7 @@ class ToolResult:
     tool_id: ToolId
     execution_id: ExecutionId
     target_id: TargetId
-    status: (
-        ToolExecutionStatus  # Terminal outcome for sync tools; dispatch outcome for async tools
-    )
+    status: ToolExecutionStatus  # Terminal outcome for sync tools; dispatch outcome for async tools
     structured_output: dict[str, Any] = field(default_factory=dict)
     diagnostics: dict[str, Any] = field(default_factory=dict)  # stdout, stderr, logs
     artifacts: tuple[str, ...] = ()

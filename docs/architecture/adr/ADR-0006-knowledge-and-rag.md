@@ -142,11 +142,17 @@ Information in computer vision depreciates over time. The Knowledge subsystem ap
 ```python
 class TopicDomain(str, Enum):
     FRAMEWORK_API = "framework_api"  # TensorRT, PyTorch APIs: horizon = 30 days
-    ECOSYSTEM_RELEASE = "ecosystem_release"  # Model releases, versions: horizon = 60 days
-    HARDWARE_SPEC = "hardware_spec"  # GPU compute caps, Jetson specs: horizon = 180 days
+    ECOSYSTEM_RELEASE = (
+        "ecosystem_release"  # Model releases, versions: horizon = 60 days
+    )
+    HARDWARE_SPEC = (
+        "hardware_spec"  # GPU compute caps, Jetson specs: horizon = 180 days
+    )
     BENCHMARK_RESULT = "benchmark_result"  # SOTA numbers, speedups: horizon = 180 days
     CV_ALGORITHM = "cv_algorithm"  # Loss functions, architectures: horizon = 365 days
-    CORE_PRINCIPLES = "core_principles"  # Epipolar geometry, filtering: horizon = 1825 days
+    CORE_PRINCIPLES = (
+        "core_principles"  # Epipolar geometry, filtering: horizon = 1825 days
+    )
 ```
 
 When evaluating a retrieved chunk, the retrieval engine calculates a **Freshness Factor** ($F \in [0.0, 1.0]$):
