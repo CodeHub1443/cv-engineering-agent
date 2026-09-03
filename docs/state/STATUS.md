@@ -15,21 +15,21 @@ promoted from `dev-munna` by the Official PM.
 The frozen project definition is `docs/PROJECT.md`. ADR-0001 (capability model),
 ADR-0002 (LLM gateway), ADR-0003 (orchestration state & checkpointing),
 ADR-0004 (project memory & experiment ledger), ADR-0005 (tools & MCP boundary),
-ADR-0006 (knowledge & RAG), and ADR-0007 (skills architecture & discovery)
-are accepted. Decisions Q1–Q5, Q7–Q8, D-022, D-023, D-024, and D-025
-are recorded. ADR-0008 (Reasoning subsystem) is drafted on `docs/issue-adr-0008-reasoning`.
+ADR-0006 (knowledge & RAG), ADR-0007 (skills architecture & discovery), and
+ADR-0008 (reasoning subsystem) are accepted. Decisions Q1–Q5, Q7–Q8, D-022,
+D-023, D-024, D-025, and D-026 are recorded.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| ADR-0008 Reasoning Subsystem | #24 | proposed on `docs/issue-adr-0008-reasoning` |
+| None | — | — |
 
 ## Next 3 actions
 
-1. Open and verify PR for ADR-0008 (Reasoning Subsystem) into `dev-munna`.
-2. Complete ADR-0008 acceptance synchronization on `dev-munna`.
-3. Unblock downstream milestone when authorized by the Official PM.
+1. Formulate and resolve Q10 (dataset storage/versioning) in `docs/state/OPEN_QUESTIONS.md`.
+2. Draft ADR-0009 (Dataset Subsystem) once Q10 is settled.
+3. Prepare next milestone promotion PR when authorized by the Official PM.
 
 ## Blockers
 

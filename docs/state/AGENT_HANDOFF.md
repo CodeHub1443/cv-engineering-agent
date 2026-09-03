@@ -22,7 +22,7 @@
 | ADR-0005 — Tools / MCP | **Accepted** |
 | ADR-0006 — Knowledge / RAG | **Accepted** |
 | ADR-0007 — Skills | **Accepted** |
-| ADR-0008 — Reasoning | Proposed in drafting (`docs/issue-adr-0008-reasoning`) |
+| ADR-0008 — Reasoning | **Accepted** |
 | ADR-0009 — Dataset subsystem | Not started |
 | ADR-0010 — Training | Unblocked (Q2 settled) |
 | ADR-0011 — Evaluation | Not started |
@@ -47,6 +47,7 @@
 - **D-023:** ADR-0005 Tools and MCP Execution Boundary is accepted; typed tool descriptor contracts decoupled from transport protocols; execution target abstraction (LOCAL, REMOTE, MCP_ENDPOINT); operational discovery preserving ADR-0001 ToolId registry authority; NVIDIA capabilities report "known but unavailable" without local fallback per D-022; structured argument vector execution without shell interpretation; approval precondition enforcement per docs/APPROVALS.md; and type-safe asynchronous ActiveJobHandoff mechanically aligned with ADR-0003 ActiveJobRef.
 - **D-024:** ADR-0006 Knowledge & RAG Subsystem is accepted as the authoritative decision; dual knowledge mechanisms (persistent knowledge vs. live research); Research Engine (Roadmap 05) as active investigator vs. Knowledge (Roadmap 04) as passive evidence substrate; 8-tier evidence weighting hierarchy with LinkedIn as signal-only (weight <= 0.2); mandatory provenance invariant requiring origin anchor (Git SHA, content SHA-256, or ETag); domain freshness horizons with linear decay and expired suppression for volatile domains; normalized hybrid scoring (S_dense and S_sparse normalized to [0,1] before linear fusion S_hybrid = 0.65*S_dense + 0.35*S_sparse); single-project workspace containment at .cv_agent/knowledge/; strict decoupling from Project Memory (ADR-0004) and LLM Gateway (ADR-0002, dynamic vector dimensionality); and prompt-injection quarantine enforcing data/instruction separation without altering evidential text.
 - **D-025:** ADR-0007 Skills Architecture & NVIDIA Capability Discovery is accepted as the authoritative decision; declarative SkillDescriptor contracts decoupled from tool execution; resolution hierarchy (CapabilityId -> SkillId -> ToolId) preserving ADR-0001 registry authority; authoritative SkillRegistry (validated/registered skills) decoupled from ephemeral runtime discovery cache; declarative NVIDIA ecosystem adapters (TensorRT, Model Optimizer PTQ/QAT, TAO, DeepStream, DALI, Triton, Jetson, CUDA Agent) per [P§15]; typed 7-state availability machine (KNOWN, DISCOVERED, CONFIGURED, AVAILABLE, EXECUTABLE, UNAVAILABLE, KNOWN_BUT_UNAVAILABLE); known-but-unavailable constraint enforcing zero silent CPU fallback on unconfigured NVIDIA targets (D-022); execution target binding aligned with ADR-0005 (LOCAL, REMOTE, MCP_ENDPOINT); approval execution requirement declaration decoupled from ADR-0003/APPROVALS.md policy authority; and proposed Phase 3 interface contracts (SkillRegistry, SkillResolver, SkillExecutor).
+- **D-026:** ADR-0008 Reasoning Subsystem Architecture is accepted as the authoritative decision; cognitive engineering judgment decoupled from orchestration (ADR-0003), execution (ADR-0005), and retrieval (ADR-0006); specialized stateless provider-agnostic reasoning components (ProblemFramingNode, BaselineSelectionNode, ExperimentDiagnosisNode, StrategyFormulationNode); provider-isolated LLM Gateway consumption with zero direct provider SDK imports per [P§20]; passive grounded evidence consumption with dedicated GroundingValidator detecting evidence contradictions and unsupported speculative inferences; capability intent formulation (CapabilityId) strictly decoupled from downstream capability validation and skill mapping (ADR-0007 SkillResolver resolving against ADR-0001); standardized Pydantic v2 schemas with ConfigDict(frozen=True); mandatory DecisionPayload[T] audit envelope containing DecisionAuditRecord; approval recommendation flagging (recommends_approval = True) deferring policy evaluation to ADR-0003/APPROVALS.md; and implementation targeted for Phase 4 (DISCOVER / DEFINE workflow per ROADMAP.md).
 
 ## Blocking questions
 
@@ -54,5 +55,5 @@ Q1–Q5, Q7–Q8 are resolved. Q10 (dataset storage/versioning) remains open and
 
 ## Next session
 
-1. Verify CI and merge PR for ADR-0008 (Reasoning Subsystem) into `dev-munna`.
-2. Perform ADR-0008 acceptance synchronization on `dev-munna` (record D-026).
+1. Formulate and resolve Q10 (dataset storage/versioning) in `docs/state/OPEN_QUESTIONS.md`.
+2. Draft ADR-0009 (Dataset Subsystem) once Q10 is settled.

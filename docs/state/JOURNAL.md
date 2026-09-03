@@ -232,3 +232,17 @@ isolation) and Q3 (cross-process restart survival) cleanly without external netw
 
 **Left open:** PR into `dev-munna` prepared for CI verification and merge. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
 
+---
+
+## 2026-09-03 — ADR-0008 Acceptance Synchronization (D-026)
+
+**Did:** Formally marked ADR-0008 (`docs/architecture/adr/ADR-0008-reasoning-subsystem.md`) as `Status: Accepted` on `dev-munna` following review, corrections (Revisions 1–3), and merge of PR #25 (`e4b0527`). Recorded decision `D-026` in `DECISIONS.md`. Synchronized rolling state ledgers (`STATUS.md`, `AGENT_HANDOFF.md`, `JOURNAL.md`). Deleted local and remote short-lived branch `docs/issue-adr-0008-reasoning`. Issue #24 is closed by PR #25.
+
+**Why:** `[P§4]`, `[P§5]`, `[P§6]`, `[P§19]`, `[P§20]`, `[P§29.1]`, `[P§29.2]`, `[P§34]` — completes the architecture specification for the Reasoning Subsystem ahead of dataset and experiment execution phases.
+
+**Broke:** Nothing broken. Governance and state synchronization only; zero runtime implementation code modified.
+
+**Learned:** Mandatory envelope wrapping (`DecisionPayload[T]`) guarantees that every empirical decision emitted by a reasoning component carries cryptographic context references, model metadata, citation URIs, and assumptions without relying on ad-hoc model compliance.
+
+**Left open:** Q10 (dataset storage/versioning) remains open and blocks ADR-0009 (Dataset subsystem).
+

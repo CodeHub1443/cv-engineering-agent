@@ -1,6 +1,6 @@
 # ADR-0008: Reasoning Subsystem Architecture
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-03
 - **Layer:** reasoning / orchestration
 - **Canon:** `[P§4]`, `[P§5]`, `[P§6]`, `[P§19]`, `[P§20]`, `[P§23]`, `[P§24]`, `[P§29.1]`, `[P§29.2]`, `[P§29.3]`, `[P§29.4]`, `[P§34]`
