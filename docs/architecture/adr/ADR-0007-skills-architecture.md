@@ -1,6 +1,6 @@
 # ADR-0007: Skills Architecture & NVIDIA Capability Discovery
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-03
 - **Layer:** skills / execution
 - **Canon:** `[P§15]`, `[P§23]`, `[P§29.9]`, `[P§34]`

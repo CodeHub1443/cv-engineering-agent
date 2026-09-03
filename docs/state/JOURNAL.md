@@ -204,3 +204,17 @@ isolation) and Q3 (cross-process restart survival) cleanly without external netw
 
 **Left open:** ADR-0007 specification drafted in `Proposed` status, awaiting architectural review. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
 
+---
+
+## 2026-09-03 — ADR-0007 Acceptance Synchronization (D-025)
+
+**Did:** Formally marked ADR-0007 (`docs/architecture/adr/ADR-0007-skills-architecture.md`) as `Status: Accepted` on `dev-munna` following review, corrections, and merge of PR #23. Recorded decision `D-025` in `DECISIONS.md`. Synchronized rolling state ledgers (`STATUS.md`, `AGENT_HANDOFF.md`, `JOURNAL.md`). ADR-0008 (Reasoning subsystem) is unblocked as the next Phase 1 architecture milestone. Issue #24 remains open but parked until Phase 3 skills implementation is scheduled.
+
+**Why:** `[P§15]`, `[P§23]`, `[P§34]` — completes the Phase 1 architectural contract for the Skills subsystem, formalizing procedural contracts, the NVIDIA declarative inventory, the 7-state availability machine, and the known-but-unavailable constraint (`D-022`) ahead of reasoning subsystem architecture.
+
+**Broke:** Nothing broken. Governance and state synchronization only; zero runtime implementation code altered.
+
+**Learned:** Explicit separation between authoritative registry entries and ephemeral discovery cache prevents dynamically discovered MCP endpoints or remote targets from polluting core capability identities while preserving flexible runtime extensibility.
+
+**Left open:** ADR-0008 (Reasoning Subsystem) is unblocked and next in sequence. Issue #24 parked. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
+
