@@ -14,30 +14,29 @@ promoted from `dev-munna` by the Official PM.
 
 The frozen project definition is `docs/PROJECT.md`. ADR-0001 (capability model),
 ADR-0002 (LLM gateway), ADR-0003 (orchestration state & checkpointing),
-ADR-0004 (project memory & experiment ledger), and ADR-0005 (tools & MCP boundary)
-are accepted. Decisions Q1–Q5, Q7–Q8, D-022, and D-023 are recorded. ADR-0006
-(Knowledge / RAG) is the next architectural specification.
+ADR-0004 (project memory & experiment ledger), ADR-0005 (tools & MCP boundary),
+and ADR-0006 (knowledge & RAG) are accepted. Decisions Q1–Q5, Q7–Q8, D-022,
+D-023, and D-024 are recorded. ADR-0007 (Skills Architecture & Discovery)
+is the next architectural specification.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| Phase 1 milestone promotion PR #18 | #18 | open (under Official PM review) |
-| ADR-0006 Knowledge & RAG specification | #TBD | in drafting on `docs/issue-adr-0006-knowledge-rag` |
+| None | — | — |
 
 ## Next 3 actions
 
-1. Complete architectural review and verification of ADR-0006 (Knowledge & RAG).
-2. Await Official PM review and merge of milestone promotion PR #18 (dev-munna -> main).
-3. Advance Phase 2 research pipeline specification per `docs/RESEARCH_POLICY.md`.
+1. Specify ADR-0007 (Skills Architecture & NVIDIA Discovery) specification.
+2. Formulate Phase 3 skill registry and NVIDIA adapter interfaces per `[P§15]`.
+3. Prepare next milestone promotion PR when authorized by the Official PM.
 
 ## Blockers
 
 - Q10 in `docs/state/OPEN_QUESTIONS.md` is open, blocking ADR-0009.
-- Downstream implementation work is gated on Phase 1 ADR acceptance.
+- Downstream implementation work is gated on architecture ADR acceptance.
 
 ## Do not start yet
 
 Stage workflows, RAG, training execution, SkillSource/skill discovery, or
 CapabilityResolver implementation. These depend on accepted architecture ADRs.
-

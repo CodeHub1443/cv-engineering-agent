@@ -176,3 +176,17 @@ isolation) and Q3 (cross-process restart survival) cleanly without external netw
 
 **Left open:** ADR-0006 specification drafted in `Proposed` status, awaiting architectural review. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
 
+---
+
+## 2026-09-03 — ADR-0006 Knowledge & RAG Subsystem Formally Accepted (dev-munna)
+
+**Did:** Formally accepted `docs/architecture/adr/ADR-0006-knowledge-and-rag.md` as the authoritative decision (`D-024`) following PR #20 and PR #21 merge into `dev-munna`. Settled the Knowledge architecture: dual knowledge mechanisms (persistent knowledge vs. live research); Research Engine (Roadmap 05) as active investigator vs. Knowledge Subsystem (Roadmap 04) as passive evidence substrate; 8-tier evidence hierarchy with LinkedIn as discovery signal only (weight <= 0.2); mandatory provenance invariant requiring canonical URI, origin anchor (Git SHA, content SHA-256, or ETag), author/org, date, and source class; domain freshness horizons with linear decay and volatile domain expiration suppression; normalized hybrid scoring (S_dense and S_sparse normalized to [0, 1] before fusion 0.65 S_dense + 0.35 S_sparse); single-project workspace containment at `.cv_agent/knowledge/` (`D-013`); strict boundary decoupling from Project Memory (`ADR-0004`) and LLM Gateway (`ADR-0002`, dynamic vector dimensionality); and prompt-injection defense establishing the architectural data/instruction boundary with zero execution authority. Recorded `D-024` in `DECISIONS.md`; synchronized `STATUS.md`, `AGENT_HANDOFF.md`, and `JOURNAL.md`.
+
+**Why:** `[P§16]`, `[P§17]`, `[P§18]`, `[P§19]`, `[P§20]`, `[P§29.3]`, `[P§29.7]`, `[P§34]` — establishes settled architectural specification for Phase 2 Knowledge & RAG prior to Phase 3 Skills architecture.
+
+**Broke:** Nothing broken. Governance and state synchronization only; no runtime implementation code modified.
+
+**Learned:** Explicit normalization of dense and lexical scores is required prior to linear fusion to guarantee mathematically sound, deterministic retrieval ranking across disparate metric scales. Enforcing data/instruction boundaries as the primary security control protects agent reasoning without altering or censoring evidential source text.
+
+**Left open:** ADR-0007 (Skills Architecture & NVIDIA Discovery) is the next architectural specification. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
+

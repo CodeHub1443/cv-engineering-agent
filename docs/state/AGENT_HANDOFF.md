@@ -9,7 +9,7 @@
 - **Integration branch:** `dev-munna`
 - **Release/integration branch:** `main`
 - **Work pattern:** `main` ← `dev-munna` ← short-lived work branches
-- **Current architecture gate:** ADR-0001 accepted; ADR-0002 accepted; ADR-0003 accepted; ADR-0004 accepted; ADR-0005 accepted.
+- **Current architecture gate:** ADR-0001 accepted; ADR-0002 accepted; ADR-0003 accepted; ADR-0004 accepted; ADR-0005 accepted; ADR-0006 accepted.
 
 ## ADR status
 
@@ -20,8 +20,8 @@
 | ADR-0003 — Orchestration state | **Accepted** |
 | ADR-0004 — Project memory / experiment ledger | **Accepted** |
 | ADR-0005 — Tools / MCP | **Accepted** |
-| ADR-0006 — Knowledge / RAG | In drafting (`docs/issue-adr-0006-knowledge-rag`) |
-| ADR-0007 — Skills | Unblocked (Q5 settled) |
+| ADR-0006 — Knowledge / RAG | **Accepted** |
+| ADR-0007 — Skills | Unblocked (Q5 settled; next in sequence) |
 | ADR-0008 — Reasoning | Not started |
 | ADR-0009 — Dataset subsystem | Not started |
 | ADR-0010 — Training | Unblocked (Q2 settled) |
@@ -45,6 +45,7 @@
 - **D-021:** ADR-0004 Project Memory and Experiment Ledger Persistence is accepted; dual-layer persistence (.cv_agent/memory/ and .cv_agent/state/experiments.sqlite), immutable completed results, explicit lifecycle transitions, relational baseline integrity, and workload-scoped metrics defined.
 - **D-022:** Q5 — factual NVIDIA capability inventory: verified local host is macOS arm64 with zero installed NVIDIA hardware, drivers, or SDKs; 20 registry capabilities remain documented/planned (D-009); local NVIDIA execution tools are absent; remote execution targets (D-014) and NVIDIA MCP servers are currently unconfigured. NVIDIA capabilities are currently known but unavailable until a compatible execution target is configured; ADR-0005 and ADR-0007 are unblocked.
 - **D-023:** ADR-0005 Tools and MCP Execution Boundary is accepted; typed tool descriptor contracts decoupled from transport protocols; execution target abstraction (LOCAL, REMOTE, MCP_ENDPOINT); operational discovery preserving ADR-0001 ToolId registry authority; NVIDIA capabilities report "known but unavailable" without local fallback per D-022; structured argument vector execution without shell interpretation; approval precondition enforcement per docs/APPROVALS.md; and type-safe asynchronous ActiveJobHandoff mechanically aligned with ADR-0003 ActiveJobRef.
+- **D-024:** ADR-0006 Knowledge & RAG Subsystem is accepted as the authoritative decision; dual knowledge mechanisms (persistent knowledge vs. live research); Research Engine (Roadmap 05) as active investigator vs. Knowledge (Roadmap 04) as passive evidence substrate; 8-tier evidence weighting hierarchy with LinkedIn as signal-only (weight <= 0.2); mandatory provenance invariant requiring origin anchor (Git SHA, content SHA-256, or ETag); domain freshness horizons with linear decay and expired suppression for volatile domains; normalized hybrid scoring (S_dense and S_sparse normalized to [0,1] before linear fusion S_hybrid = 0.65*S_dense + 0.35*S_sparse); single-project workspace containment at .cv_agent/knowledge/; strict decoupling from Project Memory (ADR-0004) and LLM Gateway (ADR-0002, dynamic vector dimensionality); and prompt-injection quarantine enforcing data/instruction separation without altering evidential text.
 
 ## Blocking questions
 
@@ -52,5 +53,5 @@ Q1–Q5, Q7–Q8 are resolved. Q10 (dataset storage/versioning) remains open and
 
 ## Next session
 
-1. Review and refine ADR-0006 (Knowledge & RAG) specification on `docs/issue-adr-0006-knowledge-rag`.
-2. Await Official PM review and merge of milestone promotion PR #18 (`dev-munna` -> `main`).
+1. Prepare and specify ADR-0007 (Skills Architecture & NVIDIA Capability Discovery).
+2. Formulate Phase 3 skill registry and NVIDIA adapter interfaces per `[P§15]`.

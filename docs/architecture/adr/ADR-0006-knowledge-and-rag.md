@@ -1,6 +1,6 @@
 # ADR-0006: Knowledge & RAG Subsystem
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-03
 - **Layer:** knowledge / retrieval
 - **Canon:** `[P§16]`, `[P§17]`, `[P§18]`, `[P§19]`, `[P§20]`, `[P§29.3]`, `[P§29.7]`, `[P§34]`
