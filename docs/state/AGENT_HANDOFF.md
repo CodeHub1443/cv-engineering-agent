@@ -22,7 +22,7 @@
 | ADR-0005 — Tools / MCP | **Accepted** |
 | ADR-0006 — Knowledge / RAG | **Accepted** |
 | ADR-0007 — Skills | **Accepted** |
-| ADR-0008 — Reasoning | Unblocked; next in sequence |
+| ADR-0008 — Reasoning | Proposed in drafting (`docs/issue-adr-0008-reasoning`) |
 | ADR-0009 — Dataset subsystem | Not started |
 | ADR-0010 — Training | Unblocked (Q2 settled) |
 | ADR-0011 — Evaluation | Not started |
@@ -54,5 +54,5 @@ Q1–Q5, Q7–Q8 are resolved. Q10 (dataset storage/versioning) remains open and
 
 ## Next session
 
-1. Formulate and draft ADR-0008 (Reasoning Subsystem) on `dev-munna`.
-2. Keep Issue #24 parked until Phase 3 skills implementation is scheduled.
+1. Verify CI and merge PR for ADR-0008 (Reasoning Subsystem) into `dev-munna`.
+2. Perform ADR-0008 acceptance synchronization on `dev-munna` (record D-026).
