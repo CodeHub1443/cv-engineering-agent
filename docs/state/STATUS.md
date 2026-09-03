@@ -17,19 +17,19 @@ ADR-0002 (LLM gateway), ADR-0003 (orchestration state & checkpointing),
 ADR-0004 (project memory & experiment ledger), ADR-0005 (tools & MCP boundary),
 ADR-0006 (knowledge & RAG), and ADR-0007 (skills architecture & discovery)
 are accepted. Decisions Q1–Q5, Q7–Q8, D-022, D-023, D-024, and D-025
-are recorded. ADR-0008 (Reasoning subsystem) is the next architectural specification.
+are recorded. ADR-0008 (Reasoning subsystem) is drafted on `docs/issue-adr-0008-reasoning`.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| None | — | — |
+| ADR-0008 Reasoning Subsystem | #24 | proposed on `docs/issue-adr-0008-reasoning` |
 
 ## Next 3 actions
 
-1. Formulate ADR-0008 (Reasoning Subsystem) specification.
-2. Unblock Issue #24 for Phase 3 skills implementation when scheduled.
-3. Prepare next milestone promotion PR when authorized by the Official PM.
+1. Open and verify PR for ADR-0008 (Reasoning Subsystem) into `dev-munna`.
+2. Complete ADR-0008 acceptance synchronization on `dev-munna`.
+3. Unblock downstream milestone when authorized by the Official PM.
 
 ## Blockers
 

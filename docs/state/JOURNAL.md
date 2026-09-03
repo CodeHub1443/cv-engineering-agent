@@ -218,3 +218,17 @@ isolation) and Q3 (cross-process restart survival) cleanly without external netw
 
 **Left open:** ADR-0008 (Reasoning Subsystem) is unblocked and next in sequence. Issue #24 parked. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
 
+---
+
+## 2026-09-03 — ADR-0008 Reasoning Subsystem Drafting (docs/issue-adr-0008-reasoning)
+
+**Did:** Created short-lived task branch `docs/issue-adr-0008-reasoning` from `dev-munna` to implement Issue #24. Drafted `docs/architecture/adr/ADR-0008-reasoning-subsystem.md` in `Status: Proposed`. Established the Reasoning architecture: stateless provider-agnostic reasoning components (`ProblemFramingNode`, `BaselineSelectionNode`, `ExperimentDiagnosisNode`, `StrategyFormulationNode`); standardized Pydantic v2 decision contracts wrapped in a mandatory `DecisionPayload[T]` envelope with `DecisionAuditRecord`; strict LLM Gateway consumption boundary with zero provider SDK imports per `[P§20]`; read-only quarantined knowledge evidence consumption (`<knowledge_citation>`) verified by a dedicated `GroundingValidator` per `[P§16]`, `[P§17]`, ADR-0006; capability intent formulation requesting `CapabilityId` with authoritative validation and skill resolution delegated to ADR-0007 / ADR-0001; approval recommendation flagging (`recommends_approval = True`) deferred to Orchestration (ADR-0003, `docs/APPROVALS.md`) per `[P§24]`; and proposed Phase 4 interface contracts. Synchronized `STATUS.md` and `AGENT_HANDOFF.md`.
+
+**Why:** `[P§4]`, `[P§5]`, `[P§6]`, `[P§19]`, `[P§20]`, `[P§29.1]`, `[P§29.2]`, `[P§34]` — isolates cognitive engineering judgment from workflow orchestration, tool execution, and knowledge storage while preventing prompt piles and conversational chatbot anti-patterns.
+
+**Broke:** Nothing broken. Architecture and specification contracts only; zero runtime implementation code modified.
+
+**Learned:** Explicitly decoupling capability intent from registry authority allows reasoning nodes to formulate hypotheses and capability needs without becoming a capability authority, preserving single-source registry authority in ADR-0001 and procedural mapping in ADR-0007.
+
+**Left open:** PR into `dev-munna` prepared for CI verification and merge. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
+
