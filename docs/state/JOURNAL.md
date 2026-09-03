@@ -162,3 +162,17 @@ isolation) and Q3 (cross-process restart survival) cleanly without external netw
 
 **Left open:** ADR-0006 (Knowledge / RAG) is the next architectural specification, under the roadmap's Phase 2 — Knowledge & Research sequence. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
 
+---
+
+## 2026-09-03 — ADR-0006 Knowledge & RAG Architecture Drafting (docs/issue-adr-0006-knowledge-rag)
+
+**Did:** Created task branch `docs/issue-adr-0006-knowledge-rag` from `dev-munna`. Drafted `docs/architecture/adr/ADR-0006-knowledge-and-rag.md` in `Status: Proposed`. Established the Knowledge & RAG boundary: dual knowledge mechanisms (persistent knowledge vs. live research per `[P§16]`); 8-tier evidence weighting hierarchy (`[P§17]`); LinkedIn as signal-only (`[P§17]`); mandatory provenance and un-dated document rejection (`[P§18]`); topic-domain freshness horizons with temporal decay (`[P§18]`); workspace-isolated hybrid dense/lexical indexing under `.cv_agent/knowledge/` (`D-013`); strict separation from Project Memory (`ADR-0004`) and LLM Gateway (`ADR-0002`); and proposed Phase 2 interface contracts (`KnowledgeIngester`, `KnowledgeRetriever`). Updated `STATUS.md` and `AGENT_HANDOFF.md`.
+
+**Why:** `[P§16]`, `[P§17]`, `[P§18]`, `[P§19]`, `[P§29.3]`, `[P§29.7]`, `[P§34]` — the CV Engineering Agent requires current ecosystem knowledge without falling victim to hallucinations, promotional marketing claims, or ungrounded retrieval volume.
+
+**Broke:** Nothing broken. Architecture and specification contracts only; no runtime implementation code modified.
+
+**Learned:** Explicitly decoupling external general CV engineering knowledge (`ADR-0006`) from internal project-specific memory and experimental baselines (`ADR-0004`) prevents knowledge drift and preserves reproducible measurement integrity.
+
+**Left open:** ADR-0006 specification drafted in `Proposed` status, awaiting architectural review. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
+

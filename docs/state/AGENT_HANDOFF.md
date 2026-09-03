@@ -20,7 +20,7 @@
 | ADR-0003 — Orchestration state | **Accepted** |
 | ADR-0004 — Project memory / experiment ledger | **Accepted** |
 | ADR-0005 — Tools / MCP | **Accepted** |
-| ADR-0006 — Knowledge / RAG | Not started |
+| ADR-0006 — Knowledge / RAG | In drafting (`docs/issue-adr-0006-knowledge-rag`) |
 | ADR-0007 — Skills | Unblocked (Q5 settled) |
 | ADR-0008 — Reasoning | Not started |
 | ADR-0009 — Dataset subsystem | Not started |
@@ -52,5 +52,5 @@ Q1–Q5, Q7–Q8 are resolved. Q10 (dataset storage/versioning) remains open and
 
 ## Next session
 
-1. Await Official PM review and merge of milestone promotion PR #18 (`dev-munna` -> `main`).
-2. Prepare ADR-0006 (Knowledge / RAG) architectural specification.
+1. Review and refine ADR-0006 (Knowledge & RAG) specification on `docs/issue-adr-0006-knowledge-rag`.
+2. Await Official PM review and merge of milestone promotion PR #18 (`dev-munna` -> `main`).
