@@ -21,7 +21,7 @@
 | ADR-0004 — Project memory / experiment ledger | **Accepted** |
 | ADR-0005 — Tools / MCP | **Accepted** |
 | ADR-0006 — Knowledge / RAG | **Accepted** |
-| ADR-0007 — Skills | Unblocked (Q5 settled; next in sequence) |
+| ADR-0007 — Skills | Proposed in drafting (`docs/issue-adr-0007-skills`) |
 | ADR-0008 — Reasoning | Not started |
 | ADR-0009 — Dataset subsystem | Not started |
 | ADR-0010 — Training | Unblocked (Q2 settled) |
@@ -53,5 +53,5 @@ Q1–Q5, Q7–Q8 are resolved. Q10 (dataset storage/versioning) remains open and
 
 ## Next session
 
-1. Prepare and specify ADR-0007 (Skills Architecture & NVIDIA Capability Discovery).
-2. Formulate Phase 3 skill registry and NVIDIA adapter interfaces per `[P§15]`.
+1. Review and refine ADR-0007 (Skills Architecture & NVIDIA Capability Discovery) on `docs/issue-adr-0007-skills` (Issue #22).
+2. Await PM review and authorization for task PR creation into `dev-munna`.
