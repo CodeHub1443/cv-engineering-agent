@@ -190,3 +190,17 @@ isolation) and Q3 (cross-process restart survival) cleanly without external netw
 
 **Left open:** ADR-0007 (Skills Architecture & NVIDIA Discovery) is the next architectural specification. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
 
+---
+
+## 2026-09-03 — ADR-0007 Skills Architecture & NVIDIA Discovery Drafting (docs/issue-adr-0007-skills)
+
+**Did:** Created task branch `docs/issue-adr-0007-skills` from `dev-munna` to implement Issue #22. Drafted `docs/architecture/adr/ADR-0007-skills-architecture.md` in `Status: Proposed`. Established the Skills architecture: declarative `SkillDescriptor` contracts decoupled from tool execution; `CapabilityId → SkillId → ToolId` resolution hierarchy preserving ADR-0001 registry authority; typed skill availability state machine (`KNOWN`, `DISCOVERED`, `CONFIGURED`, `AVAILABLE`, `EXECUTABLE`, `UNAVAILABLE`, `KNOWN_BUT_UNAVAILABLE`); declarative NVIDIA ecosystem adapters (TensorRT, Model Optimizer PTQ/QAT, TAO, DeepStream, DALI, Triton, Jetson, CUDA Agent) per `[P§15]`; the known-but-unavailable constraint enforcing zero silent CPU fallback on unconfigured NVIDIA targets (`D-022`); execution target binding aligned with ADR-0005 (`LOCAL`, `REMOTE`, `MCP_ENDPOINT`); discovery authority boundaries ensuring MCP/remote probing does not silently mutate capability identities; and proposed Phase 3 interface contracts (`SkillRegistry`, `SkillResolver`, `SkillExecutor`). Updated `STATUS.md` and `AGENT_HANDOFF.md`.
+
+**Why:** `[P§15]`, `[P§23]`, `[P§29.9]`, `[P§34]` — establishes specialized procedural knowledge linking abstract capabilities to executable tools without hard-coding prompts or reimplementing vendor expertise.
+
+**Broke:** Nothing broken. Architecture and specification contracts only; no runtime implementation code modified.
+
+**Learned:** Explicit target requirement schemas in skill descriptors allow the resolver to detect missing hardware runtimes ahead of invocation, turning silent execution failures or invalid fallback assumptions into deterministic, transparent `KNOWN_BUT_UNAVAILABLE` states.
+
+**Left open:** ADR-0007 specification drafted in `Proposed` status, awaiting architectural review. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
+
