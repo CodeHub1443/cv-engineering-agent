@@ -23,11 +23,12 @@ are accepted. Decisions Q1–Q5, Q7–Q8, D-022, and D-023 are recorded. ADR-000
 | Item | Issue | State |
 |---|---|---|
 | Phase 1 milestone promotion PR #18 | #18 | open (under Official PM review) |
+| ADR-0006 Knowledge & RAG specification | #TBD | in drafting on `docs/issue-adr-0006-knowledge-rag` |
 
 ## Next 3 actions
 
-1. Await Official PM review and merge of milestone promotion PR #18 (dev-munna -> main).
-2. Prepare ADR-0006 (Knowledge / RAG) architectural specification.
+1. Complete architectural review and verification of ADR-0006 (Knowledge & RAG).
+2. Await Official PM review and merge of milestone promotion PR #18 (dev-munna -> main).
 3. Advance Phase 2 research pipeline specification per `docs/RESEARCH_POLICY.md`.
 
 ## Blockers
