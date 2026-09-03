@@ -148,3 +148,17 @@ isolation) and Q3 (cross-process restart survival) cleanly without external netw
 
 **Left open:** ADR-0003 revised with dual-SQLite reconciliation and full acceptance criteria, awaiting PM review/acceptance. ADR-0004 (project memory / experiment ledger) is unblocked for drafting. Q5 remains deferred.
 
+---
+
+## 2026-09-03 — ADR-0005 Tools and MCP Execution Boundary Accepted (dev-munna)
+
+**Did:** Formally accepted `docs/architecture/adr/ADR-0005-tools-and-mcp-boundary.md` (`D-023`). Established the execution boundary: typed `ToolDescriptor` interfaces decoupled from physical transport; execution target abstraction (`LOCAL`, `REMOTE`, `MCP_ENDPOINT`); operational discovery subordinated to ADR-0001's authoritative `ToolId` registry; structured argument vector invocation prohibiting raw shell strings; approval precondition verification per `docs/APPROVALS.md`; and type-safe asynchronous execution handoff via `ActiveJobHandoff` mechanically aligned with ADR-0003's `ActiveJobRef`. Updated `DECISIONS.md`, `STATUS.md`, and `AGENT_HANDOFF.md`.
+
+**Why:** `[P§10]`, `[P§15]`, `[P§22]`, `[P§23]`, `[P§24]`, `[P§29.4]`, `[P§34]` — isolates execution adapters from reasoning, skills, and graph orchestration. Enforces the Apple Silicon / macOS reality (`D-022`) where local execution lacks NVIDIA runtimes, preventing invalid host execution assumptions while providing a uniform interface for future remote GPU targets (`D-014`) and MCP servers.
+
+**Broke:** Nothing broken. Architecture and documentation changes only; no runtime implementation code modified.
+
+**Learned:** Subordinating MCP tool discovery to ADR-0001's authoritative `ToolId` catalogue prevents external tool endpoints from silently mutating or expanding the agent's capability surface without governance.
+
+**Left open:** ADR-0006 (Knowledge / RAG) is the next architectural specification, under the roadmap's Phase 2 — Knowledge & Research sequence. Q10 remains open and continues to block ADR-0009 (Dataset subsystem).
+

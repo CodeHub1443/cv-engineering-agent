@@ -3,7 +3,7 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-09-02 · **Phase:** 1 — Architecture & ADR Specification · **Health:** green
+**Updated:** 2026-09-03 · **Phase:** 1 — Architecture & ADR Specification · **Health:** green
 
 ## Where we are
 
@@ -13,10 +13,10 @@ integration branch; `main` remains the official integration/release branch and i
 promoted from `dev-munna` by the Official PM.
 
 The frozen project definition is `docs/PROJECT.md`. ADR-0001 (capability model),
-ADR-0002 (LLM gateway), ADR-0003 (orchestration state & checkpointing), and
-ADR-0004 (project memory & experiment ledger) are accepted. Phase 1 substrate ADR
-specification is complete. Decisions Q1–Q5, Q7–Q8 are recorded. ADR-0005 and
-ADR-0007 are unblocked.
+ADR-0002 (LLM gateway), ADR-0003 (orchestration state & checkpointing),
+ADR-0004 (project memory & experiment ledger), and ADR-0005 (tools & MCP boundary)
+are accepted. Decisions Q1–Q5, Q7–Q8, D-022, and D-023 are recorded. ADR-0006
+(Knowledge / RAG) is the next architectural specification.
 
 ## In flight
 
@@ -27,8 +27,8 @@ ADR-0007 are unblocked.
 ## Next 3 actions
 
 1. Await Official PM review and merge of milestone promotion PR #18 (dev-munna -> main).
-2. Draft ADR-0005 (tool/MCP boundary) using the resolved Q5 capability discovery contract.
-3. Prepare Phase 2 architecture (ADR-0006 knowledge/RAG).
+2. Prepare ADR-0006 (Knowledge / RAG) architectural specification.
+3. Advance Phase 2 research pipeline specification per `docs/RESEARCH_POLICY.md`.
 
 ## Blockers
 
