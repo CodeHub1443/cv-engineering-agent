@@ -12,15 +12,22 @@
 **Q1. What is the unit of a "project"?** `[P§25]`, `[P§33]` — Does the agent handle one
 CV project per repository/workspace, or many projects with isolated memory? This
 determines the shape of project memory and whether experiment IDs are globally or
-project-scoped. *Blocks: ADR-0003, ADR-0004.*
+project-scoped. *Blocks: ADR-0004.* (No longer blocks ADR-0003 — its checkpointing is
+keyed by `session_id`, a single run, not by "project"; see ADR-0003 §1.)
 
 **Q2. Where does the agent run, and where does training run?** `[P§10]`, `[P§13]`,
 `[P§24]` — Local workstation, remote GPU box, cloud, or all three? Does the agent submit
-jobs or execute them in-process? *Blocks: ADR-0003 (state/checkpointing), ADR-0010.*
+jobs or execute them in-process? *Blocks: ADR-0010.* (No longer blocks ADR-0003 — nothing
+in that ADR executes training or submits remote jobs; see ADR-0003 §1.)
 
 **Q3. What is the human-approval transport?** `[P§24]` — CLI prompt only, or must
 approvals survive process restart (a queued request answered hours later)? The latter
-makes approvals a persisted entity, not an interrupt. *Blocks: ADR-0003.*
+makes approvals a persisted entity, not an interrupt. **Partially resolved 2026-09-15
+(ADR-0003 §1):** the transport is a LangGraph interrupt; whether it survives a process
+restart is a property of the checkpointer (swappable), not the graph/node structure.
+ADR-0003 ships with `MemorySaver` (confirmed: does not survive process restart) and
+defers the durable/queued-approval decision. *Still blocks: a durable/async approval
+transport (persistent checkpointer swap-in, ADR-0003 §8 revisit trigger).*
 
 **Q4. Is the first target a real project or a reference project?** `[P§30]` — Building
 against the prison/garment examples as a real deliverable versus as a test fixture

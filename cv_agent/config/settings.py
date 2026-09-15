@@ -74,6 +74,11 @@ class AgentConfig:
     registry_path: Path = field(
         default_factory=lambda: _resource_path("spec/capability_registry.json")
     )
+    skill_paths: tuple[Path, ...] = field(default_factory=lambda: ())
+    """Directories to scan for installed skills. Empty tuple means
+    "use cv_agent.skills.local.default_skill_roots()" — kept empty here
+    rather than duplicating that default, so there is exactly one place
+    (local.py) that defines what "installed" means for this environment."""
 
 
 def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
@@ -121,4 +126,7 @@ def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
         else _resource_path("spec/capability_registry.json")
     )
 
-    return AgentConfig(llm=llm, registry_path=registry_path)
+    skill_paths_raw: list[str] = raw.get("skill_paths", [])
+    skill_paths = tuple(Path(p) for p in skill_paths_raw)
+
+    return AgentConfig(llm=llm, registry_path=registry_path, skill_paths=skill_paths)

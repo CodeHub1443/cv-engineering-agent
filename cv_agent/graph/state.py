@@ -50,9 +50,46 @@ class AgentState(TypedDict, total=False):
     steps: list[dict[str, Any]]
     """Ordered log of node actions taken during this run."""
 
-    # ── Human-in-the-loop (reserved for future steps) ─────────────────────
+    # ── Human-in-the-loop ────────────────────────────────────────────────
     pending_human_input: Optional[str]
-    """Prompt for the human reviewer when the graph is paused."""
+    """Human-readable prompt describing what the graph is paused waiting
+    for. Set by whichever node calls `interrupt()`; cleared on resume."""
 
     human_feedback: Optional[str]
-    """Response provided by the human reviewer after an interrupt."""
+    """Reserved, generic free-text human response slot. The structured
+    workflow below (clarification/approval) uses its own typed fields
+    instead of this one — see ADR-0003 — but it stays for a future node
+    that only needs a single free-text answer."""
+
+    # ── Requirements analysis + clarification (ADR-0003, ADR-0008) ─────────
+    requirements_analysis: Optional[dict[str, Any]]
+    """`dataclasses.asdict()` of the latest `RequirementsAnalysis` produced
+    by `cv_agent.requirements.RequirementsAnalyzer`. Stored as a plain dict,
+    not the dataclass itself, so orchestration state stays a serializable,
+    checkpointer-safe structure independent of the reasoning layer's types
+    (`[P§19]`/`[P§21]` layer separation) — see ADR-0003 §3."""
+
+    clarification_answers: dict[str, str]
+    """Human-supplied answers from the clarification interrupt, keyed by
+    `RequirementField.name`. Empty until a human has actually answered —
+    never pre-filled or guessed. Re-used as `assumptions` on the next
+    `RequirementsAnalyzer.analyze()` call, exactly like any other caller-
+    supplied assumption (ADR-0008 — the analyzer still never self-promotes
+    a field on its own)."""
+
+    # ── Approval + execution (ADR-0003, ADR-0009) ───────────────────────────
+    pending_execution: Optional[dict[str, Any]]
+    """What the caller is asking the graph to (attempt to) execute, if
+    anything this run: `{"skill_id": str, "inputs": dict, "task": str |
+    None}`. None means this run does not touch execution at all."""
+
+    approval_decision: Optional[str]
+    """"approved" | "rejected" | "not_required" | None (not yet decided).
+    Set only by the approval-gate node from the value an `interrupt()` call
+    actually receives on resume — never inferred, never defaulted to
+    "approved". See ADR-0003 §5."""
+
+    execution_result: Optional[dict[str, Any]]
+    """`dataclasses.asdict()` of the `SkillExecutionResult` produced by
+    `cv_agent.execution.SkillExecutor.execute()`, if the execute node ran.
+    Same serialization rationale as `requirements_analysis`."""
