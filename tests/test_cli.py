@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 class TestCLISmoke:
     """Run the CLI as a subprocess to validate the end-to-end entrypoint."""
 
-    def _run_cli(self) -> subprocess.CompletedProcess:
+    def _run_cli(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "cv_agent"],
+            [sys.executable, "-m", "cv_agent", *args],
             capture_output=True,
             text=True,
             timeout=60,
@@ -56,13 +58,164 @@ class TestCLISmoke:
             # No errors should appear on stdout for a healthy run
             assert "STARTUP FAILURE" not in result.stdout
 
-    def test_step_two_command_name_is_rejected_until_implemented(self) -> None:
-        result = subprocess.run(
-            [sys.executable, "-m", "cv_agent", "skills"],
+
+class TestCLISkillsCapabilitiesResolve:
+    """
+    Step 2 CLI commands. Every subprocess run pins CV_AGENT_SKILL_PATHS to an
+    isolated tmp_path fixture so these tests never depend on whatever is
+    actually installed under the real ~/.claude/skills on the machine
+    running the suite.
+    """
+
+    def _run(self, args: list[str], skill_root: Path) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        env["CV_AGENT_SKILL_PATHS"] = str(skill_root)
+        return subprocess.run(
+            [sys.executable, "-m", "cv_agent", *args],
             capture_output=True,
             text=True,
             timeout=60,
+            env=env,
         )
 
-        assert result.returncode == 2
-        assert "unrecognized arguments: skills" in result.stderr
+    def _write_skill(self, root: Path, skill_id: str, description: str) -> None:
+        skill_dir = root / skill_id
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {skill_id}\ndescription: {description}\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+    def test_skills_command_reports_zero_for_empty_fixture(self, tmp_path: Path) -> None:
+        result = self._run(["skills"], tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "Discovered skills: 0" in result.stdout
+
+    def test_skills_command_reports_a_fixture_skill(self, tmp_path: Path) -> None:
+        self._write_skill(tmp_path, "fixture-skill", "A fake test skill.")
+        result = self._run(["skills"], tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "Discovered skills: 1" in result.stdout
+        assert "fixture-skill" in result.stdout
+        assert "executable=False" in result.stdout
+
+    def test_skills_command_never_reports_a_fake_undiscovered_skill(
+        self, tmp_path: Path
+    ) -> None:
+        """A skill that was never written to the fixture root must never
+        appear as discovered — nothing is fabricated."""
+        result = self._run(["skills"], tmp_path)
+        assert "definitely-not-a-real-skill" not in result.stdout
+
+    def test_capabilities_command_lists_declared_capabilities(self, tmp_path: Path) -> None:
+        result = self._run(["capabilities"], tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "Declared capabilities:" in result.stdout
+        assert "status=planned" in result.stdout
+        assert "not executable" in result.stdout
+
+    def test_resolve_command_produces_structured_output(self, tmp_path: Path) -> None:
+        result = self._run(
+            ["resolve", "deploy RT-DETR on Jetson using DeepStream"], tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Matched capabilities" in result.stdout
+        assert "Matched skills" in result.stdout
+
+    def test_resolve_command_with_no_discovered_skills_still_matches_capabilities(
+        self, tmp_path: Path
+    ) -> None:
+        result = self._run(["resolve", "optimize deployment on jetson"], tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "Matched capabilities (0)" not in result.stdout
+        assert "Matched skills (0)" in result.stdout
+
+    def test_resolve_command_reports_missing_declared_skills(self, tmp_path: Path) -> None:
+        result = self._run(
+            ["resolve", "deploy optimization on jetson tensorrt"], tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        assert "available=false" in result.stdout
+
+    def test_analyze_command_produces_structured_output(self, tmp_path: Path) -> None:
+        result = self._run(
+            ["analyze", "I need to detect garment theft in a factory"], tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Known fields" in result.stdout
+        assert "Unknown fields" in result.stdout
+        assert "Candidate CV task components" in result.stdout
+        assert "Clarification questions" in result.stdout
+
+    def test_analyze_command_does_not_execute_anything(self, tmp_path: Path) -> None:
+        """No skill/tool execution surface exists; the CLI must not attempt
+        one, and the fixture skill root must stay untouched by analyze."""
+        self._write_skill(tmp_path, "fixture-skill", "A fake test skill.")
+        before = sorted(p.name for p in tmp_path.rglob("*"))
+        result = self._run(
+            ["analyze", "deploy RT-DETR on Jetson using DeepStream"], tmp_path
+        )
+        after = sorted(p.name for p in tmp_path.rglob("*"))
+        assert result.returncode == 0, result.stderr
+        assert before == after
+
+    def test_analyze_command_verbatim_echoes_request(self, tmp_path: Path) -> None:
+        result = self._run(["analyze", "Detect theft in the warehouse."], tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "Detect theft in the warehouse." in result.stdout
+
+    def test_executions_command_reports_zero_bindings_by_default(
+        self, tmp_path: Path
+    ) -> None:
+        """No binding is registered anywhere in this codebase (ADR-0009 §5),
+        so a fresh CVAgent must report zero runtimes and zero executable
+        skills even when skills are discovered."""
+        self._write_skill(tmp_path, "fixture-skill", "A fake test skill.")
+        result = self._run(["executions"], tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "Registered runtimes: 0" in result.stdout
+        assert "fixture-skill" in result.stdout
+        assert "executable=False" in result.stdout
+        assert "Executable: 0/1" in result.stdout
+
+    def test_executions_command_does_not_execute_anything(self, tmp_path: Path) -> None:
+        self._write_skill(tmp_path, "fixture-skill", "A fake test skill.")
+        before = sorted(p.name for p in tmp_path.rglob("*"))
+        result = self._run(["executions"], tmp_path)
+        after = sorted(p.name for p in tmp_path.rglob("*"))
+        assert result.returncode == 0, result.stderr
+        assert before == after
+
+    def test_workflow_command_demonstrates_interrupt_and_resume(self, tmp_path: Path) -> None:
+        result = self._run(
+            ["workflow", "I have a prison project. Escape-attempt detection."], tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        assert "[INTERRUPT] Clarification needed" in result.stdout
+        assert "[RESUME] Resuming the same paused run" in result.stdout
+        assert "Status after resume: done" in result.stdout
+
+    def test_workflow_command_skips_interrupt_for_fully_specified_request(
+        self, tmp_path: Path
+    ) -> None:
+        result = self._run(
+            [
+                "workflow",
+                "Detect intruders using our 8 outdoor CCTV cameras at 1080p/15fps, "
+                "deploy on a Jetson Orin, need real-time response with recall above 95%, "
+                "and we have 2000 labeled clips already.",
+            ],
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "No clarification needed" in result.stdout
+
+    def test_resolve_command_does_not_trigger_execution(self, tmp_path: Path) -> None:
+        """The resolve command must never invoke execution — 'Executable'
+        or execution-status language must not leak into its output."""
+        result = self._run(
+            ["resolve", "deploy RT-DETR on Jetson using DeepStream"], tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        assert "status=completed" not in result.stdout
+        assert "status=failed" not in result.stdout

@@ -33,13 +33,25 @@ ADR-0003 orchestration state + approval interrupts · ADR-0004 project memory & 
 ledger. Implementation of each behind its acceptance test. Retro-fit ADRs to the existing
 baseline `[P§32]` where it stands, or record its debt.
 
+**Status:** ADR-0003 accepted; `cv_agent/graph/workflow.py` implements a real
+LangGraph interrupt/resume graph (`langgraph.types.interrupt()` +
+`Command(resume=...)`, not custom polling) for requirements-clarification and
+approval-gated execution, built as a second graph alongside the existing
+`build_graph()` stub (kept unchanged — see ADR-0003 §4). `CVAgent.start_workflow()`
+/`.resume_workflow()`/`.get_workflow_state()`; CLI `workflow`. **Not done:** ADR-0002
+(LLM gateway is currently mock-provider-only, no real swap demonstrated), ADR-0004
+(project memory — nothing persists beyond one run's in-process checkpoint).
+
 **Exit test:**
 1. A capability with no satisfying skill resolves to "known but unavailable" and is
    reported as such, not as an error.
 2. Two different LLM providers are swappable by configuration alone; `grep` finds no
    provider name outside the gateway.
 3. A workflow run halts at an approval gate, the process is restarted, and the run
-   resumes from the checkpoint with the approval still pending.
+   resumes from the checkpoint with the approval still pending. *(Halts at an approval
+   gate and resumes with the decision as the source of truth: met, in-process —
+   `tests/test_workflow.py`. Survives an actual process restart: not yet — the default
+   checkpointer, `MemorySaver`, is in-process only; see ADR-0003 §1/§8.)*
 4. An experiment row can be written and read back with the full `[P§25]` schema enforced.
 
 ---
@@ -66,9 +78,24 @@ the store.
 **Scope:** ADR-0007 skill registry & discovery · NVIDIA skill adapters (DeepStream, TAO,
 TensorRT, Model Optimizer, CUDA agent) as external-provenance skills.
 
+**Status:** partially done. ADR-0007 accepted; `cv_agent/skills/` implements
+discovery (`LocalSkillSource`) and deterministic (non-LLM) resolution (`TaskResolver`)
+— the agent can enumerate what's discovered vs. merely declared, per the exit test's
+second half. ADR-0009 accepted; `cv_agent/execution/` implements the execution
+*boundary* (`SkillExecutor`, `ExecutionBinding`/`ExecutionBindingRegistry`,
+`CVAgent.execute()`/`.can_execute()`, `python -m cv_agent executions`) — but zero
+bindings are registered against the real environment: inspection of all 84 installed
+skills found every `SKILL.md` is prose for an LLM agent to read and act on with its
+own tools, not a program with a verifiable invocation contract (see ADR-0009 §1).
+**Not done:** NVIDIA skill *adapters* (no `ExecutionRuntime` implementation exists for
+any real skill yet — the boundary has no first tenant), a second `SkillSource` (only
+local filesystem discovery exists).
+
 **Exit test:** a quantization capability resolves to an external NVIDIA skill; the repo
 contains **no** reimplementation of that skill's logic; and the agent can enumerate which
-external capabilities are installed versus merely known.
+external capabilities are installed versus merely known. *(Enumeration half: met via
+`python -m cv_agent resolve`. Adapter/invocation half: the boundary to hang a real
+adapter on now exists — `python -m cv_agent executions` — but no adapter is registered.)*
 
 ---
 
@@ -79,10 +106,24 @@ external capabilities are installed versus merely known.
 **Scope:** ADR-0008 reasoning nodes · the elicitation workflow · project understanding
 written to memory · CV task decomposition.
 
+**Status:** partially done. ADR-0008 accepted; `cv_agent/requirements/` implements
+deterministic requirements analysis (known/unknown/assumed fields), CV task
+decomposition into candidate components with rationale, and clarification-question
+generation — callable via `CVAgent.analyze_requirements()` / `python -m cv_agent
+analyze`. ADR-0003 (this session) gives the clarification questions a real LangGraph
+interrupt node (`cv_agent/graph/workflow.py`) that actually pauses and waits for the
+human's answer, then re-runs the analysis with it — `CVAgent.start_workflow()`/
+`.resume_workflow()` / `python -m cv_agent workflow`. **Not done:** nothing is
+persisted to project memory (no memory subsystem exists — ADR-0004, not written), and
+this workflow graph is separate from `run()`'s own graph, not merged into it (ADR-0003
+§4/§8).
+
 **Exit test:** given "I have a prison project — escape-attempt detection", the agent asks
 targeted operational questions before naming any model, and produces a written
 PROJECT UNDERSTANDING + CV TASK DECOMPOSITION persisted to project memory. If it names
-YOLO before the questions, the phase fails.
+YOLO before the questions, the phase fails. *(Questions + decomposition half: met via
+`analyze_requirements()`, now with a real pause-for-answer via `start_workflow()`/
+`resume_workflow()`. Persistence-to-memory half: not yet — no memory subsystem.)*
 
 ---
 

@@ -100,3 +100,244 @@ still duplicate each other substantially (by design — one is the procedural
 reference, one the executive summary — but they should be watched for drift the same
 way the capability registry copies were). Q1–Q5 in `OPEN_QUESTIONS.md` remain
 unanswered and still block ADR-0003. No commit or push was made — see git status.
+
+---
+
+## 2026-09-08 — Step 2: skill discovery + deterministic resolution (ADR-0007)
+
+**Did:** Added `cv_agent/skills/` — `models.py` (`Skill`, `SkillEvidence`, kept
+independent from `RegistryItem`), `source.py` (`SkillSource` protocol), `local.py`
+(`LocalSkillSource`, scans `<root>/<skill_id>/SKILL.md` under `~/.claude/skills` +
+`~/.agents/skills` by default, hand-rolled flat-frontmatter parser — no new
+dependency), `inventory.py` (`SkillInventory`, aggregates sources, dedups by
+`skill_id`), `resolver.py` (`TaskResolver`, deterministic keyword-overlap scoring
+against capability + skill metadata, no LLM). Wired into `CVAgent` as
+`.skills`/`.resolve()`. Added CLI subcommands `skills`, `capabilities`, `resolve
+"<task>"` (default no-arg health check unchanged). Wrote `ADR-0007`. Added
+`tests/test_skills.py` (23 tests) and `TestCLISkillsCapabilitiesResolve` (7 tests) in
+`tests/test_cli.py`, all against isolated `tmp_path`/`CV_AGENT_SKILL_PATHS` fixtures.
+Replaced `test_step_two_command_name_is_rejected_until_implemented` — a tripwire
+written by a prior session to assert `skills` must NOT exist — with real tests for
+the command that now exists; kept everything else. Extended `AgentConfig` with
+`skill_paths`. Updated `STATUS.md`, `DECISIONS.md` (D-010).
+
+**Why:** `[P§23]`, `[P§15]` — the capability registry can declare that
+`cv.deployment.optimization` is relevant to `deepstream`/`tensorrt`/etc., but that's
+a claim about relevance, not about what's actually installed. This closes that gap
+without collapsing DECLARED, DISCOVERED, and EXECUTABLE into one concept — the same
+distinction D-009 spent a session establishing for capabilities now applies to
+skills too, and the resolver enforces it structurally (a `SkillMatch` type has no way
+to report `executable=True`; the field is hard-set `False` at construction).
+
+**Broke:** Nothing existing — full suite went from 99 → 126 passing, no regressions.
+Deliberately removed one test whose entire assertion was "this command must not
+exist yet," since the task it was guarding against is exactly what was asked for this
+session; flagged explicitly rather than silently deleted.
+
+**Learned:** The real `~/.claude/skills/` installation on this machine is
+inconsistent — some `SKILL.md` files have YAML-style frontmatter
+(`name`/`description`/`owner`/`version`/...), some (e.g. `cuda-agent`) are plain
+prose with none at all. A discovery parser for this format has to degrade to "no
+metadata beyond the directory name" rather than raise. Also: `capability_registry.json`'s
+declared skill ids (`tensorrt`, `deepstream`, `jetson`) mostly don't match the real
+installed skill ids (`deepstream-dev`, `deepstream-generate-pipeline`, ...) — exact-id
+matching alone would find almost nothing, so the resolver also does keyword/tag
+overlap independent of declared relevance. `cuda-agent` is the one skill id that
+matches exactly in both the registry and the real environment, which made it a good
+end-to-end validation case.
+
+**Left open:** No second `SkillSource` (repository-local, remote catalog, MCP) — only
+`LocalSkillSource`. No LLM/semantic resolver — `TaskResolver`'s deterministic scoring
+is a keyword-overlap floor, not a ceiling. No execution binding for any skill — every
+discovered skill is still `executable: false`. `ruff`/`mypy` still not wired into
+`pyproject.toml` dev-dependencies (pre-existing gap, unchanged this session). No
+commit or push was made — see git status.
+
+---
+
+## 2026-09-15 — Step 4: requirements understanding + CV task decomposition (ADR-0008)
+## (Step 3 was requested first, in a separate turn — it never landed; see below)
+
+**Did:** A turn requesting "Step 3 — Skill Execution & Invocation Boundary" preceded
+this one but produced no output — the harness shows it as a dropped turn with no
+response, and inspection confirmed zero Step 3 artifacts exist (no `execution.py`, no
+ADR-0008-as-execution, no `executions` CLI, no `agent.execute()`). Flagged this to the
+user explicitly rather than either fabricating a Step 3 or silently building it
+unrequested; proceeded straight to the requested Step 4, since none of its 15
+requirements actually depend on execution existing.
+
+Added `cv_agent/requirements/` — `models.py` (`RequirementField` with
+`InfoStatus = known|unknown|assumed`, `TaskHypothesis`, `CapabilityLink`,
+`ClarificationQuestion`, `RequirementsAnalysis`), `rules.py` (`FIELD_DETECTORS`,
+`TASK_HYPOTHESIS_RULES` — flat appendable lists, not a decision tree, matching the
+pattern `cv_agent.skills.resolver` already used), `analyzer.py`
+(`RequirementsAnalyzer.analyze()` — deterministic keyword extraction, calls the
+existing `TaskResolver` for capability links, optional `LLMProvider` used only for a
+`narrative_summary` prose field). Wired into `CVAgent.analyze_requirements()`. Added
+CLI `analyze "<request>"`. Wrote `ADR-0008`. Added `tests/test_requirements.py` (27
+tests) and 3 CLI tests in `test_cli.py`. Updated `STATUS.md`, `DECISIONS.md` (D-011).
+
+**Why:** `[P§5]` — the agent must characterize the operational problem before naming
+a model; `docs/PROJECT.md` §30 describes the product as producing PROJECT
+UNDERSTANDING before anything else. Nothing in the repo did that yet — `TaskResolver`
+(Step 2) matches a task string to capabilities but doesn't ask what the task actually
+*is* first.
+
+**Broke:** Nothing — full suite went from 126 → 153 passing, no regressions.
+
+**Learned:** "Assumed" needed a hard rule to stay honest: the analyzer itself must
+never promote an unknown field to assumed (that would be exactly the silent
+invention `[P§35]` forbids) — only the *caller* can supply an explicit assumption via
+a parameter. Also: routing the LLM call through a single `narrative_summary` field,
+structurally separate from every fact-bearing field on `RequirementsAnalysis`, made
+"the LLM can't fabricate a requirement" a property a test could actually assert
+(`test_llm_never_used_for_field_extraction` feeds the mock a prompt-injection-shaped
+fixed response and confirms the structured fields are unaffected).
+
+**Left open:** The dropped Step 3 (skill execution) — genuinely not built, next
+action in `STATUS.md`. No LangGraph node consumes `RequirementsAnalysis` yet — it's a
+plain return value from `CVAgent.analyze_requirements()`, not agent state. No real
+LLM provider — narrative summaries only ever come from the mock. `ruff`/`mypy` still
+not wired into `pyproject.toml` (pre-existing gap). No commit or push — see git
+status.
+
+---
+
+## 2026-09-15 — Step 3, redone: skill execution & invocation boundary (ADR-0009)
+
+**Did:** Before writing any code, inspected the actual installed skill environment
+directly (`~/.claude/skills`, `~/.agents/skills`, 84 skill directories) rather than
+assuming an invocation mechanism. Findings: every `SKILL.md` is prose meant for an
+LLM coding agent to read and act on with its own tools — 28 of 84 declare Claude
+Code's own `allowed-tools:` frontmatter (e.g. `Read Bash`), `cuda-agent` has no
+frontmatter at all (pure persona prose), and even the two skills that bundle real
+scripts (`trt-perf-analysis`, `gstreamer-pipeline`) expose no machine-readable
+invocation contract — just prose describing which script to run how. The requested
+example `jetson-diagnostic` does not exist under that name (closest:
+`network-diagnostics`, `camera-network-diagnostics`) — noted rather than fabricated.
+
+Given that, built `cv_agent/execution/` — `models.py` (`SkillExecutionRequest`,
+`SkillExecutionResult`, `SkillExecutionStatus` with five states including
+`rejected`/`not_executable`, `ExecutionEvidence`, `ExecutionError`, `RuntimeOutcome`,
+`ApprovalPolicy`), `binding.py` (`ExecutionBinding`, a narrow `ExecutionRuntime`
+protocol naming no concrete runtime, `ExecutionBindingRegistry` — deterministic,
+dict-backed, sorted listing), `executor.py` (`SkillExecutor.execute()` — fails safely
+to `not_executable`/`rejected` without ever calling a runtime when no verified
+binding exists or approval wasn't granted; catches runtime exceptions as `failed`
+rather than propagating them). Wired `CVAgent.execute()`/`.can_execute()`/
+`.execution_bindings`. Added CLI `executions`. Wrote `ADR-0009`. Added
+`tests/test_execution.py` (22 tests, all fake runtimes/bindings) plus 3 CLI tests.
+**Deliberately registered zero bindings anywhere** — the boundary exists; no adapter
+does, because none could be honestly verified this session.
+
+**Why:** `[P§15]`, `[P§21]`, `[P§22]`, `[P§24]`, `[P§34]` — Phase 3's exit test has an
+adapter/invocation half that ADR-0007 explicitly left open; this closes the
+*boundary* without closing the adapter gap dishonestly. Treating "an LLM agent can
+read this SKILL.md" as `executable=True` would have been exactly the silent
+invention `[P§35]` and the DECLARED≠EXECUTABLE line (ADR-0001 §8a, ADR-0007, now this
+ADR) exist to forbid.
+
+**Broke:** Nothing — full suite went from 153 → 175 passing, no regressions.
+
+**Learned:** "Instruction file for an agent to read" and "executable program" are a
+real, load-bearing distinction in this specific ecosystem, not a hypothetical one —
+Claude Code's own `allowed-tools:` frontmatter convention is direct evidence a skill
+is designed to be *followed by an agent's own tool access*, not invoked as a
+subprocess with a defined I/O contract. A correct execution boundary for this
+environment has to model "no verified binding exists" as the honest default, not a
+placeholder to be filled in casually.
+
+**Left open:** No `ExecutionRuntime` implementation exists for any real skill — the
+next natural step (not requested this session) would be verifying
+`trt-perf-analysis`'s `scripts/run.sh` end-to-end and registering it as the first
+real binding, one skill at a time, never in bulk. The approval workflow
+`docs/APPROVALS.md` describes is still doc-only — `SkillExecutionRequest.approved` is
+trusted, not derived from an actual gate. No commit or push — see git status.
+
+---
+
+## 2026-09-15 — Repository alignment review (read-only)
+
+**Did:** Full read-only inspection of the repository against `docs/PROJECT.md`,
+`ROADMAP.md`, and all state/ADR files, per an explicit request not to assume Research
+Engine was automatically next. Confirmed working tree matched exactly what the prior
+two sessions built (no drift), re-ran the full suite (175 passed), and traced every
+consumer of `RequirementsAnalysis.clarification_questions` and
+`SkillExecutionRequest.approved` — found neither has a live caller: `AgentState` (read
+directly) has no field for either, and `analyze_requirements()`/`execute()` are plain
+method calls, never reached through `run()`'s graph.
+
+**Why:** the user explicitly asked for a dependency-based recommendation, not an
+assumed one — `docs/PROJECT.md` §33's own design order (registry → gateway →
+orchestration state → memory → tools → knowledge → skills → stages → execution) was
+compared against the actual build order (registry → skills → requirements →
+execution), which skipped orchestration state and memory entirely.
+
+**Broke:** Nothing — read-only, no files modified.
+
+**Learned:** "Documented as not-yet-implemented" and "correctly identified as the
+next blocking dependency" are different findings — this repo's docs already said
+orchestration state was missing; the review's contribution was tracing *why* that
+specific gap, not Research/RAG or a first execution adapter, was the one actually
+blocking further progress (two already-built subsystems dead-ending at it).
+
+**Left open:** Everything unchanged; this was analysis only. Recommendation:
+ADR-0003 next — acted on immediately after in the same session (see below).
+
+---
+
+## 2026-09-15 — ADR-0003: orchestration state + human-approval interrupts
+
+**Did:** Inspected the installed LangGraph version (1.2.11) directly rather than
+assuming an API — confirmed empirically (small probe scripts, not committed) that the
+modern dynamic `interrupt()`/`Command(resume=...)` API works as documented: a node's
+`interrupt(payload)` call pauses the graph, `invoke()` returns a dict with
+`"__interrupt__"`, and resuming re-enters the same node with `interrupt()` now
+returning the supplied value, with all prior state intact. Also confirmed storing a
+raw (non-registered) dataclass instance in checkpointed state works today but prints
+a deprecation warning ("will be blocked in a future version") — decided against it.
+
+Built `cv_agent/graph/workflow.py`: a second compiled graph (kept separate from
+`cv_agent.graph.builder.build_graph()` — see ADR-0003 §4 for why) implementing
+`initialize -> analyze_requirements -> [clarify interrupt, loops back once] ->
+approval_gate -> [execute if pending_execution present]`. Extended `AgentState` with
+`requirements_analysis`/`clarification_answers`/`pending_execution`/
+`approval_decision`/`execution_result`, all storing plain dicts
+(`dataclasses.asdict()`) rather than dataclass instances, for the serializer reason
+above and to keep orchestration state decoupled from reasoning-layer types (`[P§21]`).
+Added `CVAgent.start_workflow()`/`.resume_workflow()`/`.get_workflow_state()` and CLI
+`workflow`. Added a public `SkillExecutor.get_binding()` passthrough so the
+approval-gate node can read a binding's `approval_policy` without reaching into a
+private attribute. Wrote `ADR-0003`, resolving `OPEN_QUESTIONS.md` Q1/Q2 (don't block
+this ADR) and partially resolving Q3 (transport identified; durable/restart-survivable
+resume deferred to a checkpointer swap). Added `tests/test_workflow.py` (18 tests: 14
+graph-level with fakes, 4 through the real `CVAgent`) plus 2 CLI tests. Added
+`python -m cv_agent workflow "<task>"` as a single-process interrupt/resume demo
+(documented as necessarily single-process — `MemorySaver` doesn't survive process
+restart).
+
+**Why:** `[P§5]`, `[P§10]`, `[P§21]`, `[P§24]`, `[P§34]` — `docs/PROJECT.md` §21
+assigns LangGraph "human approval... checkpoints" specifically; the prior session's
+alignment review found `RequirementsAnalysis.clarification_questions` (ADR-0008) and
+`SkillExecutionRequest.approved` (ADR-0009) were both dead-ended data models with no
+real pause-and-wait mechanism. This makes both real for the first time.
+
+**Broke:** Nothing — full suite went from 175 → 195 passing, no regressions. Verified
+specifically that `run()`/`health_check()`/`build_graph()`'s existing behavior is
+byte-for-byte unchanged (dedicated regression test), since a second graph was built
+rather than modifying the first.
+
+**Learned:** `Command(resume=None)` is unsupported by this LangGraph version — it hits
+an internal `UnboundLocalError` (a library bug, not this repo's), not a clean
+rejection. An empty dict `{}` is both the correct semantic representation of "no
+answers supplied" and avoids the bug — used that in the "no fabricated answers" test
+instead. Also: `dataclasses.asdict()` on a dataclass containing tuples-of-dataclasses
+preserves the outer tuple's type but converts the contents to dicts recursively (JSON-
+and msgpack-safe either way) — confirmed empirically before relying on it.
+
+**Left open:** The two graphs (`build_graph()` and the new workflow graph) remain
+separate — ADR-0003 §8 names their eventual merge as a revisit trigger, not done here.
+`MemorySaver` is still the only checkpointer — a restart-survivable approval transport
+(Q3's harder half) is deferred until a persistent checkpointer is wired in. No project
+memory (ADR-0004) — `requirements_analysis` still vanishes when a session's checkpoint
+is discarded. No commit or push — see git status.
