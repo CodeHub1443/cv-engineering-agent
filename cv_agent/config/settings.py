@@ -80,6 +80,17 @@ class AgentConfig:
     rather than duplicating that default, so there is exactly one place
     (local.py) that defines what "installed" means for this environment."""
 
+    workspace_root: Optional[Path] = None
+    """Explicit project/workspace root for durable Project Memory
+    (ADR-0004). The calling application (the CLI's main(), or a caller
+    constructing AgentConfig directly) is responsible for resolving this —
+    AgentConfig neither reads it from a config file nor computes it here.
+    None means "not provided"; CVAgent forwards it unchanged to
+    cv_agent.memory.store.default_db_path(), whose own Path.cwd() fallback
+    is a documented convenience for direct/standalone use only (ADR-0004
+    §1 item 13, D-018) — not something this class invents a second copy
+    of."""
+
 
 def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
     """

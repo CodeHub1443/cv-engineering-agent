@@ -233,10 +233,22 @@ def _cmd_workflow_demo(task: str) -> int:
     invocation demo could not actually resume anything (see ADR-0003 §7).
     Answers here are synthetic placeholders, clearly labeled as such; this
     proves the interrupt/resume mechanics, not real requirements gathering.
+
+    This is the one CLI command that touches durable Project Memory
+    (ADR-0004) — start_workflow()/resume_workflow() persist a SessionRecord
+    and, when produced, a ProjectUnderstandingRevision. workspace_root is
+    resolved explicitly here, at the actual application entry point, per
+    the workspace-root resolution contract (ADR-0004 §1 item 13, D-018):
+    ProjectMemoryStore/default_db_path() never infer it themselves.
     """
+    from dataclasses import replace
+    from pathlib import Path
+
+    from cv_agent.config.settings import load_config
     from cv_agent.runtime.agent import CVAgent
 
-    agent = CVAgent()
+    config = replace(load_config(), workspace_root=Path.cwd())
+    agent = CVAgent(config)
     print(f'CV Agent workflow demo — task: "{task}"')
     print()
 

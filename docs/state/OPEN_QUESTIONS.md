@@ -9,12 +9,6 @@
 
 ## Blocking — work cannot proceed until answered
 
-**Q1. What is the unit of a "project"?** `[P§25]`, `[P§33]` — Does the agent handle one
-CV project per repository/workspace, or many projects with isolated memory? This
-determines the shape of project memory and whether experiment IDs are globally or
-project-scoped. *Blocks: ADR-0004.* (No longer blocks ADR-0003 — its checkpointing is
-keyed by `session_id`, a single run, not by "project"; see ADR-0003 §1.)
-
 **Q2. Where does the agent run, and where does training run?** `[P§10]`, `[P§13]`,
 `[P§24]` — Local workstation, remote GPU box, cloud, or all three? Does the agent submit
 jobs or execute them in-process? *Blocks: ADR-0010.* (No longer blocks ADR-0003 — nothing
@@ -46,9 +40,12 @@ mutation scope)? `docs/APPROVALS.md` has placeholders. `[P§24]`
 **Q7.** Which LLM providers are actually available with keys, and what is the routing
 policy per task class? `[P§20]`
 
-**Q8.** What is the persistence backend for project memory and the experiment ledger —
-files in-repo, SQLite, or a service? Reproducibility `[P§29.5]` favors in-repo; scale
-favors otherwise.
+**Q16.** What is the persistence backend for the experiment ledger (`docs/state/
+EXPERIMENTS.md`)? Files, SQLite, or a service? — split off from the former Q8
+2026-09-15 when Q8's project-memory half was resolved (SQLite; see Q8, Answered,
+D-016) — the experiment-ledger half was explicitly **not** resolved by that decision
+(ADR-0004 does not move `EXPERIMENTS.md` into SQLite or change its contract) and
+remains open. Does not block ADR-0004/`cv_agent/memory/` implementation.
 
 **Q9.** LinkedIn as a research source `[P§17]` — what is the actual access mechanism, and
 what are the terms-of-service constraints? The requirement is clear; the mechanism is
@@ -68,3 +65,48 @@ not.
 ~~**Q0.** Should the canonical document be edited into the repository docs, or kept
 verbatim?~~ — **Answered 2026-08-30:** kept verbatim and frozen as `docs/PROJECT.md`;
 derived files cite it as `[P§n]`. See D-001.
+
+~~**Q1. What is the unit of a "project"?**~~ `[P§25]`, `[P§33]` — Does the agent handle
+one CV project per repository/workspace, or many projects with isolated memory? —
+**Answered 2026-09-15 (owner decision):** **one CV project per repository/workspace**
+in V1. The workspace/repository IS the project boundary — no `project_id`
+abstraction, no project selection, no multi-tenant memory. Session identity
+(`AgentState.session_id`) stays distinct from project identity; every session belongs
+to the one implicit project (the workspace). No broader multi-repository workspace
+abstraction in V1. Project Understanding is persistent current state with recoverable
+revision history; experiments remain immutable append-only records. See D-014,
+ADR-0004. *Clarified 2026-09-15 (D-018):* the boundary being "the workspace" does not
+by itself guarantee any given process execution resolves it correctly — the
+**calling application**, not `ProjectMemoryStore`, is responsible for resolving
+`workspace_root` explicitly; `Path.cwd()` is a convenience default only.
+
+~~**Q15. Is Project Understanding storage Git-tracked, and is it sensitive data?**~~
+`[P§24]`, `[P§25]` — An ADR-0004 audit identified this as a missing decision: the ADR
+named a storage backend as open (Q8) but never addressed whether persisted Project
+Understanding is committed to the repository or kept local, nor whether it is
+sensitive data under `docs/APPROVALS.md` — a real gap given `docs/PROJECT.md` §5/§30's
+own worked examples (prison security, factory floors) can surface operationally
+sensitive facility detail. — **Answered 2026-09-15 (owner decision):** Project
+Understanding is classified as **potentially sensitive project data**, governed by
+`docs/APPROVALS.md`'s data/privacy rule. It must be **durable across process
+restarts** but must **NOT** be automatically stored in Git-tracked repository files —
+V1 persistent storage is **local/project-scoped and gitignored by default**.
+Durability does not imply Git tracking. This does not change `EXPERIMENTS.md`'s
+contract (that ledger's own tracking status is unaffected). External-LLM transmission
+remains governed by the existing approval/privacy rules regardless of persistence —
+storing data locally grants no new permission to send it externally. *Distinct from
+and does not resolve* **Q8**, which stays open (files vs. SQLite vs. a service — this
+decision constrains *where implied by Git*, not *which technology*). See D-015,
+ADR-0004.
+
+~~**Q8. What is the persistence backend for project memory?**~~ files, SQLite, or a
+service? — **Answered 2026-09-15 (owner decision):** **SQLite**, for V1. Local and
+project-scoped — the database file lives in the project's gitignored
+persistent-state area (per Q15/D-015: not Git-tracked). Must survive process
+restarts. SQLite stays **behind** the `ProjectMemoryStore` `Protocol` (ADR-0004 §5) —
+no `cv_agent` module outside `cv_agent/memory/` may import a SQLite-specific type or
+depend on it directly, so a future backend can replace it without touching callers.
+No external database/service is required for V1. This resolves Q8 for **project
+memory only** — the experiment ledger's own backend question is unaffected and spun
+off separately as **Q16** (Soon), since ADR-0004 does not move `EXPERIMENTS.md` into
+SQLite or change its contract. See D-016, ADR-0004.

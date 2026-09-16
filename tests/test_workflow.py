@@ -367,9 +367,12 @@ class TestCVAgentWorkflowWiring:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("CV_AGENT_SKILL_PATHS", str(tmp_path))
+        from cv_agent.config.settings import AgentConfig
         from cv_agent.runtime.agent import CVAgent
 
-        agent = CVAgent()
+        # Explicit workspace_root (ADR-0004 §1 item 13) — never the real
+        # repo cwd. Reuses the same tmp_path already isolating skill_paths.
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
         result = agent.start_workflow(_VAGUE_TASK, session_id="cva-1")
 
         assert "__interrupt__" in result
@@ -378,9 +381,12 @@ class TestCVAgentWorkflowWiring:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("CV_AGENT_SKILL_PATHS", str(tmp_path))
+        from cv_agent.config.settings import AgentConfig
         from cv_agent.runtime.agent import CVAgent
 
-        agent = CVAgent()
+        # Explicit workspace_root (ADR-0004 §1 item 13) — never the real
+        # repo cwd. Reuses the same tmp_path already isolating skill_paths.
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
         started = agent.start_workflow(_VAGUE_TASK, session_id="cva-2")
         questions = started["__interrupt__"][0].value["questions"]
         answers = {q["relates_to_field"]: "provided" for q in questions}
@@ -394,9 +400,12 @@ class TestCVAgentWorkflowWiring:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("CV_AGENT_SKILL_PATHS", str(tmp_path))
+        from cv_agent.config.settings import AgentConfig
         from cv_agent.runtime.agent import CVAgent
 
-        agent = CVAgent()
+        # Explicit workspace_root (ADR-0004 §1 item 13) — never the real
+        # repo cwd. Reuses the same tmp_path already isolating skill_paths.
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
         agent.start_workflow(_VAGUE_TASK, session_id="cva-3")
 
         state = agent.get_workflow_state("cva-3")
@@ -413,9 +422,12 @@ class TestCVAgentWorkflowWiring:
         behaving exactly as before ADR-0003 — proves the two graphs are
         genuinely independent, not a hidden refactor of one into the other."""
         monkeypatch.setenv("CV_AGENT_SKILL_PATHS", str(tmp_path))
+        from cv_agent.config.settings import AgentConfig
         from cv_agent.runtime.agent import CVAgent
 
-        agent = CVAgent()
+        # Explicit workspace_root (ADR-0004 §1 item 13) — never the real
+        # repo cwd. Reuses the same tmp_path already isolating skill_paths.
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
         result = agent.run("inspect a model", task_type="model_analysis")
 
         assert result["status"] == "ready"

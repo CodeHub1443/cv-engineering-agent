@@ -12,21 +12,21 @@ Doc consistency pass complete (D-006–D-009). `docs/PROJECT.md` is frozen canon
 
 **Implemented:** Skill discovery + resolution (ADR-0007), requirements analysis +
 task decomposition (ADR-0008), skill execution boundary (ADR-0009, zero bindings
-registered — see below). **Orchestration state + human-approval interrupts
-(ADR-0003, this session):** `cv_agent/graph/workflow.py` — a real LangGraph
-interrupt/resume graph (`interrupt()`/`Command(resume=...)`, not polling) pauses for
-requirements-clarification (re-analyzes with the human's answer) and approval-gated
-execution (resumes with the decision as the source of truth before `SkillExecutor`
-may run). `CVAgent.start_workflow()`/`.resume_workflow()`/`.get_workflow_state()`;
-CLI `workflow`. Kept as a **second** graph, separate from the existing
-`build_graph()`/`run()` stub (unchanged, regression-tested) — see ADR-0003 §4/§8.
+registered — see below), orchestration state + human-approval interrupts (ADR-0003).
+**Project memory (ADR-0004) — now wired in (this session):**
+`cv_agent/memory/` (SQLite-backed `ProjectMemoryStore`, gitignored, durable, SQLite
+confined to `sqlite_store.py`) is called from `CVAgent.start_workflow()`/
+`resume_workflow()` — `AgentConfig.workspace_root` (caller-resolved, never inferred),
+lazy `CVAgent.memory`, a `SessionRecord` per workflow session, and a
+`ProjectUnderstandingRevision` on each factual change (equality-based dedup,
+excludes LLM prose). `cv_agent/graph/workflow.py` itself is untouched — persistence
+wraps the graph invocation in `CVAgent`, kept separate from LangGraph's own
+`MemorySaver` checkpoint (ADR-0003, unchanged).
 
-**Still NOT implemented:** any real execution binding (ADR-0009 §5, `0/84`), project
-memory (no ADR-0004 — `requirements_analysis` vanishes when a checkpoint is
-discarded; `MemorySaver` doesn't survive a restart, Q3's durability half deferred),
-RAG, MCP, research subsystem, autonomous training, optimization/deployment/
-monitoring, an LLM/semantic resolver. Every capability in
-`spec/capability_registry.json` is still `status: "planned"`.
+**Still NOT implemented:** any real execution binding (ADR-0009 §5, `0/84`), RAG,
+MCP, research subsystem, autonomous training, optimization/deployment/monitoring, an
+LLM/semantic resolver, a persistent LangGraph checkpointer (Q3's durability half).
+Every capability in `spec/capability_registry.json` is still `status: "planned"`.
 
 ## In flight
 
@@ -34,26 +34,26 @@ monitoring, an LLM/semantic resolver. Every capability in
 |---|---|---|
 | GitHub scaffolding (labels, templates, CI, milestones) | #— | not started |
 | ADR-0001 capability model — seed written, needs review | #— | proposed |
-| ADR-0003 orchestration state + approval interrupts | #— | accepted (retroactive) |
-| ADR-0007/0008/0009 | #— | accepted (retroactive) |
+| ADR-0003/0007/0008/0009 | #— | accepted (retroactive) |
+| ADR-0004 project memory | #— | accepted; implemented AND wired into `CVAgent` |
 | First real `ExecutionRuntime` adapter | #— | not started |
-| ADR-0004 project memory | #— | not started |
 
 ## Next 3 actions
 
-1. ADR-0004 project memory — persist `RequirementsAnalysis` beyond one run's
-   checkpoint; resolves `OPEN_QUESTIONS.md` Q1 as a prerequisite.
-2. Verify one real skill end-to-end (candidate: `trt-perf-analysis`'s
+1. Verify one real skill end-to-end (candidate: `trt-perf-analysis`'s
    `scripts/run.sh`) and register the first genuinely-verified binding.
-3. Human review of `CLAUDE.md`, `docs/architecture/OVERVIEW.md`, ADR-0003/0007/0008/0009.
+2. Human review of `CLAUDE.md`, `docs/architecture/OVERVIEW.md`, all accepted ADRs.
+3. Merge `feature/claude/project-memory` (currently unmerged; 247 tests passing).
 
 ## Blockers
 
-- `OPEN_QUESTIONS.md` Q1 blocks ADR-0004; Q3's durable-transport half blocks a
-  restart-survivable approval flow (needs a persistent checkpointer).
+- None for ADR-0004's own scope (Q1/Q8/Q15 all resolved, now implemented and wired).
+  Q3's durable-transport half still blocks a restart-survivable *approval interrupt*
+  specifically (needs a persistent LangGraph checkpointer — separate from, and not
+  resolved by, project memory's own durability).
 
 ## Do not start yet
 
 RAG, MCP, real LLM providers, autonomous training, registering an unverified binding,
-unrestricted autonomous execution, merging the two graphs before `run()` needs it —
-`[P§34]`.
+unrestricted autonomous execution, merging the two graphs, a second
+`ProjectMemoryStore` backend before SQLite is found insufficient — `[P§34]`.

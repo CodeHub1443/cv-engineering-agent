@@ -76,6 +76,10 @@ class TestCLISkillsCapabilitiesResolve:
             text=True,
             timeout=60,
             env=env,
+            # The `workflow` command resolves workspace_root from cwd
+            # (ADR-0004 §1 item 13) — pin it to the isolated skill_root so
+            # no test ever creates .cv_agent/ in the real repository.
+            cwd=str(skill_root),
         )
 
     def _write_skill(self, root: Path, skill_id: str, description: str) -> None:
