@@ -8,17 +8,21 @@
   ADR-0009 §3's `ExecutionBinding`; supersedes neither)
 - **Issue:** #TBD
 
-> **Note on numbering:** `docs/roadmap/ROADMAP.md` (Phase 5) aspirationally
-> reserved "ADR-0010" for a future *training-execution* ADR, and "ADR-0009" for
-> a future *dataset-subsystem* ADR that never happened — ADR-0009 was actually
-> assigned to skill-execution-boundary instead when it was actually written.
-> This repo's real practice, evidenced by that exact prior collision, has never
-> been to honor the roadmap's speculative pre-allocation; each ADR gets the
-> next number free in `docs/architecture/adr/` at the time it is actually
-> written. This ADR follows that same precedent — `0010` is the next unused
-> file number, not a claim on the roadmap's training-execution topic. Flagged
-> here, not silently resolved; a human may choose to renumber either this ADR
-> or the roadmap's Phase 5 bullet.
+> **Note on numbering (resolved 2026-09-16):** `docs/roadmap/ROADMAP.md` Phase 6
+> aspirationally reserved "ADR-0010" for a future *training-execution* ADR
+> (Phase 5, separately, reserved "ADR-0009" for a future *dataset-subsystem*
+> ADR that never happened — ADR-0009 was actually assigned to
+> skill-execution-boundary instead when it was actually written, and that
+> earlier drift was simply left as-is). This repo's actual, evidenced
+> numbering convention — confirmed by that exact prior case, not invented here
+> — is: each ADR gets the next number free in `docs/architecture/adr/` at the
+> time it is actually written; the roadmap's phase-scope bullets are
+> speculative, non-binding placeholders for decisions not yet made, expected
+> to drift once the real decision is written. This ADR keeps `0010` on that
+> basis. `docs/roadmap/ROADMAP.md` Phase 6 has been updated to no longer claim
+> that number for training execution (its own scope line now names the topic
+> without a hardcoded number, deferring assignment to whenever that ADR is
+> actually written) — existing accepted ADRs are not renumbered.
 
 ## 1. Context
 
