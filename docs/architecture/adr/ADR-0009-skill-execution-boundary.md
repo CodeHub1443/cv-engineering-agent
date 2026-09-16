@@ -338,3 +338,74 @@ See ADR-0007 §9 for the separate, related decision this command depends on —
 how `Skill.executable`/`SkillMatch.executable` became truthful in the first
 place, so `--help`-level discovery (`skills`/`resolve`) and this command's own
 `can_execute()` check agree.
+
+## 11. Status — declared input contract (`ExecutionBinding.input_schema`)
+
+**Added (branch `feature/claude/execution-planning-contract`), types only —
+see ADR-0010 for the connector this unblocks.** `trt-perf-analysis`'s actual
+input contract (`{"path": ...}` XOR `{"data": [...]}`, optional
+`{"model_name": ...}`) has, until now, existed *only* as prose in
+`cv_agent/execution/runtimes/trt_perf_analysis.py::_build_argv`'s docstring —
+nowhere machine-readable. ADR-0010's planning connector needs to know, for any
+registered binding, what inputs it requires *before* attempting to construct a
+`SkillExecutionRequest`; this section adds exactly that, as data on
+`ExecutionBinding`, nothing more.
+
+- **New type**, module `cv_agent.execution.binding`:
+
+  ```python
+  @dataclass(frozen=True)
+  class InputField:
+      name: str
+      required: bool
+      description: str
+      default: Any | None = None
+  ```
+
+- **`ExecutionBinding` gains one new field:** `input_schema: tuple[InputField, ...] = ()`.
+  Default empty tuple — every existing `ExecutionBinding` construction site
+  (exactly one today: `trt_perf_analysis.build_binding()`) is unaffected
+  unless and until it is deliberately populated; this is additive, not a
+  breaking change to the dataclass's existing positional/keyword shape.
+
+- **Why this lives on `ExecutionBinding`, not a separate registry:** an input
+  contract is a fact about *one specific skill_id + binding_id pairing* —
+  exactly what `ExecutionBinding` already exists to declare (skill_id,
+  binding_id, runtime_id, approval_policy, verified, description). A separate
+  `cv_agent/execution/input_contracts.py` keyed by skill_id would duplicate
+  the key `ExecutionBinding` already owns and could silently drift out of
+  sync with whichever binding is actually registered for that skill_id at any
+  given moment — two sources of truth for one pairing, with no mechanism
+  keeping them consistent. Attaching it directly keeps one binding = one
+  complete declaration, discoverable through the *existing*
+  `ExecutionBindingRegistry.get_binding()`/`list_bindings()` — no new lookup
+  path, no new registry.
+
+- **What this is NOT:** `input_schema` is **planning metadata, not a
+  replacement for runtime validation.** `TrtPerfAnalysisRuntime._build_argv()`
+  remains the actual, authoritative enforcement of the contract (it still
+  raises `ValueError` for an invalid combination, e.g. both `path` and `data`
+  given, or neither) — nothing about this change relaxes or bypasses that. A
+  future `plan_execution` node (ADR-0010) reads `input_schema` only to decide
+  "do I already have enough to attempt a plan, or is something required
+  missing" — a coarser, earlier check than the runtime's own validation, not
+  a substitute for it. `SkillExecutionRequest.inputs` stays exactly as
+  documented in `cv_agent/execution/models.py` — "opaque to the executor and
+  binding registry" — this change does not touch that dict's own type or the
+  executor's/registry's ignorance of its contents; it only adds a place to
+  *declare*, alongside the binding, what a caller who wants to construct one
+  correctly should know.
+
+- **Backward compatibility:** an `ExecutionBinding` with no declared
+  `input_schema` (the default `()`) is exactly as valid and executable as
+  before this section — `SkillExecutor.execute()` never reads this field at
+  all (confirmed: it only reads `verified`/`approval_policy`/`runtime_id`),
+  so this addition changes zero existing behavior for the one real binding
+  that exists today unless `trt_perf_analysis.build_binding()` is separately,
+  deliberately updated to populate it (not done by this change — see ADR-0010
+  §9: types only, no behavior).
+
+**Not implemented by this section:** `trt_perf_analysis.build_binding()`
+populating its own real `input_schema`; any code that reads
+`ExecutionBinding.input_schema` for a real decision. Both are the
+implementation PR's job (ADR-0010 §9), not this contract-only change's.
