@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from cv_agent.config.settings import AgentConfig
 from cv_agent.execution.binding import ExecutionBinding
 from cv_agent.execution.models import RuntimeOutcome, SkillExecutionRequest
@@ -42,11 +44,11 @@ class _FakeRuntime:
         return RuntimeOutcome(success=True, output={"ok": True})
 
 
-def _write_skill(root: Path, skill_id: str) -> None:
+def _write_skill(root: Path, skill_id: str, description: str = "fixture skill.") -> None:
     skill_dir = root / skill_id
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {skill_id}\ndescription: fixture skill.\n---\nbody\n",
+        f"---\nname: {skill_id}\ndescription: {description}\n---\nbody\n",
         encoding="utf-8",
     )
 
@@ -144,3 +146,124 @@ class TestExecutableStatusWiring:
         match = next((m for m in result.matched_skills if m.skill_id == "cuda-agent"), None)
         assert match is not None
         assert match.executable is True
+
+
+_TRT_PERF_REQUEST = (
+    "Detect people and evaluate deployment optimization performance benchmarking "
+    "of the model."
+)
+_TRT_PERF_DESCRIPTION = "TensorRT performance benchmarking and layer analysis tool."
+
+
+class TestRequirementsAnalysisSkillLinks:
+    """
+    ADR-0008 §9: CVAgent.analyze_requirements() surfaces skill_links with
+    live executable status end to end — the exact acceptance scenario the
+    task specified: fresh agent -> register a verified binding -> analyze
+    -> the matched skill's executable flag reflects that registration,
+    and reverts to False without it. Uses a fixture 'trt-perf-analysis'
+    skill (portable, no machine dependency) plus _FakeRuntime, mirroring
+    TestExecutableStatusWiring above; a genuine end-to-end test against
+    the real installed skill follows in TestRealTrtPerfAnalysisSkillLink.
+    """
+
+    def test_matched_skill_is_executable_after_registering_a_verified_binding(
+        self, tmp_path: Path
+    ) -> None:
+        _write_skill(tmp_path, "trt-perf-analysis", _TRT_PERF_DESCRIPTION)
+        agent = CVAgent(AgentConfig(skill_paths=(tmp_path,)))
+
+        agent.execution_bindings.register_runtime(_FakeRuntime())
+        agent.execution_bindings.register_binding(
+            ExecutionBinding(
+                skill_id="trt-perf-analysis",
+                binding_id="trt-perf-analysis-fake-v1",
+                runtime_id="fake-runtime",
+                approval_policy="allowed",
+                verified=True,
+            )
+        )
+
+        analysis = agent.analyze_requirements(_TRT_PERF_REQUEST)
+
+        trt_links = [l for l in analysis.skill_links if l.skill_id == "trt-perf-analysis"]
+        assert len(trt_links) == 1
+        assert trt_links[0].executable is True
+
+    def test_same_matched_skill_is_not_executable_without_registration(
+        self, tmp_path: Path
+    ) -> None:
+        """Same discovered skill, same request, fresh CVAgent with no
+        binding registered — the matched skill must still be present
+        (discovery is unaffected) but reported as not executable."""
+        _write_skill(tmp_path, "trt-perf-analysis", _TRT_PERF_DESCRIPTION)
+        agent = CVAgent(AgentConfig(skill_paths=(tmp_path,)))
+
+        analysis = agent.analyze_requirements(_TRT_PERF_REQUEST)
+
+        trt_links = [l for l in analysis.skill_links if l.skill_id == "trt-perf-analysis"]
+        assert len(trt_links) == 1
+        assert trt_links[0].executable is False
+
+    def test_unverified_binding_does_not_make_the_matched_skill_executable(
+        self, tmp_path: Path
+    ) -> None:
+        _write_skill(tmp_path, "trt-perf-analysis", _TRT_PERF_DESCRIPTION)
+        agent = CVAgent(AgentConfig(skill_paths=(tmp_path,)))
+
+        agent.execution_bindings.register_runtime(_FakeRuntime())
+        agent.execution_bindings.register_binding(
+            ExecutionBinding(
+                skill_id="trt-perf-analysis",
+                binding_id="trt-perf-analysis-fake-v1",
+                runtime_id="fake-runtime",
+                approval_policy="allowed",
+                verified=False,
+            )
+        )
+
+        analysis = agent.analyze_requirements(_TRT_PERF_REQUEST)
+
+        trt_links = [l for l in analysis.skill_links if l.skill_id == "trt-perf-analysis"]
+        assert len(trt_links) == 1
+        assert trt_links[0].executable is False
+
+
+def _real_trt_perf_analysis_discovered() -> bool:
+    from cv_agent.skills.local import LocalSkillSource
+
+    return any(s.skill_id == "trt-perf-analysis" for s in LocalSkillSource().discover())
+
+
+_requires_real_trt_perf_analysis = pytest.mark.skipif(
+    not _real_trt_perf_analysis_discovered(),
+    reason="trt-perf-analysis is not installed under ~/.claude/skills or "
+    "~/.agents/skills on this machine — real skill_links integration test "
+    "is skipped, not faked.",
+)
+
+
+class TestRealTrtPerfAnalysisSkillLink:
+    """
+    Genuine end-to-end version of the same acceptance scenario against the
+    real, installed trt-perf-analysis skill and its real, shipped
+    ExecutionBinding (cv_agent.execution.runtimes.trt_perf_analysis) —
+    not faked. Skipped (not faked) when the skill isn't discoverable in
+    this environment, mirroring tests/test_cli_execute.py's convention.
+    """
+
+    @_requires_real_trt_perf_analysis
+    def test_real_skill_becomes_executable_after_real_registration(self) -> None:
+        from cv_agent.execution.runtimes.trt_perf_analysis import register
+
+        agent = CVAgent()
+        before = agent.analyze_requirements(_TRT_PERF_REQUEST)
+        before_links = [l for l in before.skill_links if l.skill_id == "trt-perf-analysis"]
+        assert len(before_links) == 1
+        assert before_links[0].executable is False
+
+        register(agent.execution_bindings)
+        after = agent.analyze_requirements(_TRT_PERF_REQUEST)
+        after_links = [l for l in after.skill_links if l.skill_id == "trt-perf-analysis"]
+        assert len(after_links) == 1
+        assert after_links[0].executable is True

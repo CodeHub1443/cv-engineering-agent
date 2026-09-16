@@ -12,9 +12,12 @@ testable against cv_agent.llm.mock.FakeLLMProvider without a live provider,
 per ADR-0008.
 
 Does not execute anything: this module never imports cv_agent.skills.local,
-never calls a SkillSource, and never touches an execution boundary (which
-does not exist yet — see docs/state/STATUS.md). Its only side effect is at
-most one LLMProvider.complete() call.
+never calls a SkillSource, and never imports cv_agent.execution — even
+though ADR-0009's execution boundary now exists and a skill this analyzer
+reports on may be genuinely executable (see SkillLink, ADR-0008 §9), that
+liveness fact is read secondhand off the Skill/SkillMatch objects the
+already-injected TaskResolver returns, never queried directly. Its only
+side effect is at most one LLMProvider.complete() call.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from cv_agent.requirements.models import (
     ClarificationQuestion,
     RequirementField,
     RequirementsAnalysis,
+    SkillLink,
     TaskHypothesis,
 )
 from cv_agent.requirements.rules import FIELD_DETECTORS, TASK_HYPOTHESIS_RULES
@@ -85,7 +89,7 @@ class RequirementsAnalyzer:
 
         fields = self._detect_fields(request, text_lower, assumptions)
         candidate_tasks = self._detect_task_hypotheses(text_lower)
-        capability_links = self._link_capabilities(request, candidate_tasks)
+        capability_links, skill_links = self._link_capabilities(request, candidate_tasks)
         clarifications = self._build_clarifications(fields)
         constraint_lines = self._derive_constraints(fields)
         risk_lines = self._derive_risks(fields)
@@ -109,6 +113,7 @@ class RequirementsAnalyzer:
             fields=fields,
             candidate_tasks=candidate_tasks,
             capability_links=capability_links,
+            skill_links=skill_links,
             clarification_questions=clarifications,
             assumptions=assumption_lines,
             constraints=constraint_lines,
@@ -177,21 +182,25 @@ class RequirementsAnalyzer:
         hypotheses.sort(key=lambda h: (-h.confidence, h.task_component))
         return tuple(hypotheses)
 
-    # ── Capability integration (reuses the existing resolver, never bypasses it) ──
+    # ── Capability + skill integration (reuses the existing resolver, never bypasses
+    # it, never issues a second resolution pass — one resolve() call per task
+    # component supplies both capability_links and skill_links below) ──────────────
 
     def _link_capabilities(
         self, request: str, candidate_tasks: tuple[TaskHypothesis, ...]
-    ) -> tuple[CapabilityLink, ...]:
+    ) -> tuple[tuple[CapabilityLink, ...], tuple[SkillLink, ...]]:
         links: list[CapabilityLink] = []
-        seen: set[tuple[str, str]] = set()
+        skill_links: list[SkillLink] = []
+        seen_caps: set[tuple[str, str]] = set()
+        seen_skills: set[tuple[str, str]] = set()
         for task in candidate_tasks:
             query = f"{task.task_component.replace('_', ' ')} {request}"
             result = self._resolver.resolve(query)
             for cap in result.matched_capabilities[:_MAX_CAPABILITY_LINKS_PER_TASK]:
                 key = (task.task_component, cap.capability_id)
-                if key in seen:
+                if key in seen_caps:
                     continue
-                seen.add(key)
+                seen_caps.add(key)
                 links.append(
                     CapabilityLink(
                         task_component=task.task_component,
@@ -200,7 +209,23 @@ class RequirementsAnalyzer:
                         matched_terms=cap.matched_terms,
                     )
                 )
-        return tuple(links)
+            # Same `result` as above — matched_skills is already computed by
+            # this one resolve() call; only read, never re-resolved.
+            for skill in result.matched_skills:
+                skey = (task.task_component, skill.skill_id)
+                if skey in seen_skills:
+                    continue
+                seen_skills.add(skey)
+                skill_links.append(
+                    SkillLink(
+                        task_component=task.task_component,
+                        skill_id=skill.skill_id,
+                        declared=skill.declared,
+                        matched_terms=skill.matched_terms,
+                        executable=skill.executable,
+                    )
+                )
+        return tuple(links), tuple(skill_links)
 
     # ── Clarification questions ──────────────────────────────────────────
 

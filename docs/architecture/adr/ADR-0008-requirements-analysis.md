@@ -90,6 +90,14 @@ class CapabilityLink:
     matched_terms: tuple[str, ...]
 
 @dataclass(frozen=True)
+class SkillLink:  # added ADR-0008 §9
+    task_component: str
+    skill_id: str
+    declared: bool
+    matched_terms: tuple[str, ...]
+    executable: bool  # live status at analysis time — see §9, ADR-0007 §9
+
+@dataclass(frozen=True)
 class ClarificationQuestion:
     question: str
     relates_to_field: str
@@ -102,6 +110,7 @@ class RequirementsAnalysis:
     fields: tuple[RequirementField, ...]
     candidate_tasks: tuple[TaskHypothesis, ...]
     capability_links: tuple[CapabilityLink, ...]
+    skill_links: tuple[SkillLink, ...]  # added ADR-0008 §9
     clarification_questions: tuple[ClarificationQuestion, ...]
     assumptions: tuple[str, ...]
     constraints: tuple[str, ...]
@@ -136,7 +145,8 @@ integration that never claims `status == "available"`, clarification-question
 coverage, determinism, LLM narrative isolation from fact fields) and
 `tests/test_cli.py`'s `analyze` command tests (structured output, verbatim request
 echo, and an explicit check that the skill fixture root is untouched by `analyze` —
-i.e. no execution).
+i.e. no execution). See §9 for the `skill_links` amendment's own test additions
+(`TestSkillLinks`, `TestRequirementsAnalysisSkillLinks`, `TestRealTrtPerfAnalysisSkillLink`).
 
 ## 8. Revisit trigger
 
@@ -144,4 +154,69 @@ When a LangGraph DISCOVER/DEFINE node is built and needs `RequirementsAnalysis` 
 parts of it) folded into `AgentState`; when a real LLM provider is wired in and a
 semantic (not just keyword) extraction path is wanted; or when a second CV domain
 (e.g. audio, LiDAR) reveals that `FIELD_DETECTORS`/`TASK_HYPOTHESIS_RULES` need a
-richer trigger mechanism than substring matching.
+richer trigger mechanism than substring matching — **all still open.** A fourth
+trigger, named retroactively here since it fired without being written down in
+advance: when `TaskResolver`'s `SkillMatch.executable` became a truthful, live
+signal (ADR-0007 §9) instead of a hardcoded `False`, this ADR's own
+`_link_capabilities()` was found to already be computing that information on every
+`analyze()` call and discarding it — **fired, see §9.**
+
+## 9. Status — matched-skill visibility (amendment)
+
+**Amended (branch `feature/claude/requirements-skill-links`):** an architecture audit
+of `main` @ `7c284d2` found `RequirementsAnalyzer._link_capabilities()` calling
+`TaskResolver.resolve()` once per candidate task component (exactly as §3 always
+described), reading `result.matched_capabilities` to build `capability_links`, and
+silently discarding `result.matched_skills` on the same line — even though, since
+ADR-0007 §9, that `SkillMatch.executable` field is a truthful, live fact. A user
+running `analyze` had no way to learn "and here is the executable skill for this,"
+even though the analyzer already computed it. This amendment closes that gap.
+
+- **Data-model decision (of the two the owning task offered):** `RequirementsAnalysis`
+  gains a new, top-level `skill_links: tuple[SkillLink, ...]` field — **not** a
+  `matched_skills` field nested inside `CapabilityLink`. `TaskResolver.resolve()`'s own
+  `SkillMatch` is not attributed to one specific capability within a single call: a
+  skill can be matched purely by keyword overlap (`declared=False`), independent of any
+  capability's declared `relevant_skills`, and a declared skill can be declared by more
+  than one matched capability at once. Nesting would either drop the undeclared matches
+  or fabricate a specific capability attribution the resolver itself never made — the
+  kind of blurring §4's table already rejected once (folding `RequirementField`/
+  `TaskHypothesis` into `AgentState`). `SkillLink.task_component` is the same honest
+  join key `CapabilityLink.task_component` already uses; a caller wanting "this
+  capability's skills" reads both tuples for the same `task_component`.
+- **No second resolution pass:** `_link_capabilities()` reads `result.matched_skills`
+  from the *same* `result` object it already had in scope for `matched_capabilities` —
+  one `resolve()` call per task component, exactly as before this amendment. Verified
+  by `tests/test_requirements.py::TestSkillLinks::test_no_second_resolver_call_is_introduced`,
+  which asserts the resolve() call count is unchanged.
+- **Live executable status, restated:** `SkillLink.executable` is copied verbatim from
+  `SkillMatch.executable` — true only if the `CVAgent`/`SkillInventory` this analysis
+  ran against had a verified, registered execution binding for that skill_id *at
+  analysis time* (ADR-0007 §9). It is not a permanent property of the installed skill;
+  the same skill_id can differ across two separate `analyze()` calls against
+  differently-configured agents. A discovered `SKILL.md` alone never makes it `True`.
+  `cv_agent.requirements` still imports nothing from `cv_agent.execution` — it reads
+  this fact secondhand off the `SkillMatch` the already-injected `TaskResolver` returns.
+- **Boundary preserved:** this module still does not decide which skill should execute,
+  still does not rank skills (skill_links keeps the resolver's own match order,
+  unmodified), and still adds no `selected_skill`/confidence-of-selection field —
+  exactly §2's original "does NOT own: deciding which capability/skill to actually use"
+  boundary, now simply made visible for orchestration or a human to act on, not moved.
+- **CLI:** `python -m cv_agent analyze` gained a "Matched skills" section, formatted
+  consistently with the existing `resolve` command's own skill-match output
+  (`via=declared/keyword`, `executable=True/False`). `analyze` still never registers a
+  binding, never executes anything — the same fresh, unregistered `CVAgent` every other
+  read-only command constructs, so a bare CLI invocation still always reports
+  `executable=False` for everything, same honesty default as `skills`/`resolve`/
+  `executions`.
+- **Tests:** `tests/test_requirements.py::TestSkillLinks` (9 new: empty case,
+  one-capability/one-skill, one-capability/multiple-skills, multiple-capabilities-from-
+  one-task-component, task-component scoping across multiple components, no-second-
+  resolve()-call, executable True/False/unverified-binding against a real fixture skill
+  named `trt-perf-analysis`); `tests/test_agent.py::TestRequirementsAnalysisSkillLinks`
+  + `TestRealTrtPerfAnalysisSkillLink` (`CVAgent.analyze_requirements()` end-to-end,
+  including one genuine, unfaked test against the real installed `trt-perf-analysis`
+  skill and its real shipped binding); `tests/test_cli.py` (2 new: the CLI surfaces the
+  section, and never silently registers/executes). One pre-existing test
+  (`TestDeterminism::test_same_input_same_output`) was extended, not rewritten, to also
+  assert `skill_links` is stable across repeated calls with identical input.

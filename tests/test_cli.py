@@ -168,6 +168,55 @@ class TestCLISkillsCapabilitiesResolve:
         assert result.returncode == 0, result.stderr
         assert "Detect theft in the warehouse." in result.stdout
 
+    def test_analyze_command_surfaces_matched_skill_and_executable_status(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-0008 §9: `analyze` must make the capability -> matched skill
+        -> executable now/not chain visible, consistent with `resolve`'s
+        own 'Matched skills' section format."""
+        self._write_skill(
+            tmp_path,
+            "trt-perf-analysis",
+            "TensorRT performance benchmarking and layer analysis tool.",
+        )
+        result = self._run(
+            [
+                "analyze",
+                "Detect people and evaluate deployment optimization performance "
+                "benchmarking of the model.",
+            ],
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Matched skills" in result.stdout
+        assert "trt-perf-analysis" in result.stdout
+        assert "executable=False" in result.stdout
+
+    def test_analyze_command_never_silently_registers_or_executes_a_skill(
+        self, tmp_path: Path
+    ) -> None:
+        """A fresh, unregistered CVAgent per CLI invocation (same honesty
+        default as `skills`/`resolve`/`executions`) — `analyze` must never
+        report a skill as executable=True nor print any execution-result
+        language, since it never registers a binding itself."""
+        self._write_skill(
+            tmp_path,
+            "trt-perf-analysis",
+            "TensorRT performance benchmarking and layer analysis tool.",
+        )
+        result = self._run(
+            [
+                "analyze",
+                "Detect people and evaluate deployment optimization performance "
+                "benchmarking of the model.",
+            ],
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "executable=True" not in result.stdout
+        assert "Status: completed" not in result.stdout
+        assert "Status: failed" not in result.stdout
+
     def test_executions_command_reports_zero_bindings_by_default(
         self, tmp_path: Path
     ) -> None:

@@ -638,3 +638,48 @@ audit's own recommendation not to start any of them yet. Also fixed, in passing 
 this task's explicit instruction: `docs/state/STATUS.md`'s stale "PR #27 still open"
 statement (merged as `2cf3709`, now corrected). Not committed or pushed — branch
 `feature/claude/execution-feedback-loop`, working tree only — see git status.
+
+## 2026-09-16 — Surfaced matched skill + executable status from RequirementsAnalysis (feature/claude/requirements-skill-links)
+
+**Did:** A follow-up architecture audit of merged `main` @ `7c284d2` found the single
+next highest-priority gap: `RequirementsAnalyzer._link_capabilities()` already called
+`TaskResolver.resolve()` once per task component and read `result.matched_capabilities`
+to build `capability_links`, but discarded `result.matched_skills` — including the
+truthful `executable` flag the previous session (D-021) had just wired up — on the same
+line. A user running `analyze` had no way to learn which matched capability actually had
+an executable skill behind it right now; they'd have to separately run `resolve` and
+manually cross-reference. Fixed by adding `RequirementsAnalysis.skill_links: tuple[
+SkillLink, ...]` (`task_component`, `skill_id`, `declared`, `matched_terms`,
+`executable`) — a new top-level field, deliberately not nested inside `CapabilityLink`,
+since one `resolve()` call's `SkillMatch`es aren't attributed to a single capability
+(keyword-matched skills have no capability at all; a declared skill can belong to
+several matched capabilities at once). `_link_capabilities()` now returns both tuples
+from the one `resolve()` call already in scope — no second resolution pass, verified by
+an explicit call-count test. `python -m cv_agent analyze` gained a "Matched skills"
+section formatted like `resolve`'s own output.
+
+**Why:** Same reasoning as D-021's audit, one layer up: every other candidate subsystem
+either has no current consumer or hardens a path nobody can reach yet, while this gap
+sat directly on the one path `docs/PROJECT.md` §5/§30 describes as the product — a
+request should turn into engineering action, and the information needed to connect
+"matched capability" to "executable skill" was already computed and thrown away one
+line later.
+
+**Broke:** Nothing — full suite 305 → 320 passing, zero regressions. One pre-existing
+assertion (`TestDeterminism::test_same_input_same_output`) was extended, not rewritten,
+to also cover `skill_links`.
+
+**Learned:** A duck-typed fake `TaskResolver` (mirroring this repo's existing
+`FakeRuntime`/`FakeLLMProvider` pattern) gave precise, deterministic control over
+multiplicity/scoping test scenarios without fighting real keyword-overlap matching
+internals — real resolver + real registry + fixture skills was reserved for the
+executable-status and real-`trt-perf-analysis` tests, where the real wiring itself is
+what's under test.
+
+**Left open:** `RequirementsAnalyzer` still does not rank or select a skill — that
+remains explicitly out of scope, per this task's own instruction and ADR-0008 §2's
+unchanged boundary. Also fixed, per this task's explicit instruction:
+`docs/roadmap/ROADMAP.md` Phase 3/Phase 4's stale "zero bindings registered"/"no memory
+subsystem exists" status statements, both predating D-020/D-021. Not committed or
+pushed — branch `feature/claude/requirements-skill-links`, working tree only — see git
+status.

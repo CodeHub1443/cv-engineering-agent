@@ -166,6 +166,15 @@ def _cmd_analyze(request: str) -> int:
             f"status={link.status}"
         )
 
+    print()
+    print(f"Matched skills ({len(analysis.skill_links)}):")
+    for skill_link in analysis.skill_links:
+        via = "declared" if skill_link.declared else "keyword"
+        print(
+            f"  - {skill_link.task_component:<24} -> {skill_link.skill_id:<28} "
+            f"via={via}  executable={skill_link.executable}"
+        )
+
     if analysis.clarification_questions:
         print()
         print(f"Clarification questions ({len(analysis.clarification_questions)}):")
