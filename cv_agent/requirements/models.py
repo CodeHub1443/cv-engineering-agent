@@ -9,6 +9,10 @@ explicitly supplied that assumption (see `RequirementsAnalyzer.analyze`'s
 promotes a field to `assumed` on its own initiative. Anything else is
 `unknown`, and an `unknown` field always carries a clarification question,
 never a fabricated default.
+
+A second invariant, added by ADR-0008 §9: `SkillLink.executable` is a LIVE
+fact about the calling `CVAgent`'s execution registry at analysis time, not
+a permanent property of the skill — see `SkillLink`'s own docstring.
 """
 
 from __future__ import annotations
@@ -68,6 +72,45 @@ class CapabilityLink:
 
 
 @dataclass(frozen=True)
+class SkillLink:
+    """
+    A skill the resolver matched while answering one task component's query
+    — scoped to `task_component`, the same join key `CapabilityLink` uses,
+    deliberately NOT nested inside `CapabilityLink`.
+
+    `TaskResolver.resolve()`'s own `SkillMatch` is not attributed to one
+    specific capability within a single resolve() call: a skill can be
+    matched purely by keyword overlap against discovered skill metadata
+    (`declared=False`), independent of any capability's declared
+    `relevant_skills`, and a declared skill can be declared by more than
+    one matched capability at once. Embedding `matched_skills` inside
+    `CapabilityLink` would therefore either drop the undeclared matches or
+    fabricate a specific capability attribution the resolver never made.
+    `task_component` is the honest join key both collections actually
+    share — a caller wanting "capability X's skills" reads both tuples for
+    the same `task_component` rather than being handed a false 1:1 edge.
+    """
+
+    task_component: str
+    skill_id: str
+    declared: bool
+    """Mirrors `SkillMatch.declared` verbatim — True if a matched
+    capability's `relevant_skills` declared this skill; False if it was
+    matched purely by keyword overlap against discovered skill metadata."""
+    matched_terms: tuple[str, ...]
+    executable: bool
+    """Copied verbatim from `SkillMatch.executable` at analysis time — True
+    only if the `CVAgent`/`SkillInventory` this analysis ran against had a
+    verified, registered execution binding for this skill_id *at that
+    moment*. This is NOT a permanent property of the installed skill: the
+    same skill_id can be `executable=False` in one analysis and
+    `executable=True` in another, purely depending on what the calling
+    `CVAgent`'s execution registry had registered when `analyze()` ran. A
+    discovered `SKILL.md` alone never makes this True — see
+    `cv_agent.skills.models.Skill.executable` and ADR-0007 §9."""
+
+
+@dataclass(frozen=True)
 class ClarificationQuestion:
     """A targeted question generated from one specific unknown field."""
 
@@ -87,6 +130,13 @@ class RequirementsAnalysis:
     fields: tuple[RequirementField, ...]
     candidate_tasks: tuple[TaskHypothesis, ...]
     capability_links: tuple[CapabilityLink, ...]
+    skill_links: tuple[SkillLink, ...]
+    """Skills the resolver matched while answering each task component's
+    query — see `SkillLink`'s own docstring for why this is a separate,
+    task_component-scoped collection rather than nested inside
+    `capability_links`. This module (`RequirementsAnalyzer`) never decides
+    which skill should execute and never ranks these beyond the order the
+    resolver itself already produced — see ADR-0008 §2/§9."""
     clarification_questions: tuple[ClarificationQuestion, ...]
     assumptions: tuple[str, ...]
     """Human-readable echo of every field with status == "assumed", for a

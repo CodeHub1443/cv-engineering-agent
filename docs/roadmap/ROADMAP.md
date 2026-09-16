@@ -88,19 +88,19 @@ discovery (`LocalSkillSource`) and deterministic (non-LLM) resolution (`TaskReso
 — the agent can enumerate what's discovered vs. merely declared, per the exit test's
 second half. ADR-0009 accepted; `cv_agent/execution/` implements the execution
 *boundary* (`SkillExecutor`, `ExecutionBinding`/`ExecutionBindingRegistry`,
-`CVAgent.execute()`/`.can_execute()`, `python -m cv_agent executions`) — but zero
-bindings are registered against the real environment: inspection of all 84 installed
-skills found every `SKILL.md` is prose for an LLM agent to read and act on with its
-own tools, not a program with a verifiable invocation contract (see ADR-0009 §1).
-**Not done:** NVIDIA skill *adapters* (no `ExecutionRuntime` implementation exists for
-any real skill yet — the boundary has no first tenant), a second `SkillSource` (only
-local filesystem discovery exists).
+`CVAgent.execute()`/`.can_execute()`, `python -m cv_agent executions`) and now has its
+first real tenant: `trt-perf-analysis` is an individually-verified, CLI-executable
+`ExecutionRuntime` binding (`python -m cv_agent execute trt-perf-analysis`) — but
+inspection of the other 83 installed skills found every one is prose for an LLM agent
+to read and act on with its own tools, not a program with a verifiable invocation
+contract (see ADR-0009 §1). **Not done:** adapters for those other 83 skills, a second
+`SkillSource` (only local filesystem discovery exists).
 
 **Exit test:** a quantization capability resolves to an external NVIDIA skill; the repo
 contains **no** reimplementation of that skill's logic; and the agent can enumerate which
 external capabilities are installed versus merely known. *(Enumeration half: met via
-`python -m cv_agent resolve`. Adapter/invocation half: the boundary to hang a real
-adapter on now exists — `python -m cv_agent executions` — but no adapter is registered.)*
+`python -m cv_agent resolve`. Adapter/invocation half: met for one skill —
+`trt-perf-analysis`, real and CLI-executable; the other 83 remain unadapted.)*
 
 ---
 
@@ -113,22 +113,27 @@ written to memory · CV task decomposition.
 
 **Status:** partially done. ADR-0008 accepted; `cv_agent/requirements/` implements
 deterministic requirements analysis (known/unknown/assumed fields), CV task
-decomposition into candidate components with rationale, and clarification-question
-generation — callable via `CVAgent.analyze_requirements()` / `python -m cv_agent
-analyze`. ADR-0003 (this session) gives the clarification questions a real LangGraph
-interrupt node (`cv_agent/graph/workflow.py`) that actually pauses and waits for the
-human's answer, then re-runs the analysis with it — `CVAgent.start_workflow()`/
-`.resume_workflow()` / `python -m cv_agent workflow`. **Not done:** nothing is
-persisted to project memory (no memory subsystem exists — ADR-0004, not written), and
-this workflow graph is separate from `run()`'s own graph, not merged into it (ADR-0003
-§4/§8).
+decomposition into candidate components with rationale, matched-skill/executable-status
+links (ADR-0008 §9), and clarification-question generation — callable via
+`CVAgent.analyze_requirements()` / `python -m cv_agent analyze`. ADR-0003 gives the
+clarification questions a real LangGraph interrupt node (`cv_agent/graph/workflow.py`)
+that actually pauses and waits for the human's answer, then re-runs the analysis with
+it — `CVAgent.start_workflow()`/`.resume_workflow()` / `python -m cv_agent workflow`.
+ADR-0004 accepted; `start_workflow()` persists a `SessionRecord` and, when a run's
+requirements analysis changes, a `ProjectUnderstandingRevision`, to durable, SQLite-
+backed project memory. **Not done:** the CLI's `workflow` command only demonstrates the
+interrupt/resume mechanics with synthetic answers, not real ones (no CLI path accepts
+real clarification answers or a `pending_execution` payload yet), and this workflow
+graph is separate from `run()`'s own graph, not merged into it (ADR-0003 §4/§8).
 
 **Exit test:** given "I have a prison project — escape-attempt detection", the agent asks
 targeted operational questions before naming any model, and produces a written
 PROJECT UNDERSTANDING + CV TASK DECOMPOSITION persisted to project memory. If it names
 YOLO before the questions, the phase fails. *(Questions + decomposition half: met via
 `analyze_requirements()`, now with a real pause-for-answer via `start_workflow()`/
-`resume_workflow()`. Persistence-to-memory half: not yet — no memory subsystem.)*
+`resume_workflow()`. Persistence-to-memory half: met — `start_workflow()` writes to
+`cv_agent/memory/` — but only programmatically; the CLI `workflow` demo doesn't drive
+it with real answers.)*
 
 ---
 
