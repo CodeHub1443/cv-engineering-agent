@@ -38,9 +38,14 @@ LangGraph interrupt/resume graph (`langgraph.types.interrupt()` +
 `Command(resume=...)`, not custom polling) for requirements-clarification and
 approval-gated execution, built as a second graph alongside the existing
 `build_graph()` stub (kept unchanged — see ADR-0003 §4). `CVAgent.start_workflow()`
-/`.resume_workflow()`/`.get_workflow_state()`; CLI `workflow`. **Not done:** ADR-0002
-(LLM gateway is currently mock-provider-only, no real swap demonstrated), ADR-0004
-(project memory — nothing persists beyond one run's in-process checkpoint).
+/`.resume_workflow()`/`.get_workflow_state()`; CLI `workflow`. ADR-0004 accepted,
+implemented, **and now wired into `CVAgent`**: `AgentConfig.workspace_root` +
+`CVAgent.memory` (lazy `SqliteProjectMemoryStore`, local, gitignored, durable across
+restarts) — `start_workflow()`/`resume_workflow()` write a `SessionRecord` per
+session and an immutable `ProjectUnderstandingRevision` whenever requirements
+analysis factually changes. `cv_agent/graph/workflow.py` itself remains untouched —
+persistence wraps the graph invocation in `CVAgent`, not inside a node. **Not done:**
+ADR-0002 (LLM gateway is currently mock-provider-only, no real swap demonstrated).
 
 **Exit test:**
 1. A capability with no satisfying skill resolves to "known but unavailable" and is

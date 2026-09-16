@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 
 /net-commander
+
+# Project memory (ADR-0004): local, project-scoped SQLite persistent state.
+# Never Git-tracked — see OPEN_QUESTIONS.md Q15/D-015.
+/.cv_agent/

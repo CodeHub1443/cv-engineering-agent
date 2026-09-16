@@ -342,6 +342,124 @@ separate — ADR-0003 §8 names their eventual merge as a revisit trigger, not d
 memory (ADR-0004) — `requirements_analysis` still vanishes when a session's checkpoint
 is discarded. No commit or push — see git status.
 
+## 2026-09-15 — ADR-0004 project memory: Q1/Q15/Q8 resolved, then implemented (feature/claude/project-memory)
+
+**Did:** Three prior turns resolved every question blocking ADR-0004 in sequence, each
+recorded as its own owner decision: **Q1** (`OPEN_QUESTIONS.md`, D-015) — one CV
+project per repository/workspace in V1, no `project_id` abstraction; **Q15** (new
+question, raised by an ADR-0004 self-audit, D-016) — Project Understanding is
+sensitive data per `docs/APPROVALS.md`, durable but never Git-tracked, gitignored by
+default; **Q8** (D-017) — SQLite, local/project-scoped, kept strictly behind the
+`ProjectMemoryStore` Protocol. A second self-audit after each resolution found the ADR
+internally consistent and confirmed no remaining question blocked implementation.
+Then implemented: `cv_agent/memory/` — `models.py` (`ProjectUnderstandingRevision`,
+`SessionRecord`, both backend-neutral dataclasses), `store.py` (the
+`ProjectMemoryStore` `Protocol`, `ProjectMemoryError`, `default_db_path()` — zero
+`sqlite3` references), `sqlite_store.py` (`SqliteProjectMemoryStore` — the only module
+in the codebase that imports `sqlite3`). Two tables (`understanding_revisions`,
+append-only with an autoincrement `seq` for guaranteed insertion order;
+`sessions`, upserted by `session_id`), idempotent `CREATE TABLE IF NOT EXISTS` schema
+init, every write inside `with self._conn:` for atomicity, every failure re-raised as
+`ProjectMemoryError` (never swallowed). 28 new tests (`tests/test_memory.py`) —
+initialization, empty-store behavior, immutable revision history, insertion-order
+(not alphabetical) ordering, duplicate-`revision_id` rejection, session upsert,
+close/reopen persistence across two and three restart cycles, closed-connection error
+behavior, and a structural test asserting `sqlite3` is imported nowhere in the
+codebase except `sqlite_store.py`. Not wired into `CVAgent`, the workflow graph, or
+the CLI — out of scope by explicit instruction (ADR-0004 §6/§9 already said so).
+`.gitignore` gained `/.cv_agent/`.
+
+**Why:** `docs/roadmap/ROADMAP.md` Phase 1 names ADR-0004 as this project's remaining
+substrate gap; `[P§25]`/`[P§30]` require project understanding to persist beyond one
+conversation. `[P§21]` keeps memory a distinct layer from orchestration (ADR-0003) and
+reasoning (ADR-0008) — neither of those modules' own ADRs claimed "remember across
+process restarts" as their job.
+
+**Broke:** Nothing — full suite went from 195 → 223 passing (28 new, zero regressions).
+
+**Learned:** Resolving `default_db_path()` from `Path(__file__).resolve().parents[N]`
+(the pattern `cv_agent/config/settings.py` already uses for its own resource-path
+fallback) would have been wrong here specifically — for an installed `cv-agent`,
+`__file__` sits in site-packages, so every project using the same installed copy would
+share one physical database, silently reintroducing the exact multi-project
+conflation Q1 rejected. Resolved from `Path.cwd()` instead (with an explicit
+`workspace_root` override for callers/tests), matching how the "workspace IS the
+project" decision actually has to be enforced at the filesystem level, not just in
+prose.
+
+**Left open:** No caller of `cv_agent/memory/` exists yet — Project Understanding
+still only lives in a single run's `AgentState`/return value until a future PR wires
+`ProjectMemoryStore` into `CVAgent` (revision-trigger policy still undecided, per
+ADR-0004 §9). `docs/state/EXPERIMENTS.md` and its own backend question
+(`OPEN_QUESTIONS.md` Q16) are untouched. No persistent LangGraph checkpointer. No
+commit or push — see git status; branch `feature/claude/project-memory`.
+
+## 2026-09-15 — workspace-root contract clarified (D-019), then Project Memory wired into CVAgent (D-020) (feature/claude/project-memory)
+
+**Did:** A dedicated audit of `default_db_path()`'s `Path.cwd()` fallback (requested
+separately, before any new code) found no actual guarantee ties process execution to
+a workspace directory anywhere in the codebase — no CLI flag, no `CVAgent`
+parameter, and the installed `cv-agent` console script is invocable from any
+directory. Resolved by the owner (D-019): the calling application resolves
+`workspace_root` explicitly; `Path.cwd()` stays only as a convenience default for
+direct/standalone use; automatic `.git`-discovery stays out of scope for V1.
+ADR-0004 updated (§1 item 13, §2, §5, §8, §9) — documentation only, no code.
+
+Then the actual integration (D-020): `AgentConfig.workspace_root` (new field, not
+TOML-sourced); `cv_agent.memory.store.open_store()` (new factory — mirrors
+`cv_agent.llm.registry.get_provider()`, so `CVAgent` never imports
+`SqliteProjectMemoryStore` directly); `CVAgent.memory` (public, **lazily**
+constructed — `health_check()`/`resolve()`/`analyze_requirements()`/`execute()`
+never touch disk for it); a `SessionRecord` written before `start_workflow()`'s graph
+call (status "running", preserving `started_at` across a restart) and updated after
+every `start_workflow()`/`resume_workflow()` call via a new private
+`CVAgent._sync_memory_after_run()`; a `ProjectUnderstandingRevision` appended when
+the run's `requirements_analysis` factually differs from `get_current_understanding()`
+(decided the revision-trigger policy ADR-0004 §9 deferred to this PR). `cv_agent/
+graph/workflow.py` itself was **not** touched — no node calls memory; `CVAgent` wraps
+the graph invocation instead, keeping ADR-0003's checkpoint/interrupt mechanics and
+this ADR's durable store two separate concerns (ADR-0004 §2). The CLI's
+`_cmd_workflow_demo` (the one command touching memory) now explicitly resolves
+`workspace_root=Path.cwd()` at the application boundary, per D-019.
+
+**Why:** `[P§25]`/`[P§30]` require project understanding to persist beyond one
+conversation; ADR-0004's own §9 named this exact integration as the remaining step
+once Q1/Q8/Q15 were resolved.
+
+**Broke:** Nothing in the final result, but two pre-existing tests were silently
+broken by omission before being caught: `tests/test_workflow.py`'s
+`TestCVAgentWorkflowWiring` and `tests/test_cli.py`'s CLI-subprocess `_run()` helper
+both constructed `CVAgent()`/ran the CLI with no explicit `workspace_root`/`cwd` —
+once `start_workflow()` started writing to memory, that meant every test run was
+silently creating a real `.cv_agent/memory.sqlite` inside *this repository's own*
+working directory. Caught by manually checking for a stray `.cv_agent/` after a green
+test run (the tests themselves didn't fail — nothing asserted the repo stayed clean).
+Fixed by pinning both to their existing `tmp_path` fixture.
+
+**Learned:** Two things surfaced only by writing integration tests, not by reading
+ADR-0004: (1) `AgentState["requirements_analysis"]`'s container types are not
+stable — a fresh, never-yet-checkpointed `.invoke()` still has the tuples
+`dataclasses.asdict()` produced, but the same field, once it has been through a
+LangGraph checkpoint save/restore (as it always has by the time `resume_workflow()`
+sees it), comes back with those tuples turned into lists — a bare `==` against this
+store's own JSON-round-tripped value reported "different" for byte-for-byte identical
+data. Fixed by JSON-normalizing both sides before comparing. (2) Even the *mock* LLM
+provider re-words `narrative_summary` on every call (a per-call response counter), so
+comparing the full dict meant the dedup never fired at all, including for a plain
+restart of the exact same task with no new information — a real LLM would do the same
+in production, non-deterministically. Fixed by excluding `narrative_summary`/
+`llm_provider` from the comparison, grounded in ADR-0008's own existing "prose, never
+a source of fact" field classification — not a new heuristic invented here.
+
+**Left open (unchanged from before, still correctly out of scope):**
+`docs/state/EXPERIMENTS.md` and `OPEN_QUESTIONS.md` Q16 untouched; no persistent
+LangGraph checkpointer; no RAG/MCP/real LLM provider. **New, acknowledged
+limitation:** the session-record write and the revision write inside one sync call
+are two independent atomic SQLite transactions, not one — `ProjectMemoryStore` has no
+cross-write transaction primitive, so a failure between the two writes is a narrow
+gap, not silently hidden. 24 new tests (247 total), zero regressions. No commit, no
+push — branch `feature/claude/project-memory`, still unmerged.
+
 ## 2026-09-16 — First real execution binding: trt-perf-analysis (feature/claude/execution-binding)
 
 **Did:** Made exactly one real installed skill genuinely executable through the
@@ -410,3 +528,50 @@ discovery or otherwise) was deliberately not done, out of scope for this task. T
 independent branches (`feature/claude/project-memory`/PR #27, and this one) both
 used `docs/state/DECISIONS.md` D-014 — will need renumbering when whichever merges
 second lands (noted in `STATUS.md`). No commit, no push — see git status.
+
+## 2026-09-16 — PR #27 rebased onto merged PR #28; D-014 collision resolved (feature/claude/project-memory)
+
+**Did:** PR #28 (execution-binding) merged into `main` first (`f8e7049`), landing its
+own `D-014` (trt-perf-analysis) — the exact collision the prior entry flagged.
+Reconciled `feature/claude/project-memory` (PR #27) against the new `main`: applied a
+pending PR-review fix (`_try_mark_session_error()` in `cv_agent/runtime/agent.py` —
+when the graph invocation raises AND the subsequent session-error write itself also
+fails, the original graph exception must still be what propagates, with the memory
+failure attached as `__cause__`, never silently swallowed or silently swallowing the
+graph failure; covered by a new real-connection-closing test in
+`tests/test_memory_integration.py`, not mocked), renumbered only this branch's own
+decision chain `D-014..D-019` → `D-015..D-020` (order, dates, and full semantic
+content preserved; main's `D-014` untouched), then merged `origin/main` in. Merge
+conflicts were confined to exactly the three rolling-state files both branches
+independently touched — `DECISIONS.md`, `JOURNAL.md`, `STATUS.md` — resolved by
+concatenation (main's `D-014` row first, chronologically, then this branch's
+`D-015`-`D-020`; both `JOURNAL.md` entries kept, dated order; `STATUS.md` rewritten to
+describe both shipped pieces at once). `cv_agent/execution/runtimes/`,
+`ADR-0009-skill-execution-boundary.md`, and `tests/test_execution_trt_perf_analysis.py`
+merged in with **zero conflicts** — confirming the two branches' changes were
+genuinely disjoint, not just independently numbered.
+
+**Why:** PR #27 needed to be mergeable against the post-PR-28 `main` without silently
+losing either branch's decision history, and without the two `D-014`s (unrelated
+decisions: execution binding vs. Q1 project-scope resolution) colliding into one row.
+
+**Broke:** Nothing — full suite 251 → 278 passing after the merge (222 execution-
+binding tests' worth of coverage plus this branch's 251, overlap deduplicated by the
+merge itself), zero regressions. Confirmed `cv_agent/execution/binding.py`,
+`executor.py`, `models.py`, `cv_agent/skills/`, `cv_agent/graph/workflow.py`, and the
+`trt-perf-analysis` runtime are untouched by this branch's own changes — the merge
+only combined them, it did not modify either side's implementation.
+
+**Learned:** Two independently-branched features that each append to the same
+"next free ID" ledger will always collide exactly this way — sequential IDs assigned
+per-branch, not per-merge, are optimistic-locking without the lock. Nothing about this
+ADR/decision-ledger design needs to change for V1 (both branches document *why* IDs
+moved, which is the actual property the ledger exists to preserve), but the next
+branch to add a `DECISIONS.md` row should check `origin/main`'s latest ID first, not
+just its own branch point's.
+
+**Left open:** Same as both prior entries — 83/84 skills still non-executable
+(execution-binding side); `docs/state/EXPERIMENTS.md`/`OPEN_QUESTIONS.md` Q16, no
+persistent LangGraph checkpointer, no RAG/MCP/real LLM provider (project-memory side).
+No new scope introduced by this reconciliation itself. Commit made on
+`feature/claude/project-memory`; branch pushed; PR #27 not merged — see git status.
