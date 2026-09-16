@@ -147,6 +147,65 @@ class TestSkillInventory:
         assert isinstance(skill.evidence, SkillEvidence)
 
 
+class TestSkillInventoryExecutableStatus:
+    """ADR-0007 §9 (amending §8's fired revisit trigger): SkillInventory is
+    the one place a discovered Skill's executable=False default can become
+    truthfully True, via an injected predicate — never inferred from a
+    skill's own metadata, never wired through SkillSource/LocalSkillSource
+    itself."""
+
+    def test_no_predicate_means_every_skill_stays_not_executable(
+        self, tmp_path: Path
+    ) -> None:
+        """Restates the pre-existing invariant explicitly at the
+        SkillInventory level: constructing one the old way (no
+        is_executable given) must behave exactly as before this ADR-0007 §9
+        amendment — the default parameter value must never silently change
+        prior behavior for an existing caller."""
+        _write_skill(tmp_path, "some-skill", frontmatter=None, body="body")
+        inventory = SkillInventory(sources=(LocalSkillSource(roots=(tmp_path,)),))
+        assert inventory.is_executable is None
+        assert inventory.get("some-skill").executable is False
+        assert all(s.executable is False for s in inventory.list())
+
+    def test_predicate_reporting_true_marks_the_matching_skill_executable(
+        self, tmp_path: Path
+    ) -> None:
+        _write_skill(tmp_path, "verified-skill", frontmatter=None, body="body")
+        _write_skill(tmp_path, "other-skill", frontmatter=None, body="body")
+        inventory = SkillInventory(
+            sources=(LocalSkillSource(roots=(tmp_path,)),),
+            is_executable=lambda skill_id: skill_id == "verified-skill",
+        )
+        assert inventory.get("verified-skill").executable is True
+        assert inventory.get("other-skill").executable is False
+        by_id = {s.skill_id: s for s in inventory.list()}
+        assert by_id["verified-skill"].executable is True
+        assert by_id["other-skill"].executable is False
+
+    def test_predicate_reporting_false_leaves_skill_not_executable(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers the 'unverified binding' and 'no binding at all' cases
+        uniformly — the predicate is the single source of truth; this
+        module has no independent opinion about why it returned False."""
+        _write_skill(tmp_path, "unverified-skill", frontmatter=None, body="body")
+        inventory = SkillInventory(
+            sources=(LocalSkillSource(roots=(tmp_path,)),),
+            is_executable=lambda skill_id: False,
+        )
+        assert inventory.get("unverified-skill").executable is False
+
+    def test_missing_skill_get_returns_none_even_with_predicate_wired(
+        self, tmp_path: Path
+    ) -> None:
+        inventory = SkillInventory(
+            sources=(LocalSkillSource(roots=(tmp_path,)),),
+            is_executable=lambda skill_id: True,
+        )
+        assert inventory.get("does-not-exist") is None
+
+
 class TestTaskResolver:
     @pytest.fixture()
     def registry(self) -> CapabilityRegistry:
@@ -235,3 +294,46 @@ class TestTaskResolver:
         result = resolver.resolve("dataset audit evaluation benchmarking deployment jetson")
         assert len(result.matched_capabilities) > 0
         assert all(c.status == "planned" for c in result.matched_capabilities)
+
+    def test_resolve_reports_executable_true_when_inventory_predicate_says_so(
+        self, tmp_path: Path, registry: CapabilityRegistry
+    ) -> None:
+        """ADR-0007 §9: SkillMatch.executable is copied from the matched
+        Skill, not independently hardcoded — a resolver built on an
+        execution-aware SkillInventory must surface a real verified
+        binding's True status, not silently flatten it back to False."""
+        _write_skill(
+            tmp_path,
+            "cuda-agent",
+            frontmatter="---\nname: cuda-agent\ndescription: CUDA kernel optimization expert.\n---",
+            body="",
+        )
+        inventory = SkillInventory(
+            sources=(LocalSkillSource(roots=(tmp_path,)),),
+            is_executable=lambda skill_id: skill_id == "cuda-agent",
+        )
+        resolver = TaskResolver(capability_registry=registry, skill_inventory=inventory)
+        result = resolver.resolve("optimize deployment for jetson using cuda kernels")
+
+        cuda_match = next(s for s in result.matched_skills if s.skill_id == "cuda-agent")
+        assert cuda_match.executable is True
+
+    def test_resolve_reports_executable_false_when_no_predicate_wired(
+        self, tmp_path: Path, registry: CapabilityRegistry
+    ) -> None:
+        """A plain TaskResolver/SkillInventory pair (no execution-awareness
+        injected) must never claim a skill is executable — the fresh-agent
+        honesty invariant ADR-0009 §6 established, restated here at the
+        resolver level."""
+        _write_skill(
+            tmp_path,
+            "cuda-agent",
+            frontmatter="---\nname: cuda-agent\ndescription: CUDA kernel optimization expert.\n---",
+            body="",
+        )
+        inventory = SkillInventory(sources=(LocalSkillSource(roots=(tmp_path,)),))
+        resolver = TaskResolver(capability_registry=registry, skill_inventory=inventory)
+        result = resolver.resolve("optimize deployment for jetson using cuda kernels")
+
+        cuda_match = next(s for s in result.matched_skills if s.skill_id == "cuda-agent")
+        assert cuda_match.executable is False

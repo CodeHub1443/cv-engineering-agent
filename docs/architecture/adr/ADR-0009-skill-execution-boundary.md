@@ -309,3 +309,32 @@ trigger.
   purpose. The approval workflow `docs/APPROVALS.md` describes still has no real
   implementation (§8, still open) — irrelevant to this binding specifically, since
   it needs no approval, but still true of the codebase generally.
+
+## 10. Status — first real application-layer consumer
+
+**Added (branch `feature/claude/execution-feedback-loop`):** `python -m cv_agent
+execute <skill_id>` — the first CLI command that drives `CVAgent.execute()` with
+real, user-supplied input rather than only being exercised from tests. Only
+`trt-perf-analysis` is accepted (a single constant check, not a dispatch table —
+see `cv_agent/__main__.py::_SUPPORTED_EXECUTE_SKILL_ID`'s docstring); this command
+is itself the explicit, one-off caller that registers that one binding
+(`cv_agent.execution.runtimes.trt_perf_analysis.register()`) into its own
+short-lived `CVAgent` instance before calling `.execute()` — never bypassing
+`SkillExecutor`, never duplicating its request-construction or approval-check
+logic. `skills`/`resolve`/`capabilities`/`executions` are untouched by this
+addition and still construct their own fresh, unregistered `CVAgent`, so §6's
+honesty cost (`0/84` by default) is unchanged.
+
+Approval handling (`_confirm_approval()`) never auto-approves: an
+`approval_required` binding needs either an explicit `--approve` flag or a live
+"y"/"yes" answer to a one-time prompt (`docs/APPROVALS.md` §"Agent behavior at a
+gate," rule 3); `trt-perf-analysis`'s own `"allowed"` policy (§9) means this path
+is implemented but not exercised by that binding — covered instead by unit tests
+against a fake `approval_required` binding (`tests/test_cli_execute.py::
+TestConfirmApproval`), since building a second real binding just to test this
+was out of scope.
+
+See ADR-0007 §9 for the separate, related decision this command depends on —
+how `Skill.executable`/`SkillMatch.executable` became truthful in the first
+place, so `--help`-level discovery (`skills`/`resolve`) and this command's own
+`can_execute()` check agree.
