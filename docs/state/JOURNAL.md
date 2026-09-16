@@ -459,3 +459,119 @@ are two independent atomic SQLite transactions, not one — `ProjectMemoryStore`
 cross-write transaction primitive, so a failure between the two writes is a narrow
 gap, not silently hidden. 24 new tests (247 total), zero regressions. No commit, no
 push — branch `feature/claude/project-memory`, still unmerged.
+
+## 2026-09-16 — First real execution binding: trt-perf-analysis (feature/claude/execution-binding)
+
+**Did:** Made exactly one real installed skill genuinely executable through the
+existing execution boundary (ADR-0009 §8's revisit trigger). Inspected the real
+installed skill environment directly (not assumed from ADR-0009's own prior mention)
+and chose `trt-perf-analysis`: its `scripts/analyze_trt_perf.py` uses only Python
+stdlib, exposes a stable `argparse` CLI, and is read-only/local/deterministic.
+Verified its exit-code/stdout contract empirically against the real script before
+writing any adapter code: exit `0` + one JSON object on stdout whenever structured
+data can be produced at all (including when one backend's own input fails
+validation — the script treats that as a valid outcome, not a crash); exit `2` + a
+one-line stderr message when no input files exist. Added
+`cv_agent/execution/runtimes/trt_perf_analysis.py` (`TrtPerfAnalysisRuntime`
+implementing `ExecutionRuntime`, `build_binding()`, an explicit opt-in
+`register(registry)`) and `tests/test_execution_trt_perf_analysis.py` (27 tests:
+argv-contract units, mocked subprocess error-mapping, registry/approval-gate wiring,
+and — skipped, not faked, if the skill isn't installed — genuine subprocess
+invocation through `CVAgent.execute()`). Ran a standalone end-to-end script
+(discovery → explicit `register()` → `CVAgent.execute()` → real subprocess → real
+JSON result) to confirm the path works outside the test harness too. Updated
+ADR-0009 (§3/§6/§7/§8, new §9) to record the decision without rewriting the
+architecture; added D-014.
+
+**Why:** The prior architecture audit (this session, read-only, against the real
+merged `main` — not the unmerged memory branch) found the V1 chain stops exactly
+here: requirements analysis, skill resolution, and the HITL approval gate are all
+genuinely wired end-to-end, but every one of 84 discovered skills and 20 declared
+capabilities reported `not_executable` — the agent could reason and ask but never
+act. `[P§15]`/`[P§29.9]` ("discover and invoke, don't duplicate") and `CLAUDE.md`'s
+own opening line ("performs... not merely knows") both point at this gap as the
+actual highest-value next step, ahead of roadmap ordering.
+
+**Broke:** Nothing — full suite went from 195 → 222 passing (27 new), zero
+regressions; `tests/test_execution.py`'s existing FakeRuntime-based tests are
+byte-for-byte unchanged. One test of my own was initially wrong, not the adapter:
+I assumed a malformed `layers_*.json` would hit the script's process-level `DataError`
+path (exit `2`); empirically it doesn't — a malformed *individual* backend is
+reported as `"status": "failed"` inside an otherwise-successful (exit `0`) response,
+which is the script's own documented contract ("exit 0 whenever structured data can
+be emitted at all"). Fixed the test to assert the real, verified behavior instead of
+the assumed one. Also discovered, after the real-invocation tests ran, that CPython
+had written `.pyc` bytecode cache files into the real skill's own
+`scripts/trt_perf/__pycache__/` (a standard, automatic side effect of importing that
+package as a subprocess, not something this code does deliberately) — removed them
+afterward to restore the exact pre-test state; no `.py` source file was ever touched.
+
+**Learned:** `Skill.location` (the real, discovered `SKILL.md` path) is sufficient to
+derive a skill's installation root (`Path(skill.location).parent`) for an adapter —
+no hard-coded filesystem path is needed, so the same adapter works regardless of
+whether a skill was found under `~/.claude/skills`, `~/.agents/skills`, or a
+`CV_AGENT_SKILL_PATHS` override. Invoking the real script directly via
+`sys.executable`/`SKILL_PYTHON` is equivalent to (and simpler/more portable than)
+shelling through the skill's own `scripts/run.sh`/`run.cmd` Python-discovery
+wrappers, since this process already knows its own interpreter. Timeout/error-path
+tests are more robust mocking `subprocess.run` directly than racing real wall-clock
+timing, and the task's own instructions explicitly allow this for
+"expensive or environment-dependent portions."
+
+**Left open:** 83/84 skills remain non-executable — this ADR-0009 §8 trigger fires
+per skill, not in bulk, by design; `gstreamer-pipeline` (the other bundled-script
+candidate ADR-0009 §1 named) is the next candidate, uninspected so far. Registration
+stays fully opt-in — `CVAgent.__init__` does not call `register()`, so
+`python -m cv_agent executions` against a fresh `CVAgent` still reports `0/84`;
+wiring any binding into `CVAgent`'s default construction (conditional on real
+discovery or otherwise) was deliberately not done, out of scope for this task. Two
+independent branches (`feature/claude/project-memory`/PR #27, and this one) both
+used `docs/state/DECISIONS.md` D-014 — will need renumbering when whichever merges
+second lands (noted in `STATUS.md`). No commit, no push — see git status.
+
+## 2026-09-16 — PR #27 rebased onto merged PR #28; D-014 collision resolved (feature/claude/project-memory)
+
+**Did:** PR #28 (execution-binding) merged into `main` first (`f8e7049`), landing its
+own `D-014` (trt-perf-analysis) — the exact collision the prior entry flagged.
+Reconciled `feature/claude/project-memory` (PR #27) against the new `main`: applied a
+pending PR-review fix (`_try_mark_session_error()` in `cv_agent/runtime/agent.py` —
+when the graph invocation raises AND the subsequent session-error write itself also
+fails, the original graph exception must still be what propagates, with the memory
+failure attached as `__cause__`, never silently swallowed or silently swallowing the
+graph failure; covered by a new real-connection-closing test in
+`tests/test_memory_integration.py`, not mocked), renumbered only this branch's own
+decision chain `D-014..D-019` → `D-015..D-020` (order, dates, and full semantic
+content preserved; main's `D-014` untouched), then merged `origin/main` in. Merge
+conflicts were confined to exactly the three rolling-state files both branches
+independently touched — `DECISIONS.md`, `JOURNAL.md`, `STATUS.md` — resolved by
+concatenation (main's `D-014` row first, chronologically, then this branch's
+`D-015`-`D-020`; both `JOURNAL.md` entries kept, dated order; `STATUS.md` rewritten to
+describe both shipped pieces at once). `cv_agent/execution/runtimes/`,
+`ADR-0009-skill-execution-boundary.md`, and `tests/test_execution_trt_perf_analysis.py`
+merged in with **zero conflicts** — confirming the two branches' changes were
+genuinely disjoint, not just independently numbered.
+
+**Why:** PR #27 needed to be mergeable against the post-PR-28 `main` without silently
+losing either branch's decision history, and without the two `D-014`s (unrelated
+decisions: execution binding vs. Q1 project-scope resolution) colliding into one row.
+
+**Broke:** Nothing — full suite 251 → 278 passing after the merge (222 execution-
+binding tests' worth of coverage plus this branch's 251, overlap deduplicated by the
+merge itself), zero regressions. Confirmed `cv_agent/execution/binding.py`,
+`executor.py`, `models.py`, `cv_agent/skills/`, `cv_agent/graph/workflow.py`, and the
+`trt-perf-analysis` runtime are untouched by this branch's own changes — the merge
+only combined them, it did not modify either side's implementation.
+
+**Learned:** Two independently-branched features that each append to the same
+"next free ID" ledger will always collide exactly this way — sequential IDs assigned
+per-branch, not per-merge, are optimistic-locking without the lock. Nothing about this
+ADR/decision-ledger design needs to change for V1 (both branches document *why* IDs
+moved, which is the actual property the ledger exists to preserve), but the next
+branch to add a `DECISIONS.md` row should check `origin/main`'s latest ID first, not
+just its own branch point's.
+
+**Left open:** Same as both prior entries — 83/84 skills still non-executable
+(execution-binding side); `docs/state/EXPERIMENTS.md`/`OPEN_QUESTIONS.md` Q16, no
+persistent LangGraph checkpointer, no RAG/MCP/real LLM provider (project-memory side).
+No new scope introduced by this reconciliation itself. Commit made on
+`feature/claude/project-memory`; branch pushed; PR #27 not merged — see git status.
