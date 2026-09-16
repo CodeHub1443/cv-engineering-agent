@@ -95,9 +95,12 @@ would misrepresent what it can do.
 
 `CVAgent` gets `.execute(skill, request)`, `.can_execute(skill_id)` (inspect-only),
 and `.execution_bindings` (the registry, for read-only inspection). The registry is
-constructed empty in `CVAgent.__init__` — **no binding is registered anywhere in
-this codebase.** CLI: `python -m cv_agent executions` lists discovered skills against
-registered bindings/runtimes and reports the executable count (0 today, honestly).
+constructed empty in `CVAgent.__init__` — **no binding is registered automatically,
+by `CVAgent` or anything else in this codebase** (still true after §9: one real,
+individually-verified adapter now exists as an opt-in module, but nothing wires it
+in by default). CLI: `python -m cv_agent executions` lists discovered skills against
+registered bindings/runtimes and reports the executable count against a fresh
+`CVAgent` (0/84 unless a caller has explicitly opted a specific binding in — see §9).
 
 `started` is part of `SkillExecutionStatus` for forward compatibility with an
 eventual asynchronous runtime, but is not reachable from today's synchronous
@@ -185,19 +188,31 @@ class SkillExecutor:
 ## 6. Consequences
 
 - **Enables:** `python -m cv_agent executions`, `CVAgent.execute()`/`.can_execute()`,
-  and a place for a *future, individually-verified* adapter (e.g. for
-  `trt-perf-analysis`'s bundled scripts) to register into without redesigning
-  anything — it just calls `register_binding()` + `register_runtime()`.
+  and a place for a *future, individually-verified* adapter to register into without
+  redesigning anything — it just calls `register_binding()` + `register_runtime()`.
+  *Realized for one skill, §9:* `trt-perf-analysis`'s bundled scripts are exactly
+  such an adapter now, registering through this same unmodified mechanism.
 - **Makes harder:** nothing removed; purely additive.
 - **Costs:** one new package (`cv_agent/execution/`), ~260 lines, no new dependency.
+  *Updated, §9:* plus `cv_agent/execution/runtimes/` (one adapter module, ~260
+  lines) — still no new third-party dependency; it shells out to the skill's own
+  script with this process's own Python.
 - **Migration / blast radius if reversed:** contained — `CVAgent.execute()`,
   `.can_execute()`, `.execution_bindings`, and the `executions` CLI command are the
   only consumers; removing the package does not touch `cv_agent.skills` or
-  `cv_agent.capabilities`.
+  `cv_agent.capabilities`. *Updated, §9:* removing `cv_agent/execution/runtimes/`
+  specifically touches nothing else at all — it is never imported by `CVAgent`,
+  `SkillExecutor`, or the CLI; only a caller that explicitly opted in loses that one
+  binding.
 - **Honesty cost accepted deliberately:** `python -m cv_agent executions` reports
-  `Executable: 0/84` against the real environment today. This is correct, not a
-  regression — no execution mechanism was actually verified, so claiming otherwise
-  would be the exact violation this ADR exists to prevent.
+  `Executable: 0/84` against a fresh `CVAgent` and the real environment. This is
+  correct, not a regression — no execution mechanism was actually verified when this
+  ADR was first written, so claiming otherwise would have been the exact violation
+  this ADR exists to prevent. *Updated, §9:* one mechanism is now verified
+  (`trt-perf-analysis`), but the count stays honest either way — `CVAgent`'s default
+  registry is still empty, so `executions` still reports `0/84` unless a caller has
+  explicitly called `register()` first (see §9); this ADR does not claim more than
+  what is actually wired into whichever `CVAgent` instance is asking.
 
 ## 7. Acceptance test
 
@@ -214,12 +229,83 @@ exception, `rejected` policy always rejects, `approval_required` without
 real discovered fixture skill, no filesystem mutation, `resolve` output carries no
 execution-status language).
 
+**§9 addition:** `tests/test_execution_trt_perf_analysis.py` — argv-contract unit
+tests, mocked subprocess error-mapping (timeout, missing interpreter, non-zero exit,
+non-JSON/non-object stdout — no timing races, no installed-skill dependency),
+registry/approval-gate wiring (including that an `approval_required` binding never
+calls `invoke()` without `request.approved=True`, and that a fresh `CVAgent`'s
+registry stays empty by default even after this module exists), and — skipped, not
+faked, when the skill isn't actually installed — genuine subprocess invocation of
+the real `scripts/analyze_trt_perf.py` through `CVAgent.execute()`: a successful
+real run, two real runs producing byte-identical structured output, the real
+empty-folder failure (exit `2`), and the real per-backend-malformed-JSON case
+(exit `0`, that one backend reported `"status": "failed"` inside otherwise valid
+structured output — verified empirically, not assumed).
+
 ## 8. Revisit trigger
 
 When a specific skill's invocation contract (e.g. `trt-perf-analysis`'s
 `scripts/run.sh <script> <args>`) is deliberately inspected, tested end-to-end
 against the real script, and verified reliable enough to register as the first real
 `ExecutionBinding`/`ExecutionRuntime` pair — at that point `verified=True` becomes
-true for one skill, not all of them at once. Also when the approval workflow
-`docs/APPROVALS.md` describes gets an actual implementation that sets
-`SkillExecutionRequest.approved`, rather than a caller setting it directly.
+true for one skill, not all of them at once. **Fired — see §9: `trt-perf-analysis`
+is that one skill.** Also when the approval workflow `docs/APPROVALS.md` describes
+gets an actual implementation that sets `SkillExecutionRequest.approved`, rather
+than a caller setting it directly — **still open**, unaffected by §9 (the
+`trt-perf-analysis` binding needs no approval at all — see §9 — so it does not
+exercise this trigger).
+
+## 9. Status
+
+**Implemented (branch `feature/claude/execution-binding`):** the first real,
+individually-verified `ExecutionRuntime`/`ExecutionBinding` pair, per §8's revisit
+trigger.
+
+- **Skill selected:** `trt-perf-analysis` — chosen by directly inspecting the real
+  installed skill directory (`~/.agents/skills/trt-perf-analysis`, confirmed also
+  present at `~/.claude/skills/trt-perf-analysis`), not the D-012/§1 mention alone
+  (that mention was verified, not assumed, before relying on it).
+- **Why it has a valid executable contract:** `scripts/analyze_trt_perf.py`'s own
+  module docstring states it uses only Python standard-library modules; it exposes a
+  stable `argparse` CLI (`path` positional, or repeated `--data LAYER [PROFILE]`,
+  optional `--model-name`/`--output`) — a machine-readable contract, not prose a
+  human/LLM must interpret. Exit-code/stdout behavior was verified empirically
+  against the real script (not assumed from reading alone): exit `0` with one JSON
+  object on stdout whenever it can produce structured data at all (including when a
+  specific backend's own input fails validation — the script treats that as a valid,
+  informative outcome, not a crash); exit `2` with a one-line `error: ...` message on
+  stderr when it cannot process the input at all (e.g. no `layers_*.json`/
+  `profile_*.json` present).
+- **Invocation contract (`cv_agent/execution/runtimes/trt_perf_analysis.py`):**
+  `TrtPerfAnalysisRuntime.invoke(skill, request)` derives the script's path from the
+  real, discovered `skill.location` (never a hard-coded filesystem path), and runs
+  it as a subprocess with this process's own interpreter (`sys.executable`, or the
+  `SKILL_PYTHON` environment variable if set — the same override the skill's own
+  `scripts/run.sh`/`run.cmd` wrappers honor) rather than shelling through those
+  wrappers, since this process already knows which Python it is running under.
+  `request.inputs` accepts exactly one of `{"path": "<folder>"}` or
+  `{"data": [[layer, profile?], ...]}`, plus optional `{"model_name": "<str>"}`;
+  `--output` is never forwarded — the result is always read from stdout, so
+  invocation stays read-only regardless of caller input.
+- **What the adapter guarantees:** the real, unmodified skill script runs, unaltered
+  and uncopied, against exactly the files named in `request.inputs`; a timeout
+  (default 30s, per-instance override), a missing interpreter, a non-zero exit, or
+  non-JSON/non-object stdout are all reported as `RuntimeOutcome(success=False,
+  error_message=...)`, never raised past this adapter and never fabricated as
+  success. `verified=True`/`approval_policy="allowed"` apply to this one
+  `ExecutionBinding` only (`binding_id="trt-perf-analysis-local-subprocess-v1"`) —
+  `"allowed"` because the invocation is read-only, local, deterministic, and
+  Python-stdlib-only, which needs no approval gate per `CLAUDE.md` §3 rule 10, not
+  because approval was bypassed.
+- **Registration stays opt-in, never automatic:** `cv_agent/execution/runtimes/
+  trt_perf_analysis.register(registry)` must be called explicitly by a caller that
+  has itself discovered the skill; `CVAgent.__init__` does not call it. A fresh
+  `CVAgent`'s `execution_bindings` registry — and `python -m cv_agent executions`'s
+  `0/84` report — are unchanged by this module's mere existence.
+- **What remains non-executable:** every other skill among the 84 discovered
+  ones — this ADR's §8 trigger fires **per skill**, not in bulk, exactly as
+  written; no other binding was added, declared, or implied. `gstreamer-pipeline`
+  (the other bundled-script candidate named in §1) remains uninspected for this
+  purpose. The approval workflow `docs/APPROVALS.md` describes still has no real
+  implementation (§8, still open) — irrelevant to this binding specifically, since
+  it needs no approval, but still true of the codebase generally.
