@@ -2,7 +2,7 @@
 cv_agent.memory.sqlite_store — SqliteProjectMemoryStore.
 
 The ONLY module in this codebase allowed to import `sqlite3` or reference a
-SQLite-specific type (ADR-0004 §2/§5; `OPEN_QUESTIONS.md` Q8/D-016). Every
+SQLite-specific type (ADR-0004 §2/§5; `OPEN_QUESTIONS.md` Q8/D-017). Every
 other caller — tests included, once a store is constructed — talks to this
 class only through the `ProjectMemoryStore` `Protocol` it implements.
 

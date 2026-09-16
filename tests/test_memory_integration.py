@@ -417,6 +417,47 @@ class TestGraphExceptionMarksSessionError:
         assert session.ended_at is not None
         assert session.started_at == original_started_at
 
+    def test_combined_failure_preserves_graph_exception_with_memory_error_as_cause(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PR review finding: if the graph invocation raises AND the
+        subsequent attempt to persist that as a SessionRecord error also
+        fails (e.g. the store becomes unusable), the ORIGINAL graph
+        exception must still be what propagates to the caller — a
+        memory-layer failure must never silently replace it. The memory
+        failure must also not be silently swallowed: it must be visible,
+        attached as the propagated exception's __cause__.
+
+        The store failure is genuine, not mocked: this closes the real
+        SqliteProjectMemoryStore's connection (the same trick
+        TestMemoryFailureSurfacing/test_memory.py's
+        TestErrorHandlingDoesNotSwallow already use) so the real
+        _mark_session_error() call hits a real sqlite3-backed
+        ProjectMemoryError, not a simulated one."""
+        from cv_agent.memory.store import ProjectMemoryError
+
+        agent = _agent(tmp_path, monkeypatch)
+        store = agent.memory  # trigger lazy construction while the store is healthy
+
+        def _raise_after_breaking_store(*args: object, **kwargs: object):
+            # The pre-invoke SessionRecord write (status="running") already
+            # succeeded by this point — only now does the store become
+            # unusable, simulating a failure that hits exactly when
+            # _mark_session_error() tries to read/write it afterward.
+            store.close()
+            raise self._Boom("simulated graph invocation failure")
+
+        monkeypatch.setattr(agent._workflow_graph, "invoke", _raise_after_breaking_store)
+
+        with pytest.raises(self._Boom) as exc_info:
+            agent.start_workflow(_WELL_DEFINED_TASK, session_id="double-fail")
+
+        # The graph exception is the one that propagated, unchanged...
+        assert str(exc_info.value) == "simulated graph invocation failure"
+        # ...and the memory failure was not silently swallowed — it is
+        # attached as context, not hidden and not the primary exception.
+        assert isinstance(exc_info.value.__cause__, ProjectMemoryError)
+
 
 class TestOrchestrationUnaffected:
     """Regression guard specific to this integration step: adding

@@ -345,11 +345,11 @@ is discarded. No commit or push — see git status.
 ## 2026-09-15 — ADR-0004 project memory: Q1/Q15/Q8 resolved, then implemented (feature/claude/project-memory)
 
 **Did:** Three prior turns resolved every question blocking ADR-0004 in sequence, each
-recorded as its own owner decision: **Q1** (`OPEN_QUESTIONS.md`, D-014) — one CV
+recorded as its own owner decision: **Q1** (`OPEN_QUESTIONS.md`, D-015) — one CV
 project per repository/workspace in V1, no `project_id` abstraction; **Q15** (new
-question, raised by an ADR-0004 self-audit, D-015) — Project Understanding is
+question, raised by an ADR-0004 self-audit, D-016) — Project Understanding is
 sensitive data per `docs/APPROVALS.md`, durable but never Git-tracked, gitignored by
-default; **Q8** (D-016) — SQLite, local/project-scoped, kept strictly behind the
+default; **Q8** (D-017) — SQLite, local/project-scoped, kept strictly behind the
 `ProjectMemoryStore` Protocol. A second self-audit after each resolution found the ADR
 internally consistent and confirmed no remaining question blocked implementation.
 Then implemented: `cv_agent/memory/` — `models.py` (`ProjectUnderstandingRevision`,
@@ -394,18 +394,18 @@ ADR-0004 §9). `docs/state/EXPERIMENTS.md` and its own backend question
 (`OPEN_QUESTIONS.md` Q16) are untouched. No persistent LangGraph checkpointer. No
 commit or push — see git status; branch `feature/claude/project-memory`.
 
-## 2026-09-15 — workspace-root contract clarified (D-018), then Project Memory wired into CVAgent (D-019) (feature/claude/project-memory)
+## 2026-09-15 — workspace-root contract clarified (D-019), then Project Memory wired into CVAgent (D-020) (feature/claude/project-memory)
 
 **Did:** A dedicated audit of `default_db_path()`'s `Path.cwd()` fallback (requested
 separately, before any new code) found no actual guarantee ties process execution to
 a workspace directory anywhere in the codebase — no CLI flag, no `CVAgent`
 parameter, and the installed `cv-agent` console script is invocable from any
-directory. Resolved by the owner (D-018): the calling application resolves
+directory. Resolved by the owner (D-019): the calling application resolves
 `workspace_root` explicitly; `Path.cwd()` stays only as a convenience default for
 direct/standalone use; automatic `.git`-discovery stays out of scope for V1.
 ADR-0004 updated (§1 item 13, §2, §5, §8, §9) — documentation only, no code.
 
-Then the actual integration (D-019): `AgentConfig.workspace_root` (new field, not
+Then the actual integration (D-020): `AgentConfig.workspace_root` (new field, not
 TOML-sourced); `cv_agent.memory.store.open_store()` (new factory — mirrors
 `cv_agent.llm.registry.get_provider()`, so `CVAgent` never imports
 `SqliteProjectMemoryStore` directly); `CVAgent.memory` (public, **lazily**
@@ -420,7 +420,7 @@ graph/workflow.py` itself was **not** touched — no node calls memory; `CVAgent
 the graph invocation instead, keeping ADR-0003's checkpoint/interrupt mechanics and
 this ADR's durable store two separate concerns (ADR-0004 §2). The CLI's
 `_cmd_workflow_demo` (the one command touching memory) now explicitly resolves
-`workspace_root=Path.cwd()` at the application boundary, per D-018.
+`workspace_root=Path.cwd()` at the application boundary, per D-019.
 
 **Why:** `[P§25]`/`[P§30]` require project understanding to persist beyond one
 conversation; ADR-0004's own §9 named this exact integration as the remaining step

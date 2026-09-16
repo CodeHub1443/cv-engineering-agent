@@ -88,7 +88,7 @@ class AgentConfig:
     None means "not provided"; CVAgent forwards it unchanged to
     cv_agent.memory.store.default_db_path(), whose own Path.cwd() fallback
     is a documented convenience for direct/standalone use only (ADR-0004
-    §1 item 13, D-018) — not something this class invents a second copy
+    §1 item 13, D-019) — not something this class invents a second copy
     of."""
 
 

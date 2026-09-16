@@ -37,7 +37,7 @@ def default_db_path(workspace_root: Path | None = None) -> Path:
     """
     The default, gitignored, project-local persistent-state path for this
     workspace's one project (ADR-0004 §1 items 8-12; `OPEN_QUESTIONS.md`
-    Q15/Q8, D-015/D-016).
+    Q15/Q8, D-016/D-017).
 
     Deliberately resolved from the **current working directory** (or an
     explicit `workspace_root`), not from this package's own install
@@ -60,12 +60,12 @@ class ProjectMemoryStore(Protocol):
     Storage boundary for this workspace's one project (ADR-0004 §1-§3).
 
     The V1 implementation is SQLite (`cv_agent.memory.sqlite_store.
-    SqliteProjectMemoryStore`, `OPEN_QUESTIONS.md` Q8/D-016) — local,
+    SqliteProjectMemoryStore`, `OPEN_QUESTIONS.md` Q8/D-017) — local,
     project-scoped, gitignored, durable across process restarts. Every
     caller depends on this `Protocol` only, never on a SQLite-specific type,
     so a future backend can replace it without changing a caller.
 
-    Wired into `CVAgent` (D-019) via `open_store()`/`CVAgent.memory` —
+    Wired into `CVAgent` (D-020) via `open_store()`/`CVAgent.memory` —
     `start_workflow()`/`resume_workflow()` read and write through this
     Protocol. `cv_agent.graph.workflow` itself remains intentionally
     untouched — no graph node calls this Protocol; `CVAgent` wraps the
@@ -115,7 +115,7 @@ def open_store(
 ) -> ProjectMemoryStore:
     """
     Construct the V1 `ProjectMemoryStore` (SQLite — `OPEN_QUESTIONS.md`
-    Q8/D-016) without the caller needing to import a SQLite-specific type.
+    Q8/D-017) without the caller needing to import a SQLite-specific type.
 
     Mirrors `cv_agent.llm.registry.get_provider()`'s factory pattern:
     callers ask for "the store," never for `SqliteProjectMemoryStore`

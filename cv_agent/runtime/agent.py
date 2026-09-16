@@ -259,9 +259,11 @@ class CVAgent:
         durable Project Memory *before* the graph runs (status "running"),
         and updated again after it stops — whether paused at an interrupt,
         finished, or the graph invocation raised — via
-        `_sync_memory_after_run()` on success or `_mark_session_error()` on
-        an exception (see its docstring). This is durable project context,
-        not LangGraph's own run/orchestration state: the graph itself still
+        `_sync_memory_after_run()` on success or `_try_mark_session_error()`
+        on an exception (see its docstring for the precedence policy: the
+        original graph exception always propagates, even if the
+        memory-marking attempt itself fails). This is durable project
+        context, not LangGraph's own run/orchestration state: the graph itself still
         checkpoints via `MemorySaver` exactly as before (ADR-0003,
         unchanged) — Project Memory does not replace or participate in
         that checkpointing, it only records that this session exists and,
@@ -300,8 +302,8 @@ class CVAgent:
         graph_config = {"configurable": {"thread_id": sid}}
         try:
             result: AgentState = self._workflow_graph.invoke(initial_state, config=graph_config)
-        except Exception:
-            self._mark_session_error(sid, started_at)
+        except Exception as graph_exc:
+            self._try_mark_session_error(sid, started_at, graph_exc)
             raise
         self._sync_memory_after_run(sid, started_at, result)
         return result
@@ -320,10 +322,12 @@ class CVAgent:
         mean here: LangGraph's own checkpoint (ADR-0003, `MemorySaver`,
         unchanged) is still what actually lets this call resume the paused
         graph; Project Memory only records the outcome. If the graph
-        invocation itself raises, `_mark_session_error()` records that
-        before the exception propagates — same handling as
+        invocation itself raises, `_try_mark_session_error()` attempts to
+        record that before the exception propagates — same handling as
         `start_workflow()`, for the same reason (a crash must not leave the
-        session silently stuck at whatever status it had before).
+        session silently stuck at whatever status it had before), and with
+        the same precedence guarantee: this call's original exception is
+        what propagates, even if the memory-marking attempt itself fails.
         """
         from langgraph.types import Command  # noqa: PLC0415
 
@@ -332,26 +336,57 @@ class CVAgent:
             result: AgentState = self._workflow_graph.invoke(
                 Command(resume=resume_value), config=graph_config
             )
-        except Exception:
-            self._mark_session_error(session_id, started_at=None)
+        except Exception as graph_exc:
+            self._try_mark_session_error(session_id, None, graph_exc)
             raise
         self._sync_memory_after_run(session_id, started_at=None, result=result)
         return result
 
+    def _try_mark_session_error(
+        self, session_id: str, started_at: Optional[str], graph_exc: BaseException
+    ) -> None:
+        """
+        V1 error-path policy when the graph invocation itself has already
+        raised `graph_exc` (called from the `except` blocks in
+        `start_workflow()`/`resume_workflow()`, before their own bare
+        `raise` re-raises it): attempt to persist the session error via
+        `_mark_session_error()`, but never let a *second* failure — the
+        memory write itself failing — silently replace or hide the
+        original graph exception as what the caller ultimately sees.
+
+        - Memory-marking succeeds: returns normally; the caller's `raise`
+          re-raises `graph_exc` completely unchanged.
+        - Memory-marking itself raises (e.g. `ProjectMemoryError`): that
+          failure is not swallowed — but `graph_exc`, not the memory
+          failure, is what propagates as the primary exception, via
+          `raise graph_exc from memory_exc`. The memory failure is still
+          fully visible (as `graph_exc.__cause__`, and in the printed
+          traceback) for anyone debugging, but it never displaces the
+          graph failure that actually caused this call to fail. No
+          transaction primitive is added to `ProjectMemoryStore` for
+          this — this is a caller-side propagation policy, not a storage
+          guarantee.
+        """
+        try:
+            self._mark_session_error(session_id, started_at)
+        except Exception as memory_exc:
+            raise graph_exc from memory_exc
+
     def _mark_session_error(self, session_id: str, started_at: Optional[str]) -> None:
         """
-        Called from `start_workflow()`/`resume_workflow()` when the graph
-        invocation itself raises, so a crash cannot leave the persisted
-        `SessionRecord` silently stuck at whatever status it had before
-        (typically "running", written by `start_workflow()` just before
-        invoking) — see the code-review finding this fixes.
+        Called from `_try_mark_session_error()` (in turn called from
+        `start_workflow()`/`resume_workflow()`'s `except` blocks) so a
+        crash cannot leave the persisted `SessionRecord` silently stuck at
+        whatever status it had before (typically "running", written by
+        `start_workflow()` just before invoking) — see the code-review
+        finding this fixes.
 
         Preserves `started_at`/`produced_revision_id` from the existing
         session record exactly like `_sync_memory_after_run()` does, sets
         `status="error"` and `ended_at=<now>`. Does not touch Project
         Understanding — a raised call produced no reliable
         `requirements_analysis` to persist. Failures from the store itself
-        propagate, same as everywhere else in this class — never swallowed.
+        propagate to `_try_mark_session_error()` — never swallowed here.
         """
         store = self._get_memory_store()
         existing_session = store.get_session(session_id)

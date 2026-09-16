@@ -238,7 +238,7 @@ def _cmd_workflow_demo(task: str) -> int:
     (ADR-0004) — start_workflow()/resume_workflow() persist a SessionRecord
     and, when produced, a ProjectUnderstandingRevision. workspace_root is
     resolved explicitly here, at the actual application entry point, per
-    the workspace-root resolution contract (ADR-0004 §1 item 13, D-018):
+    the workspace-root resolution contract (ADR-0004 §1 item 13, D-019):
     ProjectMemoryStore/default_db_path() never infer it themselves.
     """
     from dataclasses import replace

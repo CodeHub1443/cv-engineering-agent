@@ -43,7 +43,7 @@ policy per task class? `[P§20]`
 **Q16.** What is the persistence backend for the experiment ledger (`docs/state/
 EXPERIMENTS.md`)? Files, SQLite, or a service? — split off from the former Q8
 2026-09-15 when Q8's project-memory half was resolved (SQLite; see Q8, Answered,
-D-016) — the experiment-ledger half was explicitly **not** resolved by that decision
+D-017) — the experiment-ledger half was explicitly **not** resolved by that decision
 (ADR-0004 does not move `EXPERIMENTS.md` into SQLite or change its contract) and
 remains open. Does not block ADR-0004/`cv_agent/memory/` implementation.
 
@@ -74,8 +74,8 @@ abstraction, no project selection, no multi-tenant memory. Session identity
 (`AgentState.session_id`) stays distinct from project identity; every session belongs
 to the one implicit project (the workspace). No broader multi-repository workspace
 abstraction in V1. Project Understanding is persistent current state with recoverable
-revision history; experiments remain immutable append-only records. See D-014,
-ADR-0004. *Clarified 2026-09-15 (D-018):* the boundary being "the workspace" does not
+revision history; experiments remain immutable append-only records. See D-015,
+ADR-0004. *Clarified 2026-09-15 (D-019):* the boundary being "the workspace" does not
 by itself guarantee any given process execution resolves it correctly — the
 **calling application**, not `ProjectMemoryStore`, is responsible for resolving
 `workspace_root` explicitly; `Path.cwd()` is a convenience default only.
@@ -96,17 +96,17 @@ contract (that ledger's own tracking status is unaffected). External-LLM transmi
 remains governed by the existing approval/privacy rules regardless of persistence —
 storing data locally grants no new permission to send it externally. *Distinct from
 and does not resolve* **Q8**, which stays open (files vs. SQLite vs. a service — this
-decision constrains *where implied by Git*, not *which technology*). See D-015,
+decision constrains *where implied by Git*, not *which technology*). See D-016,
 ADR-0004.
 
 ~~**Q8. What is the persistence backend for project memory?**~~ files, SQLite, or a
 service? — **Answered 2026-09-15 (owner decision):** **SQLite**, for V1. Local and
 project-scoped — the database file lives in the project's gitignored
-persistent-state area (per Q15/D-015: not Git-tracked). Must survive process
+persistent-state area (per Q15/D-016: not Git-tracked). Must survive process
 restarts. SQLite stays **behind** the `ProjectMemoryStore` `Protocol` (ADR-0004 §5) —
 no `cv_agent` module outside `cv_agent/memory/` may import a SQLite-specific type or
 depend on it directly, so a future backend can replace it without touching callers.
 No external database/service is required for V1. This resolves Q8 for **project
 memory only** — the experiment ledger's own backend question is unaffected and spun
 off separately as **Q16** (Soon), since ADR-0004 does not move `EXPERIMENTS.md` into
-SQLite or change its contract. See D-016, ADR-0004.
+SQLite or change its contract. See D-017, ADR-0004.
