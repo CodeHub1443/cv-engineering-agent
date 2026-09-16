@@ -111,6 +111,7 @@ class CVAgent:
             requirements_analyzer=self._requirements_analyzer,
             executor=self._executor,
             skill_inventory=self._skill_inventory,
+            execution_registry=self._execution_registry,
         )
         # Durable Project Memory (ADR-0004) — lazily constructed on first
         # actual use. A CVAgent built only for health_check()/resolve()/
