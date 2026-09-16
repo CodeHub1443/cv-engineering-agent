@@ -575,3 +575,66 @@ just its own branch point's.
 persistent LangGraph checkpointer, no RAG/MCP/real LLM provider (project-memory side).
 No new scope introduced by this reconciliation itself. Commit made on
 `feature/claude/project-memory`; branch pushed; PR #27 not merged — see git status.
+
+## 2026-09-16 — Closed the requirements -> resolution -> execution feedback loop (feature/claude/execution-feedback-loop)
+
+**Did:** A read-only architecture audit against merged `main` (`2cf3709`) found the
+actual bottleneck was not another execution binding, RAG, research, a real LLM
+provider, or persistent checkpointing — it was that the one real binding
+(`trt-perf-analysis`, D-014) was invocable only from Python/tests, and
+`Skill.executable`/`SkillMatch.executable` were hardcoded `False` everywhere,
+completely disconnected from the real `ExecutionBindingRegistry`, so a real user had
+no way to discover or invoke it through the product surface. Fixed both halves.
+**(1)** `cv_agent/skills/inventory.py::SkillInventory` gained an optional
+`is_executable: Callable[[str], bool] | None` predicate applied in `list()`/`get()`
+via `dataclasses.replace()`; `cv_agent/skills/resolver.py::TaskResolver` now copies
+`skill.executable` instead of independently hardcoding `False`; `CVAgent.__init__`
+reordered to construct `ExecutionBindingRegistry`/`SkillExecutor` first and wires
+`self._executor.can_execute` into `SkillInventory`. `cv_agent.skills` still imports
+nothing from `cv_agent.execution` — the predicate is a plain callback, matching
+`can_execute`'s own shape. **(2)** New `python -m cv_agent execute <skill_id>` CLI
+command: identifies the skill, verifies `can_execute()`, builds
+`SkillExecutionRequest` from `--path`/`--input KEY=VALUE`/`--model-name`, resolves
+approval via `_confirm_approval()` (never auto-approves — `--approve` or a live
+"y"/"yes" prompt answer required for `approval_required`), and calls
+`CVAgent.execute()` — the real `SkillExecutor` path, never bypassed or duplicated.
+Only `trt-perf-analysis` is accepted (one constant check, explicitly not a dispatch
+table); this command is itself the one explicit, controlled caller that registers
+that binding, into its own short-lived `CVAgent` instance. `skills`/`resolve`/
+`capabilities`/`executions` are byte-for-byte behaviorally unchanged — still
+construct a fresh, unregistered `CVAgent`, still report `executable=False`/`0/84` by
+default.
+
+**Why:** The audit's own explicit finding (see this session's read-only report): every
+other candidate either had zero current consumer (RAG/research/experiment ledger) or
+would harden a path nobody could reach yet (persistent checkpointing hardens an
+approval interrupt the CLI never populated). This gap compounds — every future
+`ExecutionRuntime` adapter would land in the same dead end `trt-perf-analysis` was in
+without this fix first.
+
+**Broke:** Nothing — full suite 278 → 305 passing (10 resolution-wiring tests in
+`tests/test_skills.py`/`tests/test_agent.py`, 17 in new `tests/test_cli_execute.py`),
+zero regressions. Two pre-existing tests
+(`test_every_discovered_skill_is_not_executable`,
+`test_resolve_matches_a_discovered_skill`) were inspected, not rewritten — both
+remain correct as written since neither wires an `is_executable` predicate in, so
+both still exercise the unchanged default path (see ADR-0007 §9's explicit note on
+this).
+
+**Learned:** `TaskResolver` already reads every `Skill` exclusively through
+`SkillInventory` — making `SkillInventory` (not `TaskResolver`) the one
+execution-aware injection point meant a single predicate fixes both the `skills` CLI
+command and `resolve()`'s `SkillMatch.executable` at once, rather than needing the
+predicate threaded through two places. Manually verified end-to-end against the real
+installed skill and a hand-built deterministic fixture (`execute trt-perf-analysis
+--path <folder-with-3-layer-fixture>`) before writing the automated smoke test — real
+exit 0, real structured JSON on stdout, real `Status: completed`.
+
+**Left open:** 83/84 skills still non-executable (this task explicitly excluded a
+second binding); no cost-estimation code (`--approve` is a user-typed flag, not a
+cost gate — out of scope, unchanged); RAG/research/real LLM providers/persistent
+checkpointing/experiment ledger all explicitly out of scope for this task, per the
+audit's own recommendation not to start any of them yet. Also fixed, in passing per
+this task's explicit instruction: `docs/state/STATUS.md`'s stale "PR #27 still open"
+statement (merged as `2cf3709`, now corrected). Not committed or pushed — branch
+`feature/claude/execution-feedback-loop`, working tree only — see git status.

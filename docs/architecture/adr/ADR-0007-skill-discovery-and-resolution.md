@@ -132,7 +132,55 @@ machine's skills).
 ## 8. Revisit trigger
 
 When a second `SkillSource` is needed (repository-local skills, a remote catalog, or
-MCP-discovered capabilities per `spec/06-tooling-and-mcp.md`), or when an actual
-execution binding is built for any skill (which would need a fourth state beyond
-declared/discovered/executable=False to express "executable=True" honestly, per
-`docs/state/STATUS.md`'s existing DECLARED != EXECUTABLE invariant).
+MCP-discovered capabilities per `spec/06-tooling-and-mcp.md`) — **still open** — or
+when an actual execution binding is built for any skill (which would need a fourth
+state beyond declared/discovered/executable=False to express "executable=True"
+honestly, per `docs/state/STATUS.md`'s existing DECLARED != EXECUTABLE invariant) —
+**fired, see §9.**
+
+## 9. Status — executable status wiring (amendment)
+
+**Amended (branch `feature/claude/execution-feedback-loop`):** §8's second trigger
+fired once ADR-0009 shipped a real, verified `ExecutionBinding` (`trt-perf-analysis`,
+D-014) — `Skill.executable`/`SkillMatch.executable` had been hardcoded `False`
+everywhere in this package ever since, which was correct *when written* (no binding
+existed) but became a stale claim once one did.
+
+- **Dependency-direction decision:** `cv_agent.skills` must not import
+  `cv_agent.execution` — `ExecutionBinding`/`ExecutionBindingRegistry` stay concrete
+  types this package never names, preserving this ADR's own §2 boundary and
+  ADR-0009 §2's mirrored statement that discovery is "unchanged, called by nothing"
+  in the execution package. The chosen shape (of the two the owning task offered):
+  inject a plain `Callable[[str], bool]` predicate — the same shape
+  `SkillExecutor.can_execute`/`CVAgent.can_execute` already expose — rather than
+  having the application layer reconstruct `ResolutionResult`/`Skill` trees
+  after the fact. No new abstraction: `Callable[[str], bool]` is a stdlib type.
+- **Injection point:** `SkillInventory`, not `TaskResolver` directly. `TaskResolver`
+  already reads every `Skill` it matches through `SkillInventory.list()`/`.get()`
+  (§5's existing interface, unchanged), so making `SkillInventory` the one
+  execution-aware point means `SkillMatch.executable` (resolver.py) and the `skills`
+  CLI command (which reads `SkillInventory` directly) both become correct from a
+  single injection, instead of needing the predicate threaded through two places.
+  `TaskResolver._match_skills()` now copies `skill.executable` verbatim rather than
+  independently hardcoding `False`.
+- **Who wires it:** `CVAgent.__init__` (`cv_agent/runtime/agent.py`) constructs
+  `ExecutionBindingRegistry`/`SkillExecutor` before `SkillInventory`, then passes
+  `self._executor.can_execute` in. A fresh `CVAgent`'s registry still starts empty
+  exactly as ADR-0009 §3 requires, so this reordering changes no externally visible
+  default — `skills`/`resolve`/`capabilities`/`executions` still report
+  `executable=False` for every skill unless a caller has separately, explicitly
+  registered a binding (see ADR-0009 §10).
+- **What did not change:** `LocalSkillSource`/`SkillSource.discover()` still
+  hardcode `executable=False` at discovery time, per this ADR's original §5
+  interface — discovery genuinely has no way to know about execution and never
+  will. `SkillInventory(...)` constructed the old way (no `is_executable` given, the
+  default) reproduces the exact prior behavior — every existing direct construction
+  of it (nearly all of `tests/test_skills.py`) is unaffected.
+- **Consequence:** `tests/test_skills.py::test_every_discovered_skill_is_not_executable`
+  and `test_resolve_matches_a_discovered_skill`'s `executable is False` assertion
+  both remain **correct as written** — neither test wires a predicate in, so both
+  still exercise (and correctly assert) the unchanged default path. New tests
+  (`TestSkillInventoryExecutableStatus`, plus two resolver-level tests) added the
+  missing positive case and the CVAgent-level integration case
+  (`tests/test_agent.py::TestExecutableStatusWiring`), rather than rewriting
+  assertions that were never wrong.

@@ -8,10 +8,15 @@ a floor, not a ceiling: TaskResolver is the interface an LLM/semantic
 resolver can sit behind later (same input/output shape) without this
 deterministic path being removed — it stays as the auditable fallback.
 
-Central invariant, restated at the type level: a SkillMatch/CapabilityMatch
-never claims `executable`. Matching only ever establishes relevance
-(capability) or DISCOVERED (skill) — never EXECUTABLE, which requires an
-actual invocation binding that does not exist anywhere in this codebase yet.
+Central invariant, restated at the type level: a CapabilityMatch never
+claims `executable` — a capability is a declared relevance relationship,
+never a runnable thing. A SkillMatch.executable, since ADR-0007 §9 (amending
+§8's fired revisit trigger), reflects whatever `Skill.executable` the
+injected `SkillInventory` reports for that skill_id — copied verbatim, never
+independently computed here. `TaskResolver` still imports nothing from
+`cv_agent.execution` and never will; if the `SkillInventory` it was
+constructed with has no execution-awareness wired in (the default), every
+match's `executable` stays False, exactly as before this amendment.
 """
 
 from __future__ import annotations
@@ -81,7 +86,11 @@ class SkillMatch:
     surfaced as matches. Missing declared skills go to
     ResolutionResult.missing_skills instead, never fabricated as a match."""
     executable: bool
-    """Always False today — no execution binding exists. See models.Skill."""
+    """Copied from the matched `Skill.executable` (see models.Skill) at
+    match time — True only if the `SkillInventory` this resolver was built
+    with was given a predicate reporting a verified, registered execution
+    binding for this skill_id. False by default, same as `Skill.executable`,
+    for any resolver whose inventory has no execution-awareness wired in."""
 
 
 @dataclass(frozen=True)
@@ -206,7 +215,7 @@ class TaskResolver:
                 matched_terms=tuple(sorted(overlap)),
                 declared=True,
                 discovered=True,
-                executable=False,
+                executable=skill.executable,
             )
 
         for skill in discovered.values():
@@ -223,7 +232,7 @@ class TaskResolver:
                 matched_terms=tuple(sorted(overlap)),
                 declared=False,
                 discovered=True,
-                executable=False,
+                executable=skill.executable,
             )
 
         ranked = sorted(matches.values(), key=lambda m: (-m.score, m.skill_id))

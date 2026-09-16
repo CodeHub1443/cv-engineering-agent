@@ -55,9 +55,14 @@ class Skill:
     dataclass already means it was found. See `executable` for the separate,
     stricter question of whether an invocation binding exists."""
     executable: bool = False
-    """True only if a verified execution binding exists for this skill. No
-    such binding exists anywhere in this codebase yet (Step 2 scope), so this
-    is always False today — see docs/state/STATUS.md."""
+    """True only if a verified, registered execution binding exists for this
+    skill. Always False as returned by a `SkillSource`/`discover()` directly
+    — discovery has no knowledge of `cv_agent.execution` and never will (see
+    ADR-0007 §9, the amendment resolving §8's fired revisit trigger).
+    `SkillInventory` is
+    the one place this can become True, and only when constructed with an
+    explicit `is_executable` predicate backed by a real, verified
+    `ExecutionBinding` — never inferred from a skill's own metadata."""
     evidence: SkillEvidence | None = None
     raw_metadata: dict[str, Any] = field(default_factory=dict)
     """Any extra frontmatter fields the source found, preserved as-is."""

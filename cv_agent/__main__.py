@@ -8,6 +8,7 @@ Usage:
     python -m cv_agent resolve "<task>"    deterministic task -> capability -> skill
     python -m cv_agent analyze "<request>" requirements analysis + task decomposition
     python -m cv_agent executions          show execution bindings/runtimes + what's executable
+    python -m cv_agent execute <skill_id>  run a verified skill through the real execution path
     python -m cv_agent workflow "<task>"   demo: clarification interrupt -> answer -> resume
     cv-agent ...                           (when installed via pip)
 """
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import sys
 from argparse import ArgumentParser
+from typing import Any, Callable
 
 
 def _health_check() -> int:
@@ -225,6 +227,176 @@ def _cmd_executions() -> int:
     return 0
 
 
+# ── execute: the real application-layer execution path (closes the
+# requirements -> resolution -> execution loop for one individually-
+# verified skill; see ADR-0009 §8/§10) ──────────────────────────────────
+
+_SUPPORTED_EXECUTE_SKILL_ID = "trt-perf-analysis"
+"""The only skill this CLI command supports today. Deliberately a single
+constant, not a dispatch table keyed by skill_id — adding a second entry
+here without an individually-verified ExecutionRuntime for it would be
+exactly the "hardcode a large collection of bindings" shortcut ADR-0009
+rejected (see cv_agent/execution/runtimes/__init__.py's own docstring)."""
+
+
+def _parse_input_kv(pairs: list[str]) -> dict[str, str]:
+    """Parse repeated `--input KEY=VALUE` flags into a plain dict — the
+    generic escape hatch alongside the `--path`/`--model-name` convenience
+    flags, so this command stays usable for a future skill's differently-
+    shaped inputs without inventing a new CLI mechanism per skill."""
+    inputs: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(f"expected KEY=VALUE, got {pair!r}")
+        key, _, value = pair.partition("=")
+        key = key.strip()
+        if not key:
+            raise ValueError(f"expected KEY=VALUE with a non-empty key, got {pair!r}")
+        inputs[key] = value
+    return inputs
+
+
+def _confirm_approval(
+    binding: Any, *, approve_flag: bool, prompt: Callable[[str], str] = input
+) -> bool:
+    """
+    Decide whether this execution attempt carries real, explicit approval.
+    Never auto-approves — see docs/APPROVALS.md, [P§24].
+
+    - A binding whose policy is not "approval_required" ("allowed" or
+      "rejected") needs no confirmation from this function at all: SkillExecutor
+      itself is what actually enforces "rejected" regardless of this
+      return value, and "allowed" needs no gate per CLAUDE.md §3 rule 10 —
+      returning True here is a no-op either way, never a bypass.
+    - `--approve` on the command line counts as approval because the user
+      explicitly, personally typed it as part of invoking *this* command
+      for *this* skill — it is never set automatically or by a default.
+    - Absent `--approve`, this asks once, clearly, and stops (per
+      APPROVALS.md's own "Agent behavior at a gate" rule 3) via `prompt` —
+      `input()` by default, injectable for tests. Only a live "y"/"yes"
+      answer counts; anything else, or a non-interactive/EOF prompt (no
+      TTY, no `--approve`), is treated as rejection — never as silent
+      approval, and never a crash.
+    """
+    if binding.approval_policy != "approval_required":
+        return True
+    if approve_flag:
+        return True
+    try:
+        answer = prompt(
+            f"Approval required for skill '{binding.skill_id}' via binding "
+            f"'{binding.binding_id}' (policy=approval_required). "
+            "Approve execution? [y/N]: "
+        )
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _cmd_execute(
+    skill_id: str,
+    *,
+    path: str | None,
+    input_kv: list[str],
+    model_name: str | None,
+    task: str | None,
+    approve: bool,
+) -> int:
+    """
+    The real execution path: CVAgent -> SkillExecutor -> ExecutionBindingRegistry
+    -> ExecutionRuntime — never bypassed, never duplicated here (ADR-0009).
+
+    Steps, matching the task's own required contract: identify the
+    requested skill, verify it is executable, construct the execution
+    request, invoke the existing CVAgent/SkillExecutor path, return the
+    real result, surface errors clearly.
+    """
+    import json
+
+    from cv_agent.execution.models import SkillExecutionRequest
+    from cv_agent.runtime.agent import CVAgent
+
+    if skill_id != _SUPPORTED_EXECUTE_SKILL_ID:
+        print(
+            f"Skill '{skill_id}' has no supported real execution path in this "
+            f"CLI yet — only {_SUPPORTED_EXECUTE_SKILL_ID!r} is individually "
+            "verified and wired in today (ADR-0009 §8 fires per skill, not in "
+            "bulk).",
+            file=sys.stderr,
+        )
+        return 2
+
+    agent = CVAgent()
+    skill = agent.skills.get(skill_id)
+    if skill is None:
+        print(
+            f"Skill '{skill_id}' was not discovered in this environment "
+            "(not found under the scanned skill roots) — nothing to execute.",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Explicit, controlled registration — this command is the one caller
+    # that has actually identified this specific skill and deliberately
+    # opts its one verified binding in; CVAgent.__init__ never does this
+    # automatically (ADR-0009 §5), and no other skill_id reaches this line.
+    from cv_agent.execution.runtimes.trt_perf_analysis import (
+        register as _register_trt_perf_analysis,
+    )
+
+    _register_trt_perf_analysis(agent.execution_bindings)
+
+    if not agent.can_execute(skill_id):
+        print(
+            f"Skill '{skill_id}' is discovered but not executable "
+            "(no verified execution binding) — nothing to execute.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        inputs: dict[str, Any] = dict(_parse_input_kv(input_kv))
+    except ValueError as exc:
+        print(f"Invalid --input value: {exc}", file=sys.stderr)
+        return 2
+    if path is not None:
+        inputs["path"] = path
+    if model_name is not None:
+        inputs["model_name"] = model_name
+
+    binding = agent.execution_bindings.get_binding(skill_id)
+    assert binding is not None  # can_execute() above already confirmed this
+
+    approved = _confirm_approval(binding, approve_flag=approve)
+    if binding.approval_policy == "approval_required" and not approved:
+        print(
+            "Execution not approved — aborting. Nothing was run.",
+            file=sys.stderr,
+        )
+        return 3
+
+    request = SkillExecutionRequest(
+        inputs=inputs, task=task, requested_by="cli", approved=approved
+    )
+    result = agent.execute(skill, request)
+
+    print(f"Skill: {result.skill_id}")
+    print(f"Status: {result.status}")
+    print(
+        f"Binding: {result.evidence.binding_id}  Runtime: {result.evidence.runtime_id}  "
+        f"started={result.evidence.started_at}  completed={result.evidence.completed_at}"
+    )
+
+    if result.ok:
+        print("Result:")
+        print(json.dumps(result.output, indent=2, sort_keys=True))
+        return 0
+
+    assert result.error is not None
+    print(f"Error [{result.error.category}]: {result.error.message}", file=sys.stderr)
+    return 1
+
+
 def _cmd_workflow_demo(task: str) -> int:
     """
     Single-process smoke demo: request -> clarification interrupt -> answer
@@ -306,6 +478,36 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser(
         "executions", help="Show execution bindings/runtimes and what's executable."
     )
+    execute_parser = subparsers.add_parser(
+        "execute",
+        help="Run a verified skill through the real CVAgent -> SkillExecutor path.",
+    )
+    execute_parser.add_argument(
+        "skill_id", help="Skill to execute (only 'trt-perf-analysis' is supported today)."
+    )
+    execute_parser.add_argument(
+        "--path", default=None, help="Folder of layers_*.json/profile_*.json to analyze."
+    )
+    execute_parser.add_argument(
+        "--input",
+        dest="input_kv",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Additional execution input, repeatable (e.g. --input model_name=my-model).",
+    )
+    execute_parser.add_argument(
+        "--model-name", dest="model_name", default=None, help="Optional model name to forward."
+    )
+    execute_parser.add_argument(
+        "--task", default=None, help="Optional natural-language task label for evidence trails."
+    )
+    execute_parser.add_argument(
+        "--approve",
+        action="store_true",
+        help="Explicitly approve execution up front, for a binding that requires approval "
+        "(never applied automatically).",
+    )
     workflow_parser = subparsers.add_parser(
         "workflow",
         help="Demo: request -> clarification interrupt -> synthetic answer -> resume.",
@@ -326,6 +528,15 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_analyze(args.request)
     if args.command == "executions":
         return _cmd_executions()
+    if args.command == "execute":
+        return _cmd_execute(
+            args.skill_id,
+            path=args.path,
+            input_kv=args.input_kv,
+            model_name=args.model_name,
+            task=args.task,
+            approve=args.approve,
+        )
     if args.command == "workflow":
         return _cmd_workflow_demo(args.task)
 

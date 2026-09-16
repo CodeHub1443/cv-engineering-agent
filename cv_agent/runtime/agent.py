@@ -81,9 +81,22 @@ class CVAgent:
         self._registry: CapabilityRegistry = CapabilityRegistry(
             self._config.registry_path
         )
+        # Constructed before SkillInventory so its can_execute() can be
+        # injected below (ADR-0007 §9) — no binding is registered by
+        # default (ADR-0009 §5); the registry starts empty regardless of
+        # this ordering, so a fresh CVAgent's skills/resolve output still
+        # reports executable=False for everything until a caller
+        # explicitly registers a binding.
+        self._execution_registry: ExecutionBindingRegistry = ExecutionBindingRegistry()
+        self._executor: SkillExecutor = SkillExecutor(self._execution_registry)
         skill_roots = self._config.skill_paths or default_skill_roots()
         self._skill_inventory: SkillInventory = SkillInventory(
-            sources=(LocalSkillSource(roots=skill_roots),)
+            sources=(LocalSkillSource(roots=skill_roots),),
+            # ADR-0007 §9: the one place cv_agent.skills learns whether a
+            # discovered skill is genuinely executable — a plain callback,
+            # never a concrete cv_agent.execution import inside
+            # cv_agent.skills itself.
+            is_executable=self._executor.can_execute,
         )
         self._resolver: TaskResolver = TaskResolver(
             capability_registry=self._registry,
@@ -93,11 +106,6 @@ class CVAgent:
             task_resolver=self._resolver,
             llm=self._llm,
         )
-        # No binding is registered by default — see ADR-0009 §5. Tests and any
-        # future genuinely-verified adapter register into this registry
-        # explicitly; CVAgent never pre-populates it.
-        self._execution_registry: ExecutionBindingRegistry = ExecutionBindingRegistry()
-        self._executor: SkillExecutor = SkillExecutor(self._execution_registry)
         self._graph: Any = build_graph()
         self._workflow_graph: Any = build_requirements_workflow_graph(
             requirements_analyzer=self._requirements_analyzer,
