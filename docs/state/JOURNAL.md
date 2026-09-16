@@ -341,3 +341,72 @@ separate — ADR-0003 §8 names their eventual merge as a revisit trigger, not d
 (Q3's harder half) is deferred until a persistent checkpointer is wired in. No project
 memory (ADR-0004) — `requirements_analysis` still vanishes when a session's checkpoint
 is discarded. No commit or push — see git status.
+
+## 2026-09-16 — First real execution binding: trt-perf-analysis (feature/claude/execution-binding)
+
+**Did:** Made exactly one real installed skill genuinely executable through the
+existing execution boundary (ADR-0009 §8's revisit trigger). Inspected the real
+installed skill environment directly (not assumed from ADR-0009's own prior mention)
+and chose `trt-perf-analysis`: its `scripts/analyze_trt_perf.py` uses only Python
+stdlib, exposes a stable `argparse` CLI, and is read-only/local/deterministic.
+Verified its exit-code/stdout contract empirically against the real script before
+writing any adapter code: exit `0` + one JSON object on stdout whenever structured
+data can be produced at all (including when one backend's own input fails
+validation — the script treats that as a valid outcome, not a crash); exit `2` + a
+one-line stderr message when no input files exist. Added
+`cv_agent/execution/runtimes/trt_perf_analysis.py` (`TrtPerfAnalysisRuntime`
+implementing `ExecutionRuntime`, `build_binding()`, an explicit opt-in
+`register(registry)`) and `tests/test_execution_trt_perf_analysis.py` (27 tests:
+argv-contract units, mocked subprocess error-mapping, registry/approval-gate wiring,
+and — skipped, not faked, if the skill isn't installed — genuine subprocess
+invocation through `CVAgent.execute()`). Ran a standalone end-to-end script
+(discovery → explicit `register()` → `CVAgent.execute()` → real subprocess → real
+JSON result) to confirm the path works outside the test harness too. Updated
+ADR-0009 (§3/§6/§7/§8, new §9) to record the decision without rewriting the
+architecture; added D-014.
+
+**Why:** The prior architecture audit (this session, read-only, against the real
+merged `main` — not the unmerged memory branch) found the V1 chain stops exactly
+here: requirements analysis, skill resolution, and the HITL approval gate are all
+genuinely wired end-to-end, but every one of 84 discovered skills and 20 declared
+capabilities reported `not_executable` — the agent could reason and ask but never
+act. `[P§15]`/`[P§29.9]` ("discover and invoke, don't duplicate") and `CLAUDE.md`'s
+own opening line ("performs... not merely knows") both point at this gap as the
+actual highest-value next step, ahead of roadmap ordering.
+
+**Broke:** Nothing — full suite went from 195 → 222 passing (27 new), zero
+regressions; `tests/test_execution.py`'s existing FakeRuntime-based tests are
+byte-for-byte unchanged. One test of my own was initially wrong, not the adapter:
+I assumed a malformed `layers_*.json` would hit the script's process-level `DataError`
+path (exit `2`); empirically it doesn't — a malformed *individual* backend is
+reported as `"status": "failed"` inside an otherwise-successful (exit `0`) response,
+which is the script's own documented contract ("exit 0 whenever structured data can
+be emitted at all"). Fixed the test to assert the real, verified behavior instead of
+the assumed one. Also discovered, after the real-invocation tests ran, that CPython
+had written `.pyc` bytecode cache files into the real skill's own
+`scripts/trt_perf/__pycache__/` (a standard, automatic side effect of importing that
+package as a subprocess, not something this code does deliberately) — removed them
+afterward to restore the exact pre-test state; no `.py` source file was ever touched.
+
+**Learned:** `Skill.location` (the real, discovered `SKILL.md` path) is sufficient to
+derive a skill's installation root (`Path(skill.location).parent`) for an adapter —
+no hard-coded filesystem path is needed, so the same adapter works regardless of
+whether a skill was found under `~/.claude/skills`, `~/.agents/skills`, or a
+`CV_AGENT_SKILL_PATHS` override. Invoking the real script directly via
+`sys.executable`/`SKILL_PYTHON` is equivalent to (and simpler/more portable than)
+shelling through the skill's own `scripts/run.sh`/`run.cmd` Python-discovery
+wrappers, since this process already knows its own interpreter. Timeout/error-path
+tests are more robust mocking `subprocess.run` directly than racing real wall-clock
+timing, and the task's own instructions explicitly allow this for
+"expensive or environment-dependent portions."
+
+**Left open:** 83/84 skills remain non-executable — this ADR-0009 §8 trigger fires
+per skill, not in bulk, by design; `gstreamer-pipeline` (the other bundled-script
+candidate ADR-0009 §1 named) is the next candidate, uninspected so far. Registration
+stays fully opt-in — `CVAgent.__init__` does not call `register()`, so
+`python -m cv_agent executions` against a fresh `CVAgent` still reports `0/84`;
+wiring any binding into `CVAgent`'s default construction (conditional on real
+discovery or otherwise) was deliberately not done, out of scope for this task. Two
+independent branches (`feature/claude/project-memory`/PR #27, and this one) both
+used `docs/state/DECISIONS.md` D-014 — will need renumbering when whichever merges
+second lands (noted in `STATUS.md`). No commit, no push — see git status.
