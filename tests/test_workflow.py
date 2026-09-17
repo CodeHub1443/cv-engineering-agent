@@ -104,13 +104,20 @@ def graph(
     )
 
 
-def _start(graph, task: str, session_id: str, pending_execution: dict[str, Any] | None = None):
+def _start(
+    graph,
+    task: str,
+    session_id: str,
+    pending_execution: dict[str, Any] | None = None,
+    execution_inputs: dict[str, Any] | None = None,
+):
     initial = {
         "session_id": session_id,
         "task": task,
         "steps": [],
         "requirements_analysis": None,
         "clarification_answers": {},
+        "execution_inputs": execution_inputs or {},
         "planning_result": None,
         "pending_execution": pending_execution,
         "approval_decision": None,
@@ -490,6 +497,42 @@ class TestManuallySuppliedPendingExecutionPrecedence:
         # ad-hoc "skipped" placeholder.
         assert result["planning_result"] is None
 
+    def test_execution_inputs_are_ignored_when_pending_execution_is_supplied(
+        self, graph, skill_inventory: SkillInventory, execution_registry: ExecutionBindingRegistry
+    ) -> None:
+        """ADR-0010 §12: a caller-supplied pending_execution still takes
+        full precedence even when execution_inputs is also supplied —
+        plan_execution() is never called, so execution_inputs is simply
+        unused for this run, not merged into the caller's own plan."""
+        skill_inventory._skills = {"fixture-skill": _fixture_skill()}  # noqa: SLF001
+        skill_inventory._loaded = True  # noqa: SLF001
+        execution_registry.register_binding(
+            ExecutionBinding(
+                skill_id="fixture-skill",
+                binding_id="b1",
+                runtime_id="fake-runtime",
+                approval_policy="allowed",
+                verified=True,
+            )
+        )
+        execution_registry.register_runtime(
+            FakeRuntime(outcome=RuntimeOutcome(success=True, output={}))
+        )
+        supplied = {"skill_id": "fixture-skill", "inputs": {"a": 1}, "task": "t"}
+
+        result = _start(
+            graph,
+            _WELL_DEFINED_TASK,
+            "precedence-2",
+            pending_execution=supplied,
+            execution_inputs={"path": "/should/be/ignored"},
+        )
+
+        assert result["pending_execution"]["inputs"] == {"a": 1}
+        plan_step = next(s for s in result["steps"] if s["node"] == "plan_execution")
+        assert plan_step["action"] == "caller_supplied_pending_execution_preserved"
+        assert result["planning_result"] is None
+
 
 _PLANNING_TASK = (
     "Detect intruders using our 8 outdoor CCTV cameras at 1080p/15fps, "
@@ -504,6 +547,17 @@ directly without an intervening clarification interrupt, matching this
 module's own is_executable-wired fixture skills under task_component
 "person_detection"."""
 _PLANNING_SKILL_DESCRIPTION = "TensorRT performance benchmarking and layer analysis tool."
+
+_VAGUE_PLANNING_TASK = (
+    "Detect escape attempts. Also evaluate deployment optimization "
+    "performance benchmarking of the model."
+)
+"""Deliberately missing environment/camera/deployment-target/latency/
+accuracy/data-availability fields (unlike _PLANNING_TASK) so it interrupts
+for clarification first — but keeps the same person_detection trigger
+("escape"/"detect") and benchmarking vocabulary _PLANNING_TASK already
+proves matches the fixture skill, so plan_execution still finds the same
+candidate once clarification resolves."""
 
 
 def _write_planning_skill(root: Path, skill_id: str) -> None:
@@ -688,6 +742,77 @@ class TestPlanExecutionIntegration:
         assert result["planning_result"]["status"] == "missing_required_inputs"
         assert result["planning_result"]["plan"] is None
         assert list(result["planning_result"]["missing_inputs"]) == ["path"]
+
+    def test_execution_inputs_satisfy_missing_required_input_and_produce_a_plan(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-0010 §12: a caller-supplied execution_inputs value, keyed by
+        InputField.name, is what turns the exact same binding that produced
+        missing_required_inputs above into a real plan — same fixture,
+        same required field, only start_workflow's new parameter differs."""
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(
+            tmp_path, execution_registry, skill_ids=("trt-perf-analysis",)
+        )
+
+        result = _start(
+            graph,
+            _PLANNING_TASK,
+            "plan-4b",
+            execution_inputs={"path": "/data/clips"},
+        )
+
+        assert result["pending_execution"] == {
+            "skill_id": "trt-perf-analysis",
+            "inputs": {"path": "/data/clips"},
+            "task": _PLANNING_TASK,
+        }
+        assert result["planning_result"]["status"] == "planned"
+        assert result["planning_result"]["plan"]["inputs"] == {"path": "/data/clips"}
+
+    def test_execution_inputs_survive_the_clarification_loop(self, tmp_path: Path) -> None:
+        """execution_inputs supplied at start_workflow() must reach
+        plan_execution unchanged even when a clarification interrupt/resume
+        happens first — no node between initialize and plan_execution may
+        touch it, and clarification_answers must never be folded into it."""
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(
+            tmp_path, execution_registry, skill_ids=("trt-perf-analysis",)
+        )
+
+        started = _start(
+            graph,
+            _VAGUE_PLANNING_TASK,
+            "plan-9",
+            execution_inputs={"path": "/data/clips"},
+        )
+        assert "__interrupt__" in started
+        assert started["__interrupt__"][0].value["type"] == "clarification"
+
+        questions = started["__interrupt__"][0].value["questions"]
+        answers = {q["relates_to_field"]: "answered" for q in questions}
+        resumed = _resume(graph, "plan-9", answers)
+
+        # clarification_answers is populated (a different namespace) but
+        # execution_inputs — never touched by any node — is what actually
+        # reaches the plan, unchanged.
+        assert resumed["clarification_answers"] == answers
+        assert resumed["planning_result"]["status"] == "planned"
+        assert resumed["pending_execution"] == {
+            "skill_id": "trt-perf-analysis",
+            "inputs": {"path": "/data/clips"},
+            "task": _VAGUE_PLANNING_TASK,
+        }
 
     def test_planned_execution_passes_through_approval_gate(self, tmp_path: Path) -> None:
         execution_registry = ExecutionBindingRegistry()

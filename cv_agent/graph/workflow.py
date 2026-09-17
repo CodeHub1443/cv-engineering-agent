@@ -41,7 +41,11 @@ Topology:
 `plan_execution` never interrupts (ADR-0010 §3: a missing-input interrupt is
 explicitly deferred, not built here) and never executes/approves anything —
 it only derives `pending_execution` when the caller hasn't already supplied
-one. Both interrupt nodes use LangGraph's dynamic `interrupt()` — the node's
+one, reading any caller-supplied `AgentState["execution_inputs"]`
+(ADR-0010 §12, keyed by `InputField.name` — never `clarification_answers`,
+a distinct namespace keyed by `RequirementField.name`) as its
+`available_inputs`. Both interrupt nodes use LangGraph's dynamic
+`interrupt()` — the node's
 own call pauses the graph; resuming with `Command(resume=value)` re-enters
 that same node with `interrupt()` returning `value` instead of pausing
 again. State (including everything written by nodes that already ran)
@@ -219,16 +223,15 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
 
         analysis_dict = state.get("requirements_analysis") or {}
         analysis = _requirements_analysis_for_planning(analysis_dict)
-        # available_inputs: currently nothing in AgentState legitimately
-        # represents "explicit execution inputs a human has already
-        # supplied ahead of planning" — clarification_answers is keyed by
-        # RequirementField.name (e.g. "deployment_target"), not by
-        # InputField.name (e.g. "path"), and treating it as such would be
-        # exactly the "infer execution inputs from arbitrary text" this
-        # node must not do (ADR-0010 §3). Honestly passing {} here, not
-        # inventing a new state field for this integration step — see
-        # docs/state/OPEN_QUESTIONS.md Q17 for the still-open follow-up.
-        result = plan_execution(analysis, execution_registry, available_inputs={})
+        # available_inputs (ADR-0010 §12): AgentState["execution_inputs"] is
+        # the one legitimate source — caller-supplied, keyed by
+        # InputField.name, set only via start_workflow(execution_inputs=...).
+        # clarification_answers is a different namespace (keyed by
+        # RequirementField.name) and is never read here or folded in —
+        # doing so would be exactly the "infer execution inputs from
+        # arbitrary text" this node must not do (ADR-0010 §3).
+        available_inputs = state.get("execution_inputs") or {}
+        result = plan_execution(analysis, execution_registry, available_inputs=available_inputs)
 
         pending: Optional[dict[str, Any]] = None
         log_extra: dict[str, Any] = {"planning_status": result.status}
