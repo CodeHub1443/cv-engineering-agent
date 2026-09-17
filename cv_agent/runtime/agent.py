@@ -325,6 +325,7 @@ class CVAgent:
             "clarification_answers": {},
             "execution_inputs": execution_inputs or {},
             "planning_result": None,
+            "execution_input_recovery": None,
             "pending_execution": pending_execution,
             "approval_decision": None,
             "execution_result": None,
@@ -341,10 +342,27 @@ class CVAgent:
     def resume_workflow(self, session_id: str, resume_value: Any) -> AgentState:
         """
         Resume a paused workflow run with a human-supplied value — the
-        clarification answers dict for a clarify interrupt, or the literal
-        string "approved"/"rejected" for an approval interrupt. Raises no
-        special exception for an unpaused/unknown session_id; LangGraph
-        itself will error if there is nothing to resume.
+        clarification answers dict for a clarify interrupt, the literal
+        string "approved"/"rejected" for an approval interrupt, or (ADR-0010
+        §13) a dict keyed by `InputField.name` for a `provide_execution_
+        inputs` interrupt (same resume-value shape and namespace as
+        `execution_inputs`, never `clarification_answers`). No dedicated
+        method exists per interrupt kind — the interrupt's own `"type"`
+        field (in the paused state's `__interrupt__` payload) is how a
+        caller knows which shape to supply; this method itself is generic
+        and unchanged by which interrupt is paused. Raises no special
+        exception for an unpaused/unknown session_id; LangGraph itself will
+        error if there is nothing to resume.
+
+        Caveat, confirmed empirically while building the `provide_
+        execution_inputs` interrupt: `resume_value=None` and a literal
+        empty dict `resume_value={}` are **not reliably delivered** by the
+        installed LangGraph's `Command(resume=...)` — the graph can
+        silently re-pause at the same interrupt instead of resuming. To
+        decline/cancel a `provide_execution_inputs` prompt, pass a
+        non-`dict` falsy value (e.g. `""`), which *is* delivered correctly
+        and is classified as "cancelled" the same way. This is a LangGraph
+        API characteristic, not specific to any one interrupt kind.
 
         Updates the same durable `SessionRecord` `start_workflow()` created
         (ADR-0004) — this call does not create a new one. See
