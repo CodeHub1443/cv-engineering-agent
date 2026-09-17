@@ -1,9 +1,9 @@
 """
-cv_agent.graph.workflow — Requirements-clarification + approval-gated
-execution workflow graph.
+cv_agent.graph.workflow — Requirements-clarification + planning +
+approval-gated execution workflow graph.
 
-See ADR-0003. This is the first LangGraph topology in the repo that uses
-real interrupts (`langgraph.types.interrupt`), not the minimal
+See ADR-0003 and ADR-0010. This is the first LangGraph topology in the repo
+that uses real interrupts (`langgraph.types.interrupt`), not the minimal
 `initialize -> END` stub in `cv_agent.graph.builder`. It is deliberately a
 second, separate graph rather than nodes inserted into `build_graph()`'s
 topology — see ADR-0003 §4 for why, and its revisit trigger for when the two
@@ -17,26 +17,36 @@ Topology:
                      and none answered yet this run?)
                         yes  /        \\  no
                             v          v
-                        clarify   approval_gate
+                        clarify   plan_execution
                      (interrupt)       |
-                            \\        (pending_execution present
-                             \\        and its binding requires
-                              \\       approval?)
-                               \\    yes /      \\ no / none pending
-                                v       v        v
-                    analyze_requirements   execute   END
+                            \\        (ADR-0010 §3: caller-supplied
+                             \\        pending_execution preserved as-is;
+                              \\       otherwise derived from
+                               \\      requirements_analysis.skill_links —
+                                \\     never overwrites an explicit value)
+                                 v
+                    analyze_requirements   approval_gate
                     (loop back, now with          |
-                     clarification_answers        v
-                     as assumptions — routes      END
-                     straight to approval_gate
-                     the second time through)
+                     clarification_answers   (pending_execution present
+                     as assumptions — routes  and its binding requires
+                     straight to               approval?)
+                     plan_execution the           yes /      \\ no / none pending
+                     second time through)            v        v
+                                              execute   END
+                                                  |
+                                                  v
+                                                 END
 
-`clarify` and `approval_gate` are the only two interrupt points. Both use
-LangGraph's dynamic `interrupt()` — the node's own call pauses the graph;
-resuming with `Command(resume=value)` re-enters that same node with
-`interrupt()` returning `value` instead of pausing again. State (including
-everything written by nodes that already ran) survives the pause because
-the graph is compiled with a checkpointer, keyed by `thread_id`.
+`clarify` and `approval_gate` are the only two interrupt points.
+`plan_execution` never interrupts (ADR-0010 §3: a missing-input interrupt is
+explicitly deferred, not built here) and never executes/approves anything —
+it only derives `pending_execution` when the caller hasn't already supplied
+one. Both interrupt nodes use LangGraph's dynamic `interrupt()` — the node's
+own call pauses the graph; resuming with `Command(resume=value)` re-enters
+that same node with `interrupt()` returning `value` instead of pausing
+again. State (including everything written by nodes that already ran)
+survives the pause because the graph is compiled with a checkpointer, keyed
+by `thread_id`.
 """
 
 from __future__ import annotations
@@ -48,6 +58,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from cv_agent.execution.binding import ExecutionBindingRegistry
 from cv_agent.execution.executor import SkillExecutor
 from cv_agent.execution.models import (
     ExecutionError,
@@ -55,8 +66,10 @@ from cv_agent.execution.models import (
     SkillExecutionRequest,
     SkillExecutionResult,
 )
+from cv_agent.graph.planning import plan_execution
 from cv_agent.graph.state import AgentState
 from cv_agent.requirements.analyzer import RequirementsAnalyzer
+from cv_agent.requirements.models import RequirementsAnalysis, SkillLink
 from cv_agent.skills.inventory import SkillInventory
 
 
@@ -86,13 +99,13 @@ def _make_analyze_requirements_node(analyzer: RequirementsAnalyzer):
     return _node_analyze_requirements
 
 
-def _route_after_analysis(state: AgentState) -> Literal["clarify", "approval_gate"]:
+def _route_after_analysis(state: AgentState) -> Literal["clarify", "plan_execution"]:
     analysis = state.get("requirements_analysis") or {}
     questions = analysis.get("clarification_questions") or []
     already_answered = bool(state.get("clarification_answers"))
     if questions and not already_answered:
         return "clarify"
-    return "approval_gate"
+    return "plan_execution"
 
 
 def _node_clarify(state: AgentState) -> dict[str, Any]:
@@ -132,6 +145,114 @@ def _route_after_clarify(state: AgentState) -> Literal["analyze_requirements"]:
     # "clarify" a second time because clarification_answers is now set —
     # this prevents an infinite interrupt loop even if unknowns remain.
     return "analyze_requirements"
+
+
+def _skill_link_from_dict(d: dict[str, Any]) -> SkillLink:
+    return SkillLink(
+        task_component=d["task_component"],
+        skill_id=d["skill_id"],
+        declared=d["declared"],
+        matched_terms=tuple(d.get("matched_terms") or ()),
+        executable=d["executable"],
+    )
+
+
+def _requirements_analysis_for_planning(analysis_dict: dict[str, Any]) -> RequirementsAnalysis:
+    """
+    Reconstructs just enough of `RequirementsAnalysis` for `plan_execution()`
+    (ADR-0010) to read — `original_request` and `skill_links` are the only
+    two fields it touches. `AgentState["requirements_analysis"]` stores
+    `dataclasses.asdict()` output (ADR-0003 §3), never the dataclass
+    instance itself, so this adapts that dict back into the type
+    `plan_execution()`'s signature requires — `cv_agent.graph.planning`
+    itself is not changed by this. Every other `RequirementsAnalysis` field
+    is filled with a cheap, unused placeholder: never read by
+    `plan_execution()`, never written back into `AgentState`.
+
+    Robust to `skill_links`'/`matched_terms`' container type: ADR-0004's own
+    `CVAgent._sync_memory_after_run()` docstring already documents that
+    `AgentState`'s tuple fields come back as lists once state has been
+    through a LangGraph checkpoint save/restore — this reconstruction only
+    ever iterates them, never assumes tuple vs. list.
+    """
+    skill_links = tuple(
+        _skill_link_from_dict(d) for d in (analysis_dict.get("skill_links") or ())
+    )
+    return RequirementsAnalysis(
+        original_request=analysis_dict.get("original_request") or "",
+        problem_statement="",
+        fields=(),
+        candidate_tasks=(),
+        capability_links=(),
+        skill_links=skill_links,
+        clarification_questions=(),
+        assumptions=(),
+        constraints=(),
+        risks=(),
+    )
+
+
+def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
+    def _node_plan_execution(state: AgentState) -> dict[str, Any]:
+        existing_pending = state.get("pending_execution")
+        if existing_pending is not None:
+            # An already-supplied pending_execution — the pre-existing
+            # start_workflow(pending_execution=...) contract (ADR-0003 §3)
+            # — is explicit, caller-supplied intent. It always takes
+            # precedence over this node's own automatic derivation from
+            # skill_links and is never overwritten: ADR-0010's planner has
+            # no opinion about, and no visibility into, intent a caller
+            # already expressed more directly than "let the deterministic
+            # rule pick." Nothing about this is a bypass of plan_execution()
+            # — it simply means there is nothing for this node to derive.
+            #
+            # planning_result (ADR-0010 §11) is deliberately left unset
+            # here, not set to some ad-hoc "skipped" placeholder — no
+            # plan_execution() call was made, so there is no PlanningResult
+            # to report; a caller-supplied plan was never a planning
+            # decision. This "steps" entry remains the record of why.
+            return {
+                "steps": _append_step(
+                    state, "plan_execution", "caller_supplied_pending_execution_preserved"
+                ),
+            }
+
+        analysis_dict = state.get("requirements_analysis") or {}
+        analysis = _requirements_analysis_for_planning(analysis_dict)
+        # available_inputs: currently nothing in AgentState legitimately
+        # represents "explicit execution inputs a human has already
+        # supplied ahead of planning" — clarification_answers is keyed by
+        # RequirementField.name (e.g. "deployment_target"), not by
+        # InputField.name (e.g. "path"), and treating it as such would be
+        # exactly the "infer execution inputs from arbitrary text" this
+        # node must not do (ADR-0010 §3). Honestly passing {} here, not
+        # inventing a new state field for this integration step — see
+        # docs/state/OPEN_QUESTIONS.md Q17 for the still-open follow-up.
+        result = plan_execution(analysis, execution_registry, available_inputs={})
+
+        pending: Optional[dict[str, Any]] = None
+        log_extra: dict[str, Any] = {"planning_status": result.status}
+        if result.status == "planned":
+            assert result.plan is not None
+            pending = {
+                "skill_id": result.plan.skill_id,
+                "inputs": result.plan.inputs,
+                "task": result.plan.source_task,
+            }
+            log_extra["skill_id"] = result.plan.skill_id
+            log_extra["task_component"] = result.plan.task_component
+        elif result.status == "ambiguous_candidates":
+            log_extra["candidate_skill_ids"] = list(result.candidate_skill_ids)
+        elif result.status == "missing_required_inputs":
+            log_extra["missing_inputs"] = list(result.missing_inputs)
+
+        return {
+            "pending_execution": pending,
+            "planning_result": dataclasses.asdict(result),
+            "steps": _append_step(state, "plan_execution", "planning_attempted", **log_extra),
+        }
+
+    return _node_plan_execution
 
 
 def _make_approval_gate_node(executor: SkillExecutor):
@@ -237,17 +358,25 @@ def build_requirements_workflow_graph(
     requirements_analyzer: RequirementsAnalyzer,
     executor: SkillExecutor,
     skill_inventory: SkillInventory,
+    execution_registry: ExecutionBindingRegistry,
     checkpointer: Optional[Any] = None,
 ) -> Any:
     """
-    Build and compile the requirements-clarification + approval-gated
-    execution workflow graph.
+    Build and compile the requirements-clarification + planning +
+    approval-gated execution workflow graph.
 
     Kept separate from `cv_agent.graph.builder.build_graph()` (the minimal
     Step-1 topology) — see ADR-0003 §4. Every collaborator is injected, not
     imported/constructed here, so tests can pass fakes (fake analyzer,
     fake executor with fake bindings) without touching the real skill
     environment or capability registry.
+
+    `execution_registry` (new, ADR-0010) is the same `ExecutionBindingRegistry`
+    `executor` was built from — passed separately, not read off `executor`,
+    because `plan_execution()` (ADR-0010 §3) depends only on the registry's
+    inspect-only `get_binding()`, never on `SkillExecutor` itself; `executor`
+    exposes no public accessor for its own registry, and adding one would be
+    changing `SkillExecutor`, which this step does not do.
     """
     if checkpointer is None:
         checkpointer = MemorySaver()
@@ -257,6 +386,7 @@ def build_requirements_workflow_graph(
     builder.add_node("initialize", _node_initialize)
     builder.add_node("analyze_requirements", _make_analyze_requirements_node(requirements_analyzer))
     builder.add_node("clarify", _node_clarify)
+    builder.add_node("plan_execution", _make_plan_execution_node(execution_registry))
     builder.add_node("approval_gate", _make_approval_gate_node(executor))
     builder.add_node("execute", _make_execute_node(executor, skill_inventory))
 
@@ -265,11 +395,12 @@ def build_requirements_workflow_graph(
     builder.add_conditional_edges(
         "analyze_requirements",
         _route_after_analysis,
-        {"clarify": "clarify", "approval_gate": "approval_gate"},
+        {"clarify": "clarify", "plan_execution": "plan_execution"},
     )
     builder.add_conditional_edges(
         "clarify", _route_after_clarify, {"analyze_requirements": "analyze_requirements"}
     )
+    builder.add_edge("plan_execution", "approval_gate")
     builder.add_conditional_edges(
         "approval_gate", _route_after_approval, {"execute": "execute", END: END}
     )

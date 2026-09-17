@@ -53,6 +53,44 @@ not.
 
 **Q10.** Dataset storage and versioning: DVC, Git LFS, or external object store? `[P§26]`
 
+**Q17.** The `plan_execution` node (ADR-0010 §10, `cv_agent/graph/workflow.py`) — now
+built and wired into the workflow graph — finds an executable candidate with a missing
+required input (per its declared `ExecutionBinding.input_schema`, ADR-0009 §11) and
+produces **no plan** (V1's deterministic default, silent and inert, surfaced via
+`AgentState.planning_result`, ADR-0010 §11). Should it instead offer a **third
+interrupt kind** (`provide_execution_inputs`, architecturally consistent with the
+existing `clarify` interrupt, ADR-0003) that pauses and asks a human for the missing
+value before constructing the plan? ADR-0010 §3/§8 deliberately defers this rather than
+picking — it's a real UX/product decision (how proactive should the agent be about
+asking vs. staying silent), not something ADR-0010's contract-only scope should decide
+unilaterally. *Blocks: adding interrupt-based handling of the "missing input" case to
+the already-built `plan_execution` node — does not block its current, already-shipped
+no-plan default for the common case where inputs are already known.*
+
+**Q18.** When ADR-0010's V1 selection rule finds **more than one** executable
+`SkillLink` candidate for a task component, it explicitly produces no plan rather than
+silently picking one (`[P§35]`) — surfaced via `AgentState.planning_result.
+candidate_skill_ids` (ADR-0010 §11). What should actually happen instead — an explicit
+CLI `--skill <id>` override (mirroring `_cmd_execute`'s existing explicit-skill_id
+CLI contract), a clarification-style interrupt asking the human to choose, or something
+else? Not decided by ADR-0010 (see its §3 step 4, §8). *Blocks: making the already-built
+`plan_execution` node's ambiguous-candidate case do anything beyond "produce no plan."*
+
+**Q19.** `docs/APPROVALS.md`'s real approval workflow — specifically, *producing a
+cost estimate before asking* ("Before asking, the agent estimates the cost" — the
+rule's own first line) — has no implementation anywhere in this codebase (confirmed:
+ADR-0009 §8 already names this as open; the `approval_gate` graph node, ADR-0003,
+interrupts with `{skill_id, binding_id, task, inputs}` only, no estimate field).
+Distinct from **Q6** (which asks what numeric *thresholds* should trigger a gate,
+assuming an estimation mechanism exists) — this asks whether any mechanism to
+*produce* an estimate exists at all for a given binding, and if not, who's
+responsible for building one. Currently moot for `trt-perf-analysis` (`"allowed"`
+policy, never gated) but becomes load-bearing the moment ADR-0010's planning
+connector — or anything else — ever selects a candidate whose binding is
+`approval_required`. `[P§24]`, `[P§29.8]`. *Blocks: any `approval_required` binding
+being exercised through a real, non-fake approval flow with an actual estimate
+attached, including via ADR-0010's future planning connector.*
+
 ## Deferrable
 
 **Q11.** Multi-camera / multi-stream orchestration model. `[P§9]`

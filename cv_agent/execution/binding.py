@@ -17,12 +17,16 @@ an LLM agent to read and act on with its own tools, not a program with a
 stable I/O contract this registry could bind to honestly). Bindings exist so
 tests, and any future genuinely-verified adapter, have somewhere to register
 into — not because one is registered today.
+
+`ExecutionBinding.input_schema` (`InputField`, ADR-0009 §11) declares a
+binding's input contract for a future planning layer (ADR-0010) to read —
+metadata only, never a replacement for a runtime's own validation.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 from cv_agent.execution.models import ApprovalPolicy, RuntimeOutcome, SkillExecutionRequest
 from cv_agent.skills.models import Skill
@@ -47,6 +51,27 @@ class ExecutionRuntime(Protocol):
 
 
 @dataclass(frozen=True)
+class InputField:
+    """
+    One declared input a binding's runtime accepts, for a future planning
+    layer to read (ADR-0010) — NOT a replacement for the runtime's own
+    validation, which remains authoritative (see ADR-0009 §11).
+
+    Deliberately flat, not a general JSON-schema/type system: this
+    codebase's one real binding (`trt-perf-analysis`) needs only
+    name/required/description/default to answer "do I already have enough
+    to attempt a plan, or is something required missing." A richer
+    constraint model (e.g. mutually-exclusive field groups) is explicitly
+    not attempted here — see ADR-0009 §11's revisit trigger.
+    """
+
+    name: str
+    required: bool
+    description: str
+    default: Any | None = None
+
+
+@dataclass(frozen=True)
 class ExecutionBinding:
     """
     Declares that `skill_id` can be executed via `runtime_id`, under what
@@ -64,6 +89,12 @@ class ExecutionBinding:
     approval_policy: ApprovalPolicy
     verified: bool
     description: str = ""
+    input_schema: tuple[InputField, ...] = ()
+    """Declared input contract, for a future planning layer (ADR-0010) to
+    read — see ADR-0009 §11. Empty by default; `SkillExecutor` never reads
+    this field, so leaving it empty changes no existing behavior. Not yet
+    populated by any real binding (see ADR-0009 §11's own "not implemented
+    by this section" note)."""
 
 
 @dataclass

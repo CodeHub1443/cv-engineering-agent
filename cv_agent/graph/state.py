@@ -77,6 +77,29 @@ class AgentState(TypedDict, total=False):
     supplied assumption (ADR-0008 — the analyzer still never self-promotes
     a field on its own)."""
 
+    # ── Planning (ADR-0010) ──────────────────────────────────────────────
+    planning_result: Optional[dict[str, Any]]
+    """`dataclasses.asdict()` of the `PlanningResult` (`cv_agent.graph.
+    planning`) produced by the most recent actual `plan_execution()` call
+    this run — same serialization rationale as `requirements_analysis`/
+    `execution_result` below. Shape: `{"status": PlanningStatus, "plan":
+    dict | None, "candidate_skill_ids": tuple/list[str], "missing_inputs":
+    tuple/list[str]}` (tuple on a fresh, non-checkpoint-restored run; may
+    come back as a list after a checkpoint save/restore, same instability
+    `requirements_analysis`'s own tuple fields already have — see
+    `CVAgent._sync_memory_after_run()`); `plan`/`candidate_skill_ids`/
+    `missing_inputs` are only meaningfully populated for the `PlanningStatus`
+    value they document (see `cv_agent.graph.planning.PlanningResult`).
+
+    `None` has two causes, exactly the same ambiguity `execution_result`
+    already carries for `execute`: this run's `plan_execution` node has
+    not run yet, OR it ran but *skipped* calling `plan_execution()` entirely
+    because `pending_execution` was already caller-supplied (ADR-0010 §10)
+    — a caller-supplied plan is never a `plan_execution()` decision, so
+    there is no `PlanningResult` to report for it. `steps` still carries a
+    `"caller_supplied_pending_execution_preserved"` entry for that case,
+    same as before this field existed."""
+
     # ── Approval + execution (ADR-0003, ADR-0009) ───────────────────────────
     pending_execution: Optional[dict[str, Any]]
     """What the caller is asking the graph to (attempt to) execute, if

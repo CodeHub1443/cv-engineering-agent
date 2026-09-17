@@ -154,7 +154,10 @@ latency, memory, and power on a named target.
 
 **Goal:** the experiment loop. `[P§10]`, `[P§12]`, `[P§24]`, `[P§27]`
 
-**Scope:** ADR-0010 training execution · ADR-0011 evaluation & failure analysis.
+**Scope:** a training-execution ADR (number TBD — `ADR-0010` is now
+`docs/architecture/adr/ADR-0010-execution-planning-contract.md`, assigned when
+that decision was actually written, per this repo's real numbering practice —
+see its own header note) · ADR-0011 evaluation & failure analysis.
 
 **Exit test:** a training run requests approval with a cost estimate, runs after approval,
 writes a complete ledger row, produces a composite result per `docs/EVALUATION.md`, and
