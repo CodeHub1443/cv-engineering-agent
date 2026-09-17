@@ -304,6 +304,7 @@ class CVAgent:
             "human_feedback": None,
             "requirements_analysis": None,
             "clarification_answers": {},
+            "planning_result": None,
             "pending_execution": pending_execution,
             "approval_decision": None,
             "execution_result": None,

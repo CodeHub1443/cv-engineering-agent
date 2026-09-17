@@ -53,26 +53,28 @@ not.
 
 **Q10.** Dataset storage and versioning: DVC, Git LFS, or external object store? `[P§26]`
 
-**Q17.** When a future `plan_execution` node (ADR-0010) finds an executable candidate
-with a missing required input (per its declared `ExecutionBinding.input_schema`,
-ADR-0009 §11), should that produce **no plan** (V1's deterministic default, silent and
-inert) or a **third interrupt kind** (`provide_execution_inputs`, architecturally
-consistent with the existing `clarify` interrupt, ADR-0003) that pauses and asks a
-human for the missing value before constructing the plan? ADR-0010 §3/§8 deliberately
-defers this rather than picking — it's a real UX/product decision (how proactive should
-the agent be about asking vs. staying silent), not something ADR-0010's contract-only
-scope should decide unilaterally. *Blocks: the `plan_execution` implementation PR's
-handling of the "missing input" case specifically — does not block building the plan
-for the common case where inputs are already known.*
+**Q17.** The `plan_execution` node (ADR-0010 §10, `cv_agent/graph/workflow.py`) — now
+built and wired into the workflow graph — finds an executable candidate with a missing
+required input (per its declared `ExecutionBinding.input_schema`, ADR-0009 §11) and
+produces **no plan** (V1's deterministic default, silent and inert, surfaced via
+`AgentState.planning_result`, ADR-0010 §11). Should it instead offer a **third
+interrupt kind** (`provide_execution_inputs`, architecturally consistent with the
+existing `clarify` interrupt, ADR-0003) that pauses and asks a human for the missing
+value before constructing the plan? ADR-0010 §3/§8 deliberately defers this rather than
+picking — it's a real UX/product decision (how proactive should the agent be about
+asking vs. staying silent), not something ADR-0010's contract-only scope should decide
+unilaterally. *Blocks: adding interrupt-based handling of the "missing input" case to
+the already-built `plan_execution` node — does not block its current, already-shipped
+no-plan default for the common case where inputs are already known.*
 
 **Q18.** When ADR-0010's V1 selection rule finds **more than one** executable
 `SkillLink` candidate for a task component, it explicitly produces no plan rather than
-silently picking one (`[P§35]`). What should actually happen instead — an explicit
+silently picking one (`[P§35]`) — surfaced via `AgentState.planning_result.
+candidate_skill_ids` (ADR-0010 §11). What should actually happen instead — an explicit
 CLI `--skill <id>` override (mirroring `_cmd_execute`'s existing explicit-skill_id
 CLI contract), a clarification-style interrupt asking the human to choose, or something
-else? Not decided by ADR-0010 (see its §3 step 4, §8). *Blocks: making the
-`plan_execution` implementation PR's ambiguous-candidate case do anything beyond
-"produce no plan."*
+else? Not decided by ADR-0010 (see its §3 step 4, §8). *Blocks: making the already-built
+`plan_execution` node's ambiguous-candidate case do anything beyond "produce no plan."*
 
 **Q19.** `docs/APPROVALS.md`'s real approval workflow — specifically, *producing a
 cost estimate before asking* ("Before asking, the agent estimates the cost" — the

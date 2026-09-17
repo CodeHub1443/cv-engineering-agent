@@ -111,6 +111,7 @@ def _start(graph, task: str, session_id: str, pending_execution: dict[str, Any] 
         "steps": [],
         "requirements_analysis": None,
         "clarification_answers": {},
+        "planning_result": None,
         "pending_execution": pending_execution,
         "approval_decision": None,
         "execution_result": None,
@@ -484,6 +485,10 @@ class TestManuallySuppliedPendingExecutionPrecedence:
         assert result["pending_execution"]["inputs"] == {"a": 1}
         plan_step = next(s for s in result["steps"] if s["node"] == "plan_execution")
         assert plan_step["action"] == "caller_supplied_pending_execution_preserved"
+        # ADR-0010 §10: no plan_execution() call was made, so there is no
+        # PlanningResult to report — planning_result stays None, never an
+        # ad-hoc "skipped" placeholder.
+        assert result["planning_result"] is None
 
 
 _PLANNING_TASK = (
@@ -595,6 +600,23 @@ class TestPlanExecutionIntegration:
         assert plan_step["planning_status"] == "planned"
         assert plan_step["skill_id"] == "trt-perf-analysis"
         assert plan_step["task_component"] == "person_detection"
+        # ADR-0010 §10: the same outcome is now a structured, top-level
+        # state field too, not only recoverable by parsing steps. (tuple
+        # fields survive as tuples on a fresh, non-checkpoint-restored
+        # invoke — ADR-0004's own CVAgent._sync_memory_after_run() docstring
+        # already documents they come back as lists after a checkpoint
+        # round-trip, e.g. after a resume; not exercised in this test.)
+        assert result["planning_result"] == {
+            "status": "planned",
+            "plan": {
+                "skill_id": "trt-perf-analysis",
+                "task_component": "person_detection",
+                "inputs": {},
+                "source_task": _PLANNING_TASK,
+            },
+            "candidate_skill_ids": (),
+            "missing_inputs": (),
+        }
 
     def test_no_executable_candidate_reaches_end_without_execution(
         self, tmp_path: Path
@@ -614,6 +636,8 @@ class TestPlanExecutionIntegration:
         assert "execute" not in [s["node"] for s in result["steps"]]
         plan_step = next(s for s in result["steps"] if s["node"] == "plan_execution")
         assert plan_step["planning_status"] == "no_executable_candidate"
+        assert result["planning_result"]["status"] == "no_executable_candidate"
+        assert result["planning_result"]["plan"] is None
 
     def test_multiple_executable_candidates_are_ambiguous_no_execution(
         self, tmp_path: Path
@@ -632,6 +656,12 @@ class TestPlanExecutionIntegration:
         plan_step = next(s for s in result["steps"] if s["node"] == "plan_execution")
         assert plan_step["planning_status"] == "ambiguous_candidates"
         assert sorted(plan_step["candidate_skill_ids"]) == ["bench-tool-b", "trt-perf-analysis"]
+        assert result["planning_result"]["status"] == "ambiguous_candidates"
+        assert result["planning_result"]["plan"] is None
+        assert sorted(result["planning_result"]["candidate_skill_ids"]) == [
+            "bench-tool-b",
+            "trt-perf-analysis",
+        ]
 
     def test_missing_required_input_no_plan_no_execution(self, tmp_path: Path) -> None:
         execution_registry = ExecutionBindingRegistry()
@@ -651,6 +681,9 @@ class TestPlanExecutionIntegration:
         plan_step = next(s for s in result["steps"] if s["node"] == "plan_execution")
         assert plan_step["planning_status"] == "missing_required_inputs"
         assert plan_step["missing_inputs"] == ["path"]
+        assert result["planning_result"]["status"] == "missing_required_inputs"
+        assert result["planning_result"]["plan"] is None
+        assert list(result["planning_result"]["missing_inputs"]) == ["path"]
 
     def test_planned_execution_passes_through_approval_gate(self, tmp_path: Path) -> None:
         execution_registry = ExecutionBindingRegistry()
@@ -719,6 +752,7 @@ class TestPlanExecutionIntegration:
 
         assert started["__interrupt__"][0].value["type"] == "clarification"
         assert "plan_execution" not in [s["node"] for s in started["steps"]]
+        assert started["planning_result"] is None
 
         questions = started["__interrupt__"][0].value["questions"]
         answers = {q["relates_to_field"]: "answered" for q in questions}
@@ -726,3 +760,27 @@ class TestPlanExecutionIntegration:
 
         assert "plan_execution" in [s["node"] for s in resumed["steps"]]
         assert resumed["pending_execution"] is None  # nothing was ever registered
+        assert resumed["planning_result"]["status"] == "no_executable_candidate"
+
+    def test_planning_result_persists_unchanged_across_an_approval_resume(
+        self, tmp_path: Path
+    ) -> None:
+        """A caller resuming the approval interrupt re-enters approval_gate
+        only (LangGraph's dynamic interrupt() semantics, ADR-0003 §1) —
+        plan_execution never re-runs, so the planning_result it already
+        wrote must survive untouched through the resume."""
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry, "trt-perf-analysis", approval_policy="approval_required"
+        )
+        graph = self._graph_for(
+            tmp_path, execution_registry, skill_ids=("trt-perf-analysis",)
+        )
+
+        started = _start(graph, _PLANNING_TASK, "plan-9")
+        assert started["planning_result"]["status"] == "planned"
+
+        resumed = _resume(graph, "plan-9", "approved")
+
+        assert resumed["planning_result"]["status"] == "planned"
+        assert resumed["planning_result"]["plan"]["skill_id"] == "trt-perf-analysis"

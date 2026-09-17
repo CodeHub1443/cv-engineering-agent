@@ -2,11 +2,13 @@
 cv_agent.graph.planning — ExecutionPlan contract + deterministic planner (ADR-0010).
 
 `plan_execution()` implements ADR-0010 §3's V1 selection/input-completeness
-rule as a plain, pure function — not yet wired into any graph. See ADR-0010
-§9: a future `plan_execution` *node* (inserted into
-`cv_agent.graph.workflow.build_requirements_workflow_graph()`'s existing
-topology, between `analyze_requirements` and `approval_gate`) is a thin
-wrapper around this function reading/writing `AgentState`, not built here.
+rule as a plain, pure function. See ADR-0010 §10: the `plan_execution` graph
+node (inserted into `cv_agent.graph.workflow.build_requirements_workflow_graph()`'s
+topology, between `analyze_requirements`/`clarify` and `approval_gate`) is a
+thin wrapper around this function that reads/writes `AgentState` — this
+module itself still knows nothing about `AgentState`, LangGraph, or
+`approval_gate`/`execute`; the node lives in `cv_agent.graph.workflow`, not
+here.
 
 Lives in `cv_agent.graph`, not `cv_agent.requirements`, because turning a
 *candidate* (`cv_agent.requirements.models.SkillLink`) into a *decision*
@@ -93,9 +95,12 @@ PlanningStatus = Literal[
 class PlanningResult:
     """
     The outcome of one `plan_execution()` call — a normal, expected result
-    for every branch, never an exception (ADR-0010 §7). A future
-    `plan_execution` graph node branches on `.status`; only `"planned"`
-    carries a `.plan` to write into `AgentState["pending_execution"]`.
+    for every branch, never an exception (ADR-0010 §7). The `plan_execution`
+    graph node (ADR-0010 §10, `cv_agent.graph.workflow`) branches on
+    `.status`; only `"planned"` carries a `.plan` to write into
+    `AgentState["pending_execution"]`. The full result is also mirrored into
+    `AgentState["planning_result"]` (ADR-0010 §11) for callers that need more
+    than the plan/no-plan distinction `pending_execution` alone carries.
     """
 
     status: PlanningStatus

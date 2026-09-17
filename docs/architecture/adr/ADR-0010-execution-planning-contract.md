@@ -1,6 +1,8 @@
 # ADR-0010: Execution-planning contract (RequirementsAnalysis → ExecutionPlan)
 
-- **Status:** Proposed — types/interface only, no behavior implemented (see §9)
+- **Status:** Accepted — `plan_execution()` and the `plan_execution` graph node
+  are implemented and wired into `build_requirements_workflow_graph()` (see
+  §9, §10)
 - **Date:** 2026-09-16
 - **Layer:** orchestration
 - **Canon:** `[P§19]`, `[P§21]`, `[P§22]`, `[P§24]`, `[P§34]`, `[P§35]`
@@ -222,41 +224,45 @@ See ADR-0009 §11 (this same change) for `ExecutionBinding.input_schema` /
 
 ## 6. Consequences
 
-- **Enables:** a concrete, typed contract a future implementation PR can
-  build `plan_execution` against without re-deriving the shape question;
-  unblocks writing that PR's own ADR-0003-topology-extension and its tests
-  against a stable target.
-- **Makes harder:** nothing removed; purely additive types.
-- **Costs:** one new module (`cv_agent/graph/planning.py`, ~30 lines, one
-  dataclass, no logic), one new dataclass in `cv_agent/execution/binding.py`
-  (ADR-0009 §11), no new dependency.
-- **Migration / blast radius if reversed:** contained — `ExecutionPlan` is
-  referenced by nothing yet (no node, no CLI command, no test beyond a shape
-  check); removing it touches no other module. `ExecutionBinding.input_schema`
-  defaults to `()`, so every existing construction site (exactly one:
-  `trt_perf_analysis.build_binding()`) is unaffected whether or not it is
-  ever populated.
+As originally written (§9's types-only scope) — **enabled:** a concrete,
+typed contract to build `plan_execution` against without re-deriving the
+shape question; **migration/blast radius if reversed:** contained,
+`ExecutionPlan` referenced by nothing yet. **Superseded by §10/§11:**
+`ExecutionPlan`/`PlanningResult` are now referenced by the real
+`plan_execution` graph node and `AgentState.planning_result`; reversing this
+ADR now means reverting the topology change too (§10) — no longer a
+zero-blast-radius types-only removal. `ExecutionBinding.input_schema` still
+defaults to `()` and remains unpopulated by the one real binding
+(`trt_perf_analysis.build_binding()`), so that part of the original
+migration claim still holds.
 
 ## 7. Acceptance test
 
-This step's own acceptance test is necessarily narrow — it proves the
-*contract types* are real, constructible Python with the exact declared
-shape, not that any selection/planning *behavior* works (none is implemented
-— see §9). `tests/test_execution_planning_contract.py` (new): `ExecutionPlan`
+As originally written, this step's own acceptance test was necessarily
+narrow — it proved the *contract types* were real, constructible Python
+with the exact declared shape, not that any selection/planning *behavior*
+worked. `tests/test_execution_planning_contract.py`: `ExecutionPlan`
 constructs with exactly the four documented fields and is frozen/immutable;
 `InputField`/`ExecutionBinding.input_schema` construct with the documented
 shape and default to an empty tuple, preserving every existing
 `ExecutionBinding` construction site unchanged (see ADR-0009 §11's own
-acceptance-test note). The **behavioral** acceptance test — selection rule,
-input-completeness check, graph routing, `pending_execution` materialization
-— is explicitly deferred to the implementation PR this ADR unblocks (§9).
+acceptance-test note); `plan_execution()`'s own selection/input-completeness
+rule (17 behavioral tests in the same file).
+
+**The behavioral, graph-integrated acceptance test (§10, §11), added since:**
+`tests/test_workflow.py::TestPlanExecutionIntegration` (one/zero/multiple
+executable candidates, missing required input, planned execution through
+both an `allowed` and an `approval_required` binding, clarification-before-
+planning ordering, `planning_result` persistence across an approval resume)
+and `TestManuallySuppliedPendingExecutionPrecedence` (the precedence rule
+made explicit). All 18 pre-existing `test_workflow.py` tests continue to
+pass with zero body changes.
 
 ## 8. Revisit trigger
 
-- When the implementation PR is actually written (§9) — at that point this
-  ADR's §7 gains its real, behavioral acceptance test, and this ADR is
-  amended (a dated "Status" section, matching ADR-0009 §9/§10's own pattern)
-  rather than superseded.
+- **Fired — see §10/§11:** the graph-integration implementation PR was
+  written, and this ADR was amended in place (dated "Status" sections,
+  matching ADR-0009 §9/§10/§11's own pattern) rather than superseded.
 - When the "ambiguous — no silent selection" case (§3, step 4) needs a real
   resolution mechanism — an explicit human/CLI disambiguation choice, most
   likely — logged in `docs/state/OPEN_QUESTIONS.md`, not decided here.
@@ -275,21 +281,106 @@ input-completeness check, graph routing, `pending_execution` materialization
   APPROVALS.md's own "before asking, the agent estimates the cost" rule; this
   ADR inherits that gap from ADR-0009 §8 rather than solving it.
 - Explicitly **not yet triggered** by this ADR, and explicitly out of scope
-  for the PR that will implement §9's node: LLM-assisted selection (deferred
-  — see §1/§2's deterministic-only V1 rule; a future LLM role, if any, would
-  be prose-explanation-only or a proposed-value-requiring-explicit-
-  confirmation, mirroring `RequirementField.source == "caller_assumption"`
-  exactly, never a silent authority over `approval_decision` or selection).
+  for every implementation step so far (§10, §11): LLM-assisted selection
+  (deferred — see §1/§2's deterministic-only V1 rule; a future LLM role, if
+  any, would be prose-explanation-only or a proposed-value-requiring-
+  explicit-confirmation, mirroring `RequirementField.source ==
+  "caller_assumption"` exactly, never a silent authority over
+  `approval_decision` or selection).
 
-## 9. Status
+## 9. Status — contract types (superseded status, kept for history)
 
-**Types/interface only (this change).** `cv_agent.graph.planning.ExecutionPlan`
-and `cv_agent.execution.binding.InputField`/`ExecutionBinding.input_schema`
-(ADR-0009 §11) exist as real, tested-for-shape Python types. **Not
-implemented:** the `plan_execution` node itself, any change to
-`build_requirements_workflow_graph()`'s topology or routing, any change to
-`approval_gate`/`execute`, any CLI command, any selection/input-completeness
-logic. `AgentState.pending_execution` is unchanged — still populated only by
-an explicit caller argument to `start_workflow()`, exactly as before this ADR.
-A future implementation PR builds the node against this contract and amends
-this section.
+**Types/interface only, as originally shipped.** `cv_agent.graph.planning.
+ExecutionPlan` and `cv_agent.execution.binding.InputField`/`ExecutionBinding.
+input_schema` (ADR-0009 §11) existed as real, tested-for-shape Python types,
+with no node, no topology change, and no selection/input-completeness logic
+wired in yet. **This section's "not implemented" list no longer describes
+the current state — see §10, which built the node this section deferred.**
+
+## 10. Status — graph integration (`plan_execution` node)
+
+**Implemented (branch `feature/claude/execution-planning-contract`):** the
+`plan_execution` node itself, using the unmodified `plan_execution()`
+function from §9 — no change to selection/input-completeness logic.
+
+- **Topology:** `analyze_requirements`/`clarify`'s existing routing target
+  changed from `approval_gate` to a new `plan_execution` node; a new plain
+  edge `plan_execution -> approval_gate` follows. `plan_execution` sits
+  strictly after the clarification loop resolves and strictly before
+  `approval_gate` — verified by
+  `tests/test_workflow.py::TestPlanExecutionIntegration::
+  test_planning_happens_only_after_clarification_completes`.
+  `approval_gate`/`execute` node bodies, `_route_after_approval`,
+  `SkillExecutor`, and `ExecutionRuntime` are byte-for-byte unchanged.
+- **Precedence over a caller-supplied plan:** if `AgentState["pending_execution"]`
+  is already set when this node runs — the pre-existing
+  `start_workflow(pending_execution=...)` contract (ADR-0003 §3) — the node
+  makes **no** `plan_execution()` call at all and leaves it untouched. This
+  is not a bypass of the planner: an already-expressed, caller-supplied
+  intent is not a decision `plan_execution()` was ever asked to make, so
+  there is nothing for it to override. Verified by
+  `TestManuallySuppliedPendingExecutionPrecedence` and by every pre-existing
+  `TestApprovalGate` test continuing to pass with zero body changes.
+  `AgentState["pending_execution"]`'s own shape is unchanged —
+  `{"skill_id": str, "inputs": dict, "task": str | None}`; `task_component`
+  is never added to it (carried only on the plan/in `steps`).
+- **`available_inputs` is always `{}`:** nothing in `AgentState` today
+  legitimately represents "explicit execution inputs a human already
+  supplied ahead of planning" — `clarification_answers` is keyed by
+  `RequirementField.name`, not `InputField.name`, and repurposing it would
+  itself be the "infer from arbitrary text" §3 forbids. A real input channel
+  is deliberately not built here — see `docs/state/OPEN_QUESTIONS.md` Q17.
+
+## 11. Status — structured observability (`AgentState.planning_result`)
+
+**Implemented (same branch, following a read-only review of §10's own
+commit):** the review found that `PlanningStatus` and its diagnostic payload
+(`candidate_skill_ids`, `missing_inputs`) were observable **only** by parsing
+`AgentState["steps"]` for the `plan_execution` node's log entry — inconsistent
+with how this same graph already treats `approval_decision`/`execution_result`
+as dedicated, top-level, directly-queryable fields (`_node_approval_gate` sets
+`approval_decision="not_required"` even for its own trivial no-op case). This
+section closes that gap without touching `cv_agent.graph.planning` at all.
+
+- **New field**, `cv_agent.graph.state.AgentState.planning_result:
+  Optional[dict[str, Any]]` — `dataclasses.asdict()` of the `PlanningResult`
+  (§9) produced by the most recent **actual** `plan_execution()` call this
+  run, same serialization rationale as `requirements_analysis`/
+  `execution_result` (§3, ADR-0003 §3: a plain dict, never the dataclass
+  instance, so orchestration state stays independent of the reasoning/
+  planning layer's own types). Shape: `{"status": PlanningStatus, "plan":
+  dict | None, "candidate_skill_ids": tuple|list[str], "missing_inputs":
+  tuple|list[str]}` — `plan`/`candidate_skill_ids`/`missing_inputs` are only
+  meaningfully populated for the `PlanningStatus` value that documents them
+  (§9's own `PlanningStatus` docstring, unchanged).
+- **`None` has two causes — the same ambiguity `execution_result` already
+  has, not a new one:** the `plan_execution` node has not run yet this run,
+  **or** it ran but made no `plan_execution()` call at all because
+  `pending_execution` was already caller-supplied (§10's precedence rule). A
+  caller-supplied plan was never a `plan_execution()` decision, so there is
+  no `PlanningResult` to report for it — `planning_result` is deliberately
+  left `None` rather than given an ad-hoc "skipped" placeholder value, which
+  would have meant inventing a status `PlanningStatus` itself does not have
+  (out of scope: this section does not touch `cv_agent.graph.planning`).
+  `AgentState["steps"]` still carries the
+  `"caller_supplied_pending_execution_preserved"` entry for that case,
+  unchanged from §10 — `steps` is not replaced by this field, it remains the
+  chronological audit trail; `planning_result` is the queryable snapshot of
+  the latest planning attempt, when one was actually attempted.
+- **Persistence across resume:** `planning_result`, once set, survives an
+  `approval_gate` interrupt/resume untouched, since `plan_execution` never
+  re-runs after `approval_gate` starts (LangGraph's dynamic `interrupt()`
+  re-enters only the node that called it — ADR-0003 §1) — verified by
+  `test_planning_result_persists_unchanged_across_an_approval_resume`.
+- **Container-type caveat carried over from ADR-0004:** `candidate_skill_ids`/
+  `missing_inputs` are tuples on a fresh, non-checkpoint-restored `.invoke()`
+  but may come back as lists after a checkpoint save/restore (e.g. after a
+  `resume_workflow()` call) — the same instability
+  `CVAgent._sync_memory_after_run()` already documents for
+  `requirements_analysis`'s own tuple fields. Callers should not assume a
+  specific container type, only iterate.
+- **Not changed by this section:** `cv_agent.graph.planning`
+  (`PlanningResult`, `PlanningStatus`, `plan_execution()` itself — no new
+  status value, no selection-logic change), `pending_execution`'s shape,
+  `approval_gate`/`execute`, `SkillExecutor`, `ExecutionRuntime`, any CLI
+  surface.

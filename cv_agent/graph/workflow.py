@@ -205,6 +205,12 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
             # already expressed more directly than "let the deterministic
             # rule pick." Nothing about this is a bypass of plan_execution()
             # — it simply means there is nothing for this node to derive.
+            #
+            # planning_result (ADR-0010 §11) is deliberately left unset
+            # here, not set to some ad-hoc "skipped" placeholder — no
+            # plan_execution() call was made, so there is no PlanningResult
+            # to report; a caller-supplied plan was never a planning
+            # decision. This "steps" entry remains the record of why.
             return {
                 "steps": _append_step(
                     state, "plan_execution", "caller_supplied_pending_execution_preserved"
@@ -242,6 +248,7 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
 
         return {
             "pending_execution": pending,
+            "planning_result": dataclasses.asdict(result),
             "steps": _append_step(state, "plan_execution", "planning_attempted", **log_extra),
         }
 
