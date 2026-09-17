@@ -601,11 +601,15 @@ class TestPlanExecutionIntegration:
         assert plan_step["skill_id"] == "trt-perf-analysis"
         assert plan_step["task_component"] == "person_detection"
         # ADR-0010 §10: the same outcome is now a structured, top-level
-        # state field too, not only recoverable by parsing steps. (tuple
-        # fields survive as tuples on a fresh, non-checkpoint-restored
+        # state field too, not only recoverable by parsing steps.
+        # WARNING: this strict dict equality (including the literal `()`
+        # tuples below) only holds on a fresh, non-checkpoint-restored
         # invoke — ADR-0004's own CVAgent._sync_memory_after_run() docstring
-        # already documents they come back as lists after a checkpoint
-        # round-trip, e.g. after a resume; not exercised in this test.)
+        # already documents that AgentState's tuple fields come back as
+        # lists after a checkpoint round-trip (e.g. after a resume, not
+        # exercised in this test). Do not copy this exact pattern to assert
+        # on post-resume state — normalize with list(...)/sorted(...)
+        # instead, as the ambiguous/missing-input tests below already do.
         assert result["planning_result"] == {
             "status": "planned",
             "plan": {
@@ -767,8 +771,14 @@ class TestPlanExecutionIntegration:
     ) -> None:
         """A caller resuming the approval interrupt re-enters approval_gate
         only (LangGraph's dynamic interrupt() semantics, ADR-0003 §1) —
-        plan_execution never re-runs, so the planning_result it already
-        wrote must survive untouched through the resume."""
+        plan_execution never re-runs, so the *complete* planning_result it
+        already wrote (status, full plan, candidate_skill_ids,
+        missing_inputs) must survive semantically unchanged through the
+        resume, even though the checkpoint round-trip a resume goes through
+        may turn its tuple fields into lists (ADR-0004's documented
+        instability) — list(...) normalizes both sides before comparing so
+        this checks semantic equality, not literal container-type equality.
+        """
         execution_registry = ExecutionBindingRegistry()
         self._register(
             execution_registry, "trt-perf-analysis", approval_policy="approval_required"
@@ -777,10 +787,30 @@ class TestPlanExecutionIntegration:
             tmp_path, execution_registry, skill_ids=("trt-perf-analysis",)
         )
 
+        def _normalized(state: dict) -> dict:
+            pr = state["planning_result"]
+            return {
+                "status": pr["status"],
+                "plan": pr["plan"],
+                "candidate_skill_ids": list(pr["candidate_skill_ids"]),
+                "missing_inputs": list(pr["missing_inputs"]),
+            }
+
         started = _start(graph, _PLANNING_TASK, "plan-9")
-        assert started["planning_result"]["status"] == "planned"
+        before = _normalized(started)
+        assert before == {
+            "status": "planned",
+            "plan": {
+                "skill_id": "trt-perf-analysis",
+                "task_component": "person_detection",
+                "inputs": {},
+                "source_task": _PLANNING_TASK,
+            },
+            "candidate_skill_ids": [],
+            "missing_inputs": [],
+        }
 
         resumed = _resume(graph, "plan-9", "approved")
+        after = _normalized(resumed)
 
-        assert resumed["planning_result"]["status"] == "planned"
-        assert resumed["planning_result"]["plan"]["skill_id"] == "trt-perf-analysis"
+        assert after == before

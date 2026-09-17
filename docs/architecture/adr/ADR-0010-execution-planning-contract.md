@@ -2,7 +2,8 @@
 
 - **Status:** Accepted — `plan_execution()` and the `plan_execution` graph node
   are implemented and wired into `build_requirements_workflow_graph()` (see
-  §9, §10)
+  §9, §10); structured `AgentState.planning_result` observability is
+  implemented too (see §11)
 - **Date:** 2026-09-16
 - **Layer:** orchestration
 - **Canon:** `[P§19]`, `[P§21]`, `[P§22]`, `[P§24]`, `[P§34]`, `[P§35]`
