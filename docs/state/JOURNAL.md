@@ -683,3 +683,42 @@ unchanged boundary. Also fixed, per this task's explicit instruction:
 subsystem exists" status statements, both predating D-020/D-021. Not committed or
 pushed — branch `feature/claude/requirements-skill-links`, working tree only — see git
 status.
+
+## 2026-09-17 — Explicit execution-input channel (feature/claude/execution-input-channel)
+**Did:**       Added `AgentState.execution_inputs: dict[str, Any]` (new field, keyed
+               by `InputField.name`, ADR-0009 §11) and
+               `CVAgent.start_workflow(execution_inputs=...)`; the `plan_execution`
+               node now reads `state.get("execution_inputs") or {}` as
+               `plan_execution()`'s `available_inputs` instead of the hardcoded `{}`
+               ADR-0010 §10 shipped with. `cv_agent.graph.planning` itself is
+               unchanged. ADR-0010 gained §12; `docs/state/OPEN_QUESTIONS.md` Q17
+               reworded (not struck through) to describe the narrower remaining gap.
+**Why:**       A read-only design review (this session, prior turn) found the exact
+               gap ADR-0010 §10 had already named honestly: no channel existed for a
+               caller who already knows a required execution input's value before a
+               run starts. Closing it unblocks any future binding whose
+               `input_schema` declares a required field — today only
+               `trt-perf-analysis`, which ships `input_schema=()`, so this was
+               previously untestable end-to-end without a synthetic fixture.
+**Broke:**     Nothing — full suite 362 passing (357 before this branch + 5 new: 3 in
+               `tests/test_workflow.py::TestPlanExecutionIntegration`/
+               `TestManuallySuppliedPendingExecutionPrecedence`, 2 in new
+               `tests/test_memory_integration.py::TestExecutionInputsChannel`). Zero
+               regressions; every pre-existing test's `_start()`/initial-state
+               fixture was extended (one new dict key, default `{}`), not rewritten.
+**Learned:**   Constructing a task string that both (a) triggers a real clarification
+               interrupt and (b) still matches the same fixture skill after resume
+               needed deliberate care — `_VAGUE_TASK` alone lacks the benchmarking
+               vocabulary `_PLANNING_TASK`'s fixture skill matches on, so a new
+               `_VAGUE_PLANNING_TASK` (vague on most fields, but keeps the
+               person-detection trigger + benchmarking vocabulary) was needed to
+               actually exercise "execution_inputs survives the clarify loop and
+               still reaches a real plan," not just "survives and reaches
+               no_executable_candidate."
+**Left open:** Per this task's explicit scope decision: no CLI flag (API parameter
+               only), no same-session retry/interrupt after
+               `missing_required_inputs` (Q17, narrowed but still open), no
+               cross-binding field-name collision guard (named as a documented
+               future consideration for when a second individually-verified binding
+               exists). Committed to branch `feature/claude/execution-input-channel`,
+               not `main`.

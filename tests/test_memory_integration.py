@@ -25,6 +25,14 @@ _WELL_DEFINED_TASK = (
     "and we have 2000 labeled clips already."
 )
 
+_PLANNING_TASK = _WELL_DEFINED_TASK + (
+    " Also evaluate deployment optimization performance benchmarking of the model."
+)
+"""Same fully-specified request as _WELL_DEFINED_TASK (zero clarification
+questions) plus benchmarking vocabulary, so it matches a fixture skill
+described as a benchmarking tool — same convention as
+tests/test_workflow.py's own _PLANNING_TASK."""
+
 
 def _agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, skill_root: Path | None = None):
     monkeypatch.setenv("CV_AGENT_SKILL_PATHS", str(skill_root or tmp_path))
@@ -247,6 +255,100 @@ class TestProjectUnderstandingPersistenceTrigger:
 
         assert resumed["status"] == "done"
         assert len(agent.memory.list_understanding_revisions()) == 1  # unchanged
+
+
+class TestExecutionInputsChannel:
+    """ADR-0010 §12: CVAgent.start_workflow(execution_inputs=...) is the
+    real, top-level API surface for the explicit execution-input channel —
+    proven here through the actual CVAgent/workflow-graph/skill-discovery
+    wiring end to end, not only at the graph-node level already covered by
+    tests/test_workflow.py::TestPlanExecutionIntegration."""
+
+    @staticmethod
+    def _write_fixture_skill(skill_root: Path) -> None:
+        skill_dir = skill_root / "trt-perf-analysis"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: trt-perf-analysis\n"
+            "description: TensorRT performance benchmarking and layer analysis tool.\n"
+            "---\nbody\n",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _register_binding(agent, *, input_schema=()) -> None:
+        from cv_agent.execution.binding import ExecutionBinding
+        from cv_agent.execution.models import RuntimeOutcome
+
+        class _FakeRuntime:
+            runtime_id = "fake-runtime"
+
+            def invoke(self, skill, request):
+                return RuntimeOutcome(success=True, output={})
+
+        agent.execution_bindings.register_runtime(_FakeRuntime())
+        agent.execution_bindings.register_binding(
+            ExecutionBinding(
+                skill_id="trt-perf-analysis",
+                binding_id="trt-perf-analysis-fake-v1",
+                runtime_id="fake-runtime",
+                approval_policy="allowed",
+                verified=True,
+                input_schema=input_schema,
+            )
+        )
+
+    def test_execution_inputs_flow_through_start_workflow_to_a_real_plan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cv_agent.execution.binding import InputField
+
+        skill_root = tmp_path / "skills"
+        self._write_fixture_skill(skill_root)
+        agent = _agent(tmp_path, monkeypatch, skill_root=skill_root)
+        self._register_binding(
+            agent,
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+
+        result = agent.start_workflow(
+            _PLANNING_TASK,
+            session_id="exec-inputs-1",
+            execution_inputs={"path": "/data/clips"},
+        )
+
+        assert "__interrupt__" not in result
+        assert result["planning_result"]["status"] == "planned"
+        assert result["pending_execution"] == {
+            "skill_id": "trt-perf-analysis",
+            "inputs": {"path": "/data/clips"},
+            "task": _PLANNING_TASK,
+        }
+        assert result["status"] == "done"
+        assert result["execution_result"]["status"] == "completed"
+
+    def test_omitted_execution_inputs_default_to_empty_and_still_block_a_missing_required_input(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Backward compatibility: a caller who does not pass
+        execution_inputs at all sees the exact same 'no plan' outcome as
+        before this parameter existed — the default is {}, never inferred
+        from clarification_answers or anything else in the request text."""
+        from cv_agent.execution.binding import InputField
+
+        skill_root = tmp_path / "skills"
+        self._write_fixture_skill(skill_root)
+        agent = _agent(tmp_path, monkeypatch, skill_root=skill_root)
+        self._register_binding(
+            agent,
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+
+        result = agent.start_workflow(_PLANNING_TASK, session_id="exec-inputs-2")
+
+        assert result["pending_execution"] is None
+        assert result["planning_result"]["status"] == "missing_required_inputs"
+        assert list(result["planning_result"]["missing_inputs"]) == ["path"]
 
 
 class TestPersistenceVisibleToNewCVAgent:

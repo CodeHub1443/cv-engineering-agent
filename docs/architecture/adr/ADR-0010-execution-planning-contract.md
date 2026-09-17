@@ -3,7 +3,8 @@
 - **Status:** Accepted — `plan_execution()` and the `plan_execution` graph node
   are implemented and wired into `build_requirements_workflow_graph()` (see
   §9, §10); structured `AgentState.planning_result` observability is
-  implemented too (see §11)
+  implemented too (see §11); an explicit, pre-supplied execution-input
+  channel is implemented too (see §12)
 - **Date:** 2026-09-16
 - **Layer:** orchestration
 - **Canon:** `[P§19]`, `[P§21]`, `[P§22]`, `[P§24]`, `[P§34]`, `[P§35]`
@@ -259,6 +260,20 @@ and `TestManuallySuppliedPendingExecutionPrecedence` (the precedence rule
 made explicit). All 18 pre-existing `test_workflow.py` tests continue to
 pass with zero body changes.
 
+**The explicit execution-input channel (§12), added since:**
+`TestPlanExecutionIntegration::test_execution_inputs_satisfy_missing_required_input_and_produce_a_plan`
+(the exact fixture that produces `missing_required_inputs` without it now
+produces `"planned"` with it), `test_execution_inputs_survive_the_clarification_loop`
+(supplied at `start_workflow()`, unchanged through a clarify interrupt/resume,
+still reaches the plan), and
+`TestManuallySuppliedPendingExecutionPrecedence::test_execution_inputs_are_ignored_when_pending_execution_is_supplied`
+(precedence rule extended: a caller-supplied `pending_execution` still wins
+even when `execution_inputs` is also supplied). Plus
+`tests/test_memory_integration.py::TestExecutionInputsChannel` — the same
+guarantee proven through the real `CVAgent.start_workflow()` API surface end
+to end (real skill discovery, real `SkillExecutor`), not only at the graph
+level.
+
 ## 8. Revisit trigger
 
 - **Fired — see §10/§11:** the graph-integration implementation PR was
@@ -267,11 +282,16 @@ pass with zero body changes.
 - When the "ambiguous — no silent selection" case (§3, step 4) needs a real
   resolution mechanism — an explicit human/CLI disambiguation choice, most
   likely — logged in `docs/state/OPEN_QUESTIONS.md`, not decided here.
-- When the "missing required input → no plan" V1 default (§3) is judged too
-  silent in practice — the natural extension is a third interrupt kind
+- **Narrowed by §12, not fired:** the "missing required input → no plan" V1
+  default (§3) is judged too silent in practice **for a caller who did not
+  know the value in advance.** §12 already closes the sub-case of a caller
+  who *does* know it ahead of time. What remains open is a caller who only
+  learns the value after seeing `planning_result.status ==
+  "missing_required_inputs"` and has no way to resume the same run with it —
+  the natural extension is still a third interrupt kind
   (`provide_execution_inputs`), architecturally consistent with the existing
   `clarify` interrupt but a distinct product decision — logged in
-  `docs/state/OPEN_QUESTIONS.md`, not decided here.
+  `docs/state/OPEN_QUESTIONS.md` Q17, not decided here.
 - When a second individually-verified `ExecutionRuntime`/`ExecutionBinding`
   exists (ADR-0009 §8's own per-skill revisit trigger) — the first real
   stress test of whether `InputField`'s flat required/optional shape
@@ -325,12 +345,16 @@ function from §9 — no change to selection/input-completeness logic.
   `AgentState["pending_execution"]`'s own shape is unchanged —
   `{"skill_id": str, "inputs": dict, "task": str | None}`; `task_component`
   is never added to it (carried only on the plan/in `steps`).
-- **`available_inputs` is always `{}`:** nothing in `AgentState` today
-  legitimately represents "explicit execution inputs a human already
+- **`available_inputs` was always `{}` at this step, superseded by §12:**
+  at the time this section was written, nothing in `AgentState`
+  legitimately represented "explicit execution inputs a human already
   supplied ahead of planning" — `clarification_answers` is keyed by
   `RequirementField.name`, not `InputField.name`, and repurposing it would
-  itself be the "infer from arbitrary text" §3 forbids. A real input channel
-  is deliberately not built here — see `docs/state/OPEN_QUESTIONS.md` Q17.
+  itself be the "infer from arbitrary text" §3 forbids. §12 (below) closes
+  that gap with a dedicated, distinctly-namespaced `AgentState.execution_inputs`
+  field; `clarification_answers` itself is still never read for this
+  purpose — see `docs/state/OPEN_QUESTIONS.md` Q17 for what §12 does *not*
+  close.
 
 ## 11. Status — structured observability (`AgentState.planning_result`)
 
@@ -385,3 +409,94 @@ section closes that gap without touching `cv_agent.graph.planning` at all.
   status value, no selection-logic change), `pending_execution`'s shape,
   `approval_gate`/`execute`, `SkillExecutor`, `ExecutionRuntime`, any CLI
   surface.
+
+## 12. Status — explicit execution-input channel (`AgentState.execution_inputs`)
+
+**Implemented (branch `feature/claude/execution-input-channel`), API
+parameter only — CLI flags deferred.** §10 shipped the `plan_execution` node
+always calling `plan_execution()` with `available_inputs={}`, honestly
+documented as a real gap (`docs/state/OPEN_QUESTIONS.md` Q17) rather than
+faked. This section gives a caller who already knows a required input's
+value **before** a run starts a real, explicit way to supply it — closing
+the sub-case of Q17 where the value is known in advance, and leaving open
+only the sub-case where it is learned mid-run (Q17, restated below).
+
+- **New field**, `cv_agent.graph.state.AgentState.execution_inputs:
+  dict[str, Any]` — caller-supplied values keyed by `InputField.name`
+  (ADR-0009 §11, e.g. `"path"`). Defaults to `{}`. **Deliberately a
+  different namespace from `clarification_answers`**, which stays keyed by
+  `RequirementField.name` (e.g. `"deployment_target"`) — the two dicts are
+  never merged, cross-read, or used to fill each other in. Folding one into
+  the other would be exactly the "infer an execution input from arbitrary
+  request/answer text" failure `[P§35]` and §3's own input-completeness rule
+  already forbid.
+- **How a caller supplies it:** `CVAgent.start_workflow()` gains one new
+  keyword-only parameter, `execution_inputs: Optional[dict[str, Any]] =
+  None`, stored verbatim into `AgentState["execution_inputs"]` (`{}` if
+  omitted — the exact same "no plan if a required input is missing"
+  behavior as before this parameter existed, so every existing caller is
+  unaffected). No CLI flag is added in this step (`_cmd_workflow_demo`
+  remains unchanged) — deferred, not forgotten; the API parameter is the
+  complete V1 surface.
+- **How `plan_execution` receives it:** `_node_plan_execution` reads
+  `state.get("execution_inputs") or {}` and passes it as `plan_execution()`'s
+  `available_inputs` argument — the one line §10 previously hardcoded to
+  `{}`. `cv_agent.graph.planning.plan_execution()` itself is **unchanged** —
+  it already accepted `available_inputs` as a parameter; only the node's own
+  value changed.
+- **Precedence over a caller-supplied `pending_execution` is unchanged and
+  unaffected:** if `pending_execution` is already set when `plan_execution`
+  runs, the node still makes **no** `plan_execution()` call at all (§10's
+  existing rule) — `execution_inputs`, if also supplied in that run, is
+  simply unused, not merged into the caller's own plan. Verified by
+  `TestManuallySuppliedPendingExecutionPrecedence::
+  test_execution_inputs_are_ignored_when_pending_execution_is_supplied`.
+- **Survives the clarification loop:** `execution_inputs` is written once,
+  at `start_workflow()`, and no node between `initialize` and
+  `plan_execution` — including `clarify`/`analyze_requirements`'s loop-back —
+  ever touches it. Verified by
+  `test_execution_inputs_survive_the_clarification_loop`, which supplies
+  `execution_inputs` on a request that also triggers a real clarification
+  interrupt/resume and confirms the same value reaches the eventual plan
+  unchanged, while `clarification_answers` (populated by the resume) stays
+  in its own separate field.
+- **V1 is pre-supply only — no same-session retry, Q17 stays open, narrowed:**
+  there is no interrupt that pauses `plan_execution` to ask for a missing
+  value, and none is added here. If a run reaches
+  `planning_result.status == "missing_required_inputs"`, the only recovery
+  in V1 is a **new** `start_workflow()` call with `execution_inputs` now
+  supplied — `plan_execution` never re-runs within the same session once the
+  graph has moved past it (`approval_gate`/`END`). This is a real, named
+  limitation, not an oversight — seen as acceptable for V1 per this task's
+  own explicit decision. `docs/state/OPEN_QUESTIONS.md` Q17 is reworded (not
+  struck through) to describe exactly this narrower remaining gap.
+- **No cross-binding collision guard:** `plan_execution()`'s missing-input
+  check reads `available_inputs` by field *name* only, scoped to the one
+  already-selected candidate's `input_schema` — so a name collision between
+  two different bindings' declared fields (e.g. both happening to declare a
+  required `"path"`) cannot affect *which* candidate gets selected
+  (`execution_inputs` is never consulted during selection, only afterward,
+  during the single selected candidate's own completeness check). It could
+  still mean a value supplied with one skill in mind incidentally also
+  satisfies a completeness check for a different skill_id in a different run
+  that happens to declare the same field name. Not a problem with today's
+  one real binding; explicitly not guarded against here per this task's own
+  scope decision — retained as a documented future consideration for when a
+  second individually-verified binding exists (ADR-0009 §8's per-skill
+  trigger).
+- **Tests:** `tests/test_workflow.py::TestPlanExecutionIntegration` (2 new:
+  the missing-input fixture satisfied by `execution_inputs`, survival across
+  a clarification interrupt/resume) and
+  `TestManuallySuppliedPendingExecutionPrecedence` (1 new: precedence over a
+  caller-supplied plan); `tests/test_memory_integration.py::
+  TestExecutionInputsChannel` (2 new: end-to-end through the real
+  `CVAgent.start_workflow()` API and real skill discovery — supplied value
+  produces a plan and a completed execution; omitted value preserves the
+  pre-existing missing-input behavior exactly). All pre-existing tests in
+  both files continue to pass with the `_start()`/fixture helpers extended,
+  not rewritten (an `execution_inputs` key added to the shared initial-state
+  dict, defaulting to `{}`).
+- **Not implemented by this section:** any CLI flag (`_cmd_workflow_demo` or
+  otherwise) for supplying `execution_inputs`; the Q17 interrupt-based
+  mid-run recovery path; a cross-binding collision guard. All three remain
+  open, named above rather than silently deferred.

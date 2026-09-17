@@ -252,6 +252,7 @@ class CVAgent:
         *,
         session_id: Optional[str] = None,
         pending_execution: Optional[dict[str, Any]] = None,
+        execution_inputs: Optional[dict[str, Any]] = None,
     ) -> AgentState:
         """
         Start (or restart) a requirements-clarification / approval-gated
@@ -262,7 +263,25 @@ class CVAgent:
         pending_execution, if given, is {"skill_id": str, "inputs": dict,
         "task": str | None} — a skill this run should also attempt to
         execute, gated by its binding's approval policy. None means this
-        run only does requirements analysis/clarification.
+        run only does requirements analysis/clarification. If given, the
+        `plan_execution` node makes no planning call at all and this value
+        is used untouched (ADR-0010 §10) — `execution_inputs` below is then
+        unused for this run, not merged with it.
+
+        execution_inputs (ADR-0010 §12), if given, is a flat dict keyed by
+        `InputField.name` (ADR-0009 §11, e.g. "path") — values a caller
+        already knows *before* this run starts, for the `plan_execution`
+        node to pass through to `plan_execution()` as its
+        `available_inputs`. This is a distinct namespace from clarification
+        answers (keyed by `RequirementField.name`, e.g.
+        "deployment_target") and is never derived from them. None/omitted
+        means `{}` — the same "no plan if a required input is missing"
+        default as before this parameter existed. V1 is pre-supply only:
+        there is no mid-run interrupt that asks for a missing value (see
+        `docs/state/OPEN_QUESTIONS.md` Q17, still open) — a caller who
+        learns the value only after this call returns
+        `planning_result.status == "missing_required_inputs"` must start a
+        new run with it supplied.
 
         Session lifecycle (ADR-0004): a `SessionRecord` is written to
         durable Project Memory *before* the graph runs (status "running"),
@@ -304,6 +323,7 @@ class CVAgent:
             "human_feedback": None,
             "requirements_analysis": None,
             "clarification_answers": {},
+            "execution_inputs": execution_inputs or {},
             "planning_result": None,
             "pending_execution": pending_execution,
             "approval_decision": None,

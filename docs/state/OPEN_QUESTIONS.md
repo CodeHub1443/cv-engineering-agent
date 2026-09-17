@@ -53,19 +53,25 @@ not.
 
 **Q10.** Dataset storage and versioning: DVC, Git LFS, or external object store? `[P§26]`
 
-**Q17.** The `plan_execution` node (ADR-0010 §10, `cv_agent/graph/workflow.py`) — now
-built and wired into the workflow graph — finds an executable candidate with a missing
-required input (per its declared `ExecutionBinding.input_schema`, ADR-0009 §11) and
-produces **no plan** (V1's deterministic default, silent and inert, surfaced via
-`AgentState.planning_result`, ADR-0010 §11). Should it instead offer a **third
-interrupt kind** (`provide_execution_inputs`, architecturally consistent with the
-existing `clarify` interrupt, ADR-0003) that pauses and asks a human for the missing
-value before constructing the plan? ADR-0010 §3/§8 deliberately defers this rather than
-picking — it's a real UX/product decision (how proactive should the agent be about
-asking vs. staying silent), not something ADR-0010's contract-only scope should decide
-unilaterally. *Blocks: adding interrupt-based handling of the "missing input" case to
-the already-built `plan_execution` node — does not block its current, already-shipped
-no-plan default for the common case where inputs are already known.*
+**Q17.** *Narrowed 2026-09-17 (ADR-0010 §12):* a caller who already knows a required
+execution input's value **before** a run starts now has a real channel —
+`CVAgent.start_workflow(execution_inputs=...)`, keyed by `InputField.name`
+(ADR-0009 §11), read by the `plan_execution` node as `plan_execution()`'s
+`available_inputs`. That sub-case is closed. What remains open: a caller who only
+learns the missing value **after** `plan_execution` (`cv_agent/graph/workflow.py`)
+already produced `planning_result.status == "missing_required_inputs"` (ADR-0010
+§11) has no way to supply it and continue the *same* session — `plan_execution` never
+re-runs once the graph has moved past it (`approval_gate`/`END`), and V1 has no
+same-session retry (ADR-0010 §12, explicit V1 scope decision). Should this instead
+offer a **third interrupt kind** (`provide_execution_inputs`, architecturally
+consistent with the existing `clarify` interrupt, ADR-0003) that pauses and asks a
+human for the missing value before constructing the plan, in the same run? Still not
+decided — a real UX/product decision (how proactive should the agent be about asking
+vs. requiring a fresh call), not something ADR-0010's contract-only scope should
+decide unilaterally. *Blocks: adding interrupt-based, same-session recovery for the
+"missing input, not known in advance" case — does not block the current, shipped
+pre-supply channel (ADR-0010 §12) or the no-plan default when no value is ever
+supplied.*
 
 **Q18.** When ADR-0010's V1 selection rule finds **more than one** executable
 `SkillLink` candidate for a task component, it explicitly produces no plan rather than

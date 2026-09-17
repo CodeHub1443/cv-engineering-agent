@@ -77,6 +77,26 @@ class AgentState(TypedDict, total=False):
     supplied assumption (ADR-0008 — the analyzer still never self-promotes
     a field on its own)."""
 
+    # ── Execution inputs (ADR-0010 §12) ─────────────────────────────────
+    execution_inputs: dict[str, Any]
+    """Caller-supplied values for a candidate skill's declared
+    `ExecutionBinding.input_schema` fields (ADR-0009 §11), keyed by
+    `InputField.name` — a deliberately distinct namespace from
+    `clarification_answers` above, which stays keyed by
+    `RequirementField.name`. The two dicts are never merged or cross-read:
+    an `InputField` name (e.g. "path") and a `RequirementField` name (e.g.
+    "deployment_target") mean different things, and treating one as the
+    other would be exactly the kind of silent inference `[P§35]` forbids.
+
+    Set only via an explicit `CVAgent.start_workflow(execution_inputs=...)`
+    argument (ADR-0010 §12) — empty (`{}`) by default, never inferred or
+    pre-filled by any node. `plan_execution` reads this verbatim as
+    `plan_execution()`'s `available_inputs` parameter; nothing else in the
+    graph writes to it. V1 is pre-supply only: there is no interrupt that
+    asks for a missing value mid-run (see `docs/state/OPEN_QUESTIONS.md`
+    Q17, still open) — a caller who did not know the value before
+    `start_workflow()` was called must retry with a new run once it does."""
+
     # ── Planning (ADR-0010) ──────────────────────────────────────────────
     planning_result: Optional[dict[str, Any]]
     """`dataclasses.asdict()` of the `PlanningResult` (`cv_agent.graph.
