@@ -562,6 +562,24 @@ not prove the underlying contract is unchanged (the same `binding_id` could
 be re-registered with a renamed field, a changed `description`/`default`,
 or a flipped `required` flag) — see 13.4.
 
+**Serialization fidelity, verified on PR #33 review:** `dataclasses.asdict()`
+(the same serialization every other `AgentState` dict field already uses,
+ADR-0003 §3) converts each `InputField` in the tuple to a plain dict
+carrying all four attributes — `name`, `required`, `description`, `default`
+— never just the name; list order matches declaration order (a deliberate,
+documented consequence: reordering a binding's declared fields with no
+other change is itself treated as a contract change, per 13.5). Both the
+checkpointed side (`AgentState["planning_result"]["selected_input_schema"]`,
+read by `provide_execution_inputs` and stored into
+`execution_input_recovery["expected_input_schema"]`) and the retry side
+(freshly `asdict()`'d inside `_node_plan_execution`) are plain `list[dict]`
+before comparison — never compared as raw dataclass instances or via
+`repr()`/object identity — so `==` is a genuine, deterministic,
+value-based structural comparison, confirmed through a real `MemorySaver`
+checkpoint round-trip (`tests/test_workflow.py::
+test_full_input_field_contract_survives_the_real_checkpoint_round_trip`),
+not just an in-memory one.
+
 `cv_agent.graph.state.AgentState` gains `execution_input_recovery:
 Optional[dict[str, Any]]`:
 
@@ -652,7 +670,23 @@ same-`binding_id` binding whose contract changed shape underneath the
 pause is caught, not just a different `binding_id` entirely. A changed or
 missing binding is therefore structurally incapable of producing an
 executable plan under a different identity: the only write of
-`pending_execution` is gated on this comparison.
+`pending_execution` is gated on this comparison, and it happens strictly
+**before** `pending_execution` is ever constructed (verified on PR #33
+review — see `_node_plan_execution`'s own control flow: `plan_allowed` is
+recomputed from `final_outcome`/`terminal` before the block that builds
+`pending` ever runs).
+
+**`still_incomplete_after_supply` is an invariant/safety guard, not a
+normally-reachable branch** (raised explicitly on PR #33 review, kept
+deliberately): if `identity_ok` and `schema_ok` both hold, every requested
+field name is, by construction, a required field of the (unchanged)
+selected binding, and a raw `"supplied"` classification already means every
+one of those names has a valid value in the now-merged `execution_inputs`
+— so `plan_execution()`'s own missing-field check (§3) cannot find anything
+absent, and `fresh.status` must be `"planned"`. No test constructs a real
+scenario reaching this branch; it exists only to keep the "never fabricate
+a plan" guarantee unconditional rather than dependent on that reasoning
+continuing to hold as the codebase evolves.
 
 ### 13.6 Confirmed LangGraph API characteristics (empirical, not assumed)
 
@@ -720,25 +754,34 @@ whether) to extend `InputField`/`input_schema` with an XOR/oneOf construct
 ### 13.9 Tests
 
 `tests/test_execution_planning_contract.py::TestPlanningResultSelectedIdentity`
-(5 tests: populated for `"planned"`/`"missing_required_inputs"`, absent for
+(6 tests: populated for `"planned"`/`"missing_required_inputs"`, absent for
 `"no_executable_candidate"`/`"ambiguous_candidates"`, empty schema is `()`
-not `None`). `tests/test_workflow.py::TestProvideExecutionInputsRecovery`
-(16 tests: full valid resume reaches `approval_gate` unchanged including an
-`approval_required` binding; partial resume is `"incomplete"`; a field
-explicitly supplied-but-blank classifies identically to an omitted one
-(mixed valid/invalid); all-invalid resume is `"invalid"`; a
-LangGraph-deliverable falsy non-dict resume is `"cancelled"`; a non-mapping
-resume does not crash; the recovery round never interrupts twice;
-`clarification_answers`/`execution_inputs` stay separate; a different
-`binding_id` registered under the same `skill_id` during the pause is
-detected as `"identity_changed"`; the same `binding_id` re-registered with
-a structurally different `input_schema` during the pause is detected as
-`"schema_changed"`, even though a plain ID comparison would have missed it;
-caller-supplied `pending_execution` never engages this interrupt). Two
+not `None`, and — added on PR #33 review —
+`test_asdict_preserves_the_full_input_field_contract_per_entry`, a unit-level
+proof that `dataclasses.asdict()` keeps all four `InputField` attributes
+per entry, not just names). `tests/test_workflow.py::
+TestProvideExecutionInputsRecovery` (18 tests: full valid resume reaches
+`approval_gate` unchanged including an `approval_required` binding; partial
+resume is `"incomplete"`; a field explicitly supplied-but-blank classifies
+identically to an omitted one (mixed valid/invalid); all-invalid resume is
+`"invalid"`; a LangGraph-deliverable falsy non-dict resume is `"cancelled"`;
+a non-mapping resume does not crash; the recovery round never interrupts
+twice; `clarification_answers`/`execution_inputs` stay separate; a
+different `binding_id` registered under the same `skill_id` during the
+pause is detected as `"identity_changed"`; the same `binding_id`
+re-registered with a structurally different `input_schema` during the
+pause is detected as `"schema_changed"`, even though a plain ID comparison
+would have missed it; caller-supplied `pending_execution` never engages
+this interrupt; and — added on PR #33 review —
+`test_full_input_field_contract_survives_the_real_checkpoint_round_trip`, a
+multi-field schema with a real `description`/`default` on each field,
+resumed through the real `MemorySaver` checkpoint via `_start()`/`_resume()`
+(not an in-memory/mocked shortcut), asserting no false-positive
+`"schema_changed"` for a binding that never actually changed). Two
 pre-existing tests updated, not rewritten:
 `test_one_executable_candidate_populates_pending_execution` (full
 `planning_result` dict-equality assertion extended with the three new
 fields) and `test_missing_required_input_no_plan_no_execution` (now also
 asserts the interrupt this exact fixture triggers, since it no longer
-terminates the run directly). Full suite 362 → 379 passing, zero
+terminates the run directly). Full suite 362 → 381 passing, zero
 regressions.

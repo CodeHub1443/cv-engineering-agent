@@ -1057,6 +1057,81 @@ class TestProvideExecutionInputsRecovery:
         assert recovery["accepted"] == ["path"]
         assert recovery["still_missing"] == []
 
+    def test_full_input_field_contract_survives_the_real_checkpoint_round_trip(
+        self, tmp_path: Path
+    ) -> None:
+        """
+        Explicit verification (requested on PR #33 review): the
+        identity+schema guard's `expected_input_schema` snapshot must
+        preserve the FULL InputField contract — name, required, description,
+        AND default — not just field names, through the real checkpoint
+        (MemorySaver, via _start()/_resume(), not a bypassed/mocked path),
+        and the comparison must be deterministic (no false-positive
+        "schema_changed" for a genuinely unchanged binding). A multi-field
+        schema with a non-None default and real description text is used
+        deliberately, since a single bare-minimum field wouldn't exercise
+        default/description at all.
+        """
+        schema = (
+            InputField(name="path", required=True, description="folder containing layer JSON"),
+            InputField(
+                name="model_name",
+                required=True,
+                description="human-readable model label",
+                default="unnamed-model",
+            ),
+        )
+        execution_registry = ExecutionBindingRegistry()
+        self._register(execution_registry, "trt-perf-analysis", input_schema=schema)
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        started = _start(graph, _PLANNING_TASK, "rec-verify-1")
+        payload = started["__interrupt__"][0].value
+        # The payload itself (built pre-interrupt from the checkpointed
+        # planning_result, never a live lookup — ADR-0010 §13.3) already
+        # carries per-field descriptions, proving more than bare names
+        # reached this point.
+        assert {"name": "path", "description": "folder containing layer JSON"} in payload[
+            "missing_inputs"
+        ]
+        assert {
+            "name": "model_name",
+            "description": "human-readable model label",
+        } in payload["missing_inputs"]
+
+        resumed = _resume(
+            graph, "rec-verify-1", {"path": "/data/clips", "model_name": "resnet50"}
+        )
+
+        recovery = resumed["execution_input_recovery"]
+        # No false-positive mismatch for a binding that never actually
+        # changed — proves the structural comparison is correct, not just
+        # permissive.
+        assert recovery["outcome"] == "supplied"
+        assert recovery["terminal"] is False
+        assert recovery["mismatch_detail"] is None
+        # The stored snapshot itself carries all four InputField fields per
+        # entry, in declaration order — not just names.
+        assert recovery["expected_input_schema"] == [
+            {
+                "name": "path",
+                "required": True,
+                "description": "folder containing layer JSON",
+                "default": None,
+            },
+            {
+                "name": "model_name",
+                "required": True,
+                "description": "human-readable model label",
+                "default": "unnamed-model",
+            },
+        ]
+        assert resumed["pending_execution"] == {
+            "skill_id": "trt-perf-analysis",
+            "inputs": {"path": "/data/clips", "model_name": "resnet50"},
+            "task": _PLANNING_TASK,
+        }
+
     def test_approval_required_binding_still_gates_after_successful_recovery(
         self, tmp_path: Path
     ) -> None:

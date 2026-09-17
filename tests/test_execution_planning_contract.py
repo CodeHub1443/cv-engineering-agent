@@ -424,3 +424,49 @@ class TestPlanningResultSelectedIdentity:
         result = plan_execution(_analysis(links), _registry(_binding("skill-a")))
         assert result.status == "planned"
         assert result.selected_input_schema == ()
+
+    def test_asdict_preserves_the_full_input_field_contract_per_entry(self) -> None:
+        """Explicit verification (requested on PR #33 review): the
+        `dataclasses.asdict()` serialization the workflow layer stores into
+        AgentState (checkpointer-safe, per ADR-0003 §3) must preserve every
+        InputField attribute — name, required, description, AND default —
+        for every entry, in declaration order, not just field names. This
+        is what `_node_plan_execution`'s identity+schema guard (ADR-0010
+        §13.5) ultimately compares; if asdict() ever silently dropped a
+        field, the guard's structural comparison would be comparing an
+        incomplete contract without any test catching it here."""
+        schema = (
+            InputField(name="path", required=True, description="folder path"),
+            InputField(
+                name="model_name",
+                required=False,
+                description="model label",
+                default="unnamed",
+            ),
+        )
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema)),
+            available_inputs={"path": "/tmp/x"},
+        )
+        assert result.status == "planned"
+
+        serialized = dataclasses.asdict(result)
+        # dataclasses.asdict() applied directly (no LangGraph checkpoint
+        # involved here) preserves the tuple container itself — only a real
+        # checkpoint round-trip turns it into a list (ADR-0004's documented
+        # instability; also true for candidate_skill_ids/missing_inputs
+        # elsewhere in this same PlanningResult). The workflow-layer
+        # comparison in _node_plan_execution normalizes both sides to
+        # list[dict] before comparing regardless (ADR-0010 §13.5) — this
+        # test verifies the per-entry field contents, not container type.
+        assert serialized["selected_input_schema"] == (
+            {"name": "path", "required": True, "description": "folder path", "default": None},
+            {
+                "name": "model_name",
+                "required": False,
+                "description": "model label",
+                "default": "unnamed",
+            },
+        )

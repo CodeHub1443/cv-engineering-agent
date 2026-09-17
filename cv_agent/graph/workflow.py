@@ -437,6 +437,21 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
             elif raw_outcome != "supplied":
                 final_outcome, terminal, detail = raw_outcome, True, None
             elif result.status != "planned":
+                # Invariant/safety guard, not a reachable branch under
+                # normal operation (verified on PR #33 review): if
+                # identity_ok and schema_ok both hold, every requested
+                # field name is, by construction, a required field of the
+                # (unchanged) selected binding, and the interrupt node's
+                # own "supplied" classification already means every one of
+                # those names has a valid value in the now-merged
+                # execution_inputs — so plan_execution()'s own missing-field
+                # check (ADR-0010 §3) cannot find anything absent, and
+                # result.status must be "planned". This branch exists only
+                # to keep the "never fabricate a plan" guarantee
+                # unconditional rather than dependent on that reasoning
+                # continuing to hold as the codebase evolves — belt and
+                # suspenders, deliberately kept even though no test
+                # constructs a real scenario that reaches it.
                 final_outcome, terminal, detail = (
                     "binding_mismatch",
                     True,
