@@ -722,3 +722,69 @@ status.
                future consideration for when a second individually-verified binding
                exists). Committed to branch `feature/claude/execution-input-channel`,
                not `main`.
+
+## 2026-09-17 — Same-session `missing_required_inputs` recovery (Q17, ADR-0010 §13)
+
+**Did:**       Closed Q17's remaining sub-case (ADR-0010 §12 had already closed the
+               "known in advance" half): a new `provide_execution_inputs` interrupt
+               node, architecturally consistent with `clarify` (ADR-0003), inserted
+               between `plan_execution` and `approval_gate` in
+               `cv_agent/graph/workflow.py`. `plan_execution -> approval_gate`
+               became a conditional edge (`_route_after_planning`); a new plain edge
+               `provide_execution_inputs -> plan_execution` closes the recovery
+               loop, bounded to exactly one round via
+               `AgentState.execution_input_recovery["attempted"]`. `PlanningResult`
+               (`cv_agent/graph/planning.py`) gained `selected_skill_id`/
+               `selected_binding_id`/`selected_input_schema`, populated for both
+               `"planned"` and `"missing_required_inputs"` — the checkpointed
+               identity+contract snapshot a retry compares against before ever
+               producing a plan. Any incomplete/invalid/cancelled/
+               `binding_mismatch` outcome routes straight to `END`, bypassing
+               `approval_gate` entirely, so a failed recovery can never read as
+               "approval not required" for a plan that was never produced.
+**Why:**       `docs/state/OPEN_QUESTIONS.md` Q17's remaining half, resolved via a
+               multi-round design review (4 rounds) that progressively tightened the
+               design: distinguishing valid/incomplete/invalid/cancelled input
+               (not just "did we ask once"), guaranteeing binding identity is
+               checked explicitly rather than relying on implicit reselection,
+               closing a schema-mutation gap (same `binding_id`, changed contract —
+               ID equality alone is not sufficient), and making the terminal
+               outcome caller-visible without a new lifecycle `status` value.
+**Broke:**     Two real bugs found only by running the tests, not anticipated in
+               design: (1) `status` never reached `"done"` on the new
+               bypass-to-`END` path, since that was previously `approval_gate`'s
+               job and `approval_gate` is now skipped for this case — fixed by
+               having `_node_plan_execution` set it directly when finalizing a
+               terminal recovery outcome. (2) `Command(resume={})` — a literal
+               empty dict — is **not reliably delivered** by the installed
+               LangGraph; the graph silently re-pauses at the same interrupt
+               instead of resuming (confirmed empirically, not assumed). This
+               contradicts this file's own pre-existing `clarify`-interrupt test
+               comment claiming "an empty mapping is the correct way to represent
+               'no answers supplied'" — that claim does not hold; `clarify`'s own
+               existing test for it only passes because it never asserts
+               `"__interrupt__" not in resumed`. Not fixed for `clarify` (out of
+               this task's scope) — documented instead, in `CVAgent.
+               resume_workflow()`'s docstring and this new interrupt's own test,
+               that a non-`dict` falsy value (e.g. `""`), not `{}`, is the
+               correctly-deliverable way to signal "declined."
+**Learned:**   `trt_perf_analysis.build_binding()`'s real input contract is a
+               genuine `path`/`data` XOR (verified by reading `_build_argv()`
+               directly, not assumed) — `InputField.required: bool`'s flat model
+               cannot express it truthfully. Populating `input_schema` for this
+               binding was explicitly *not* done here; every test uses a synthetic
+               fixture binding instead (same convention
+               `tests/test_execution_planning_contract.py`'s pre-existing tests
+               already use). Spun off as new, separate `OPEN_QUESTIONS.md` Q20.
+**Left open:** Q20 (TRT XOR/oneOf schema support — blocks only a *real*,
+               unfaked end-to-end test of this feature, not the mechanism itself).
+               No CLI flag for resuming a `provide_execution_inputs` interrupt (the
+               existing generic `resume_workflow()` already suffices — no dedicated
+               wrapper added, matching `clarify`/`approval_gate`'s own precedent).
+               Pre-existing `ruff`/`mypy` findings elsewhere in the touched files
+               (`pending_prompt` unused in `_node_clarify`, unused `langgraph`
+               import in `health_check()`, unused `PlanningResult` import in
+               `test_execution_planning_contract.py`) confirmed pre-dating this
+               branch via `git diff main` — not fixed, out of scope. Full suite 362
+               → 379 passing, zero regressions. Branch
+               `feature/claude/q17-input-recovery`, not `main`.

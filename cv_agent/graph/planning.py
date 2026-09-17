@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from cv_agent.execution.binding import ExecutionBindingRegistry
+from cv_agent.execution.binding import ExecutionBindingRegistry, InputField
 from cv_agent.requirements.models import RequirementsAnalysis, SkillLink
 
 
@@ -114,6 +114,33 @@ class PlanningResult:
     """Set only when status == "missing_required_inputs" — the names of
     every InputField.required field with no value in available_inputs,
     sorted."""
+    selected_skill_id: str | None = None
+    """Set whenever exactly one candidate was selected — status == "planned"
+    OR "missing_required_inputs" (never for "no_executable_candidate"/
+    "ambiguous_candidates", where there is no single selected candidate).
+    ADR-0010 §13: this is what lets a caller (the `plan_execution` graph
+    node's same-session missing-input recovery) record *which* candidate a
+    human is being asked about, and later verify — from checkpointed state,
+    not a fresh registry lookup — that a retry still targets the same one.
+    Redundant with `plan.skill_id` when status == "planned"; the only place
+    that carries this identity for "missing_required_inputs" at all."""
+    selected_binding_id: str | None = None
+    """Companion to `selected_skill_id` — the specific `ExecutionBinding.
+    binding_id` selected, not just the skill_id. Set together with
+    `selected_skill_id`, same two statuses. A binding can in principle be
+    re-registered under the same skill_id with a different binding_id;
+    carrying both, not skill_id alone, is what makes that detectable
+    (ADR-0010 §13)."""
+    selected_input_schema: tuple[InputField, ...] | None = None
+    """A verbatim snapshot of the selected candidate's `ExecutionBinding.
+    input_schema` at the moment of selection — set together with
+    `selected_skill_id`/`selected_binding_id`. ADR-0010 §13: `binding_id`
+    string equality alone does not prove the *contract* is unchanged (the
+    same binding_id could be re-registered with a renamed field, a changed
+    description/default, or a flipped `required` flag). This snapshot is
+    what a same-session recovery round compares against, structurally,
+    before ever trusting a human-supplied value or producing a plan from
+    it — never a fresh, live registry lookup at comparison time."""
 
 
 def plan_execution(
@@ -200,7 +227,13 @@ def plan_execution(
         if field.required and field.name not in known_inputs
     )
     if missing:
-        return PlanningResult(status="missing_required_inputs", missing_inputs=tuple(missing))
+        return PlanningResult(
+            status="missing_required_inputs",
+            missing_inputs=tuple(missing),
+            selected_skill_id=selected.skill_id,
+            selected_binding_id=binding.binding_id,
+            selected_input_schema=binding.input_schema,
+        )
 
     plan = ExecutionPlan(
         skill_id=selected.skill_id,
@@ -208,4 +241,10 @@ def plan_execution(
         inputs=dict(known_inputs),
         source_task=analysis.original_request,
     )
-    return PlanningResult(status="planned", plan=plan)
+    return PlanningResult(
+        status="planned",
+        plan=plan,
+        selected_skill_id=selected.skill_id,
+        selected_binding_id=binding.binding_id,
+        selected_input_schema=binding.input_schema,
+    )

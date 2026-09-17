@@ -8,57 +8,53 @@
 
 ## Where we are
 
-`main` is at `b447c41` (PR #31 merged — ADR-0010 execution-planning contract:
-`plan_execution()`, the `plan_execution` graph node, `AgentState.planning_result`).
-This branch (`feature/claude/execution-input-channel`, unmerged) closes the gap
-ADR-0010 §10 explicitly named as open: `plan_execution` always called
-`plan_execution()` with `available_inputs={}`, because nothing in `AgentState`
-represented "a caller already knows this required value." A caller can now supply
-one via `CVAgent.start_workflow(execution_inputs=...)`.
+`main` is at `48e7c13` (PR #32 — pre-supplied execution-input channel, ADR-0010
+§12). This branch (`feature/claude/q17-input-recovery`, unmerged) closes Q17's
+remaining sub-case: a caller who learns a required execution input's value only
+**after** `missing_required_inputs` can now supply it and resume planning in the
+*same* session via a new `provide_execution_inputs` interrupt — one round only,
+identity+schema-gated, bypassing `approval_gate` on any failure outcome (ADR-0010 §13).
 
 **Implemented:** skill discovery + resolution (ADR-0007), requirements analysis +
-skill_links (ADR-0008), skill execution boundary (ADR-0009) with one real, opt-in
-`ExecutionRuntime` (`trt-perf-analysis`), orchestration + human-approval interrupts
-(ADR-0003), project memory (ADR-0004), deterministic execution planning + graph
-integration + structured `planning_result` (ADR-0010 §9–§11, merged). **This
-session:** `AgentState.execution_inputs` (new field, keyed by `InputField.name`,
-distinct namespace from `clarification_answers`); `CVAgent.start_workflow(
-execution_inputs=...)`; `plan_execution` node reads it instead of a hardcoded `{}`
-(ADR-0010 §12). API parameter only — no CLI flag yet, no same-session retry after
-`missing_required_inputs`, no cross-binding collision guard (all named, deferred).
+skill_links (ADR-0008), skill execution boundary (ADR-0009, one real opt-in
+`ExecutionRuntime`: `trt-perf-analysis`), orchestration + approval interrupts
+(ADR-0003), project memory (ADR-0004), execution planning + `planning_result`
+(ADR-0010 §9–§11), pre-supplied execution-input channel (ADR-0010 §12). **This
+session:** same-session `missing_required_inputs` recovery (ADR-0010 §13) —
+`provide_execution_inputs` node, `PlanningResult.selected_skill_id`/
+`selected_binding_id`/`selected_input_schema`, `AgentState.execution_input_recovery`.
 
-**Still NOT implemented:** bindings for the other 83 discovered skills, RAG, MCP,
-research, autonomous training, optimization/deployment/monitoring, a real LLM
-provider (mock only), cost estimation, a persistent LangGraph checkpointer (Q3's
-durability half), skill ranking/selection/disambiguation (Q18), a
-`provide_execution_inputs` interrupt for same-session recovery (Q17, narrowed).
+**Still NOT implemented:** bindings for 83 other skills, RAG, MCP, research,
+autonomous training, a real LLM provider, cost estimation, a persistent checkpointer
+(Q3), skill disambiguation (Q18), an approval-gate cost estimate (Q19),
+execution-input oneOf/XOR schema support (Q20 — blocks only a real, unfaked
+end-to-end recovery test against `trt-perf-analysis`; the mechanism is
+binding-agnostic and fixture-tested).
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| `AgentState.execution_inputs` + `start_workflow(execution_inputs=...)` (ADR-0010 §12) | #— | implemented, PR open |
+| `provide_execution_inputs` recovery (ADR-0010 §13) | #— | implemented, tests pass, PR pending |
 | ADR-0001/0003/0007/0008/0009/0010 | #— | accepted (retroactive) |
 
 ## Next 3 actions
 
-1. Review and merge the execution-input-channel PR.
-2. Decide Q17 (same-session missing-input recovery — interrupt vs. new-run-only)
-   and Q18 (ambiguous-candidate disambiguation) — both real product decisions, not
-   architecture.
-3. A second individually-verified `ExecutionRuntime` adapter (candidate:
-   `gstreamer-pipeline`, per ADR-0009 §9) — inspect, don't assume; the first real
-   stress test of `InputField`/`input_schema` generalizing beyond one binding.
+1. Review and merge the Q17-recovery PR.
+2. Decide Q18 (candidate disambiguation) and Q20 (TRT XOR/oneOf schema support).
+3. A second individually-verified `ExecutionRuntime` (`gstreamer-pipeline`, ADR-0009
+   §9) — first stress test of `input_schema`/`execution_input_recovery` beyond one.
 
 ## Blockers
 
-- None for this session's scope. Q3's durable-transport half still blocks a
-  restart-survivable *approval interrupt*.
+- None for this session's scope. Q3 still blocks a restart-survivable approval
+  interrupt. Q20 blocks a real (not synthetic-fixture) end-to-end recovery test.
 
 ## Do not start yet
 
 RAG, MCP, real LLM providers, autonomous training, cost estimation, registering an
-unverified binding, bulk-registering unverified bindings, a second `ExecutionRuntime`/
-skill binding, skill ranking/auto-selection, unrestricted autonomous execution,
-merging the two graphs before `run()` needs it, a second `ProjectMemoryStore` backend,
-a `provide_execution_inputs` interrupt (Q17 not yet decided) — `[P§34]`.
+unverified binding, a second `ExecutionRuntime`/skill binding, skill
+ranking/auto-selection, unrestricted autonomous execution, merging the two graphs,
+a second `ProjectMemoryStore` backend, populating `trt_perf_analysis`'s
+`input_schema` before Q20, fixing `clarify`'s empty-dict-resume gap (documented,
+not fixed, out of scope) — `[P§34]`.

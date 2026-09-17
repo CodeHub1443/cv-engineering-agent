@@ -4,8 +4,10 @@
   are implemented and wired into `build_requirements_workflow_graph()` (see
   §9, §10); structured `AgentState.planning_result` observability is
   implemented too (see §11); an explicit, pre-supplied execution-input
-  channel is implemented too (see §12)
-- **Date:** 2026-09-16
+  channel is implemented too (see §12); same-session recovery from
+  `missing_required_inputs` via a third interrupt kind is implemented too
+  (see §13)
+- **Date:** 2026-09-16 (§13: 2026-09-17)
 - **Layer:** orchestration
 - **Canon:** `[P§19]`, `[P§21]`, `[P§22]`, `[P§24]`, `[P§34]`, `[P§35]`
 - **Supersedes / Superseded by:** — (extends ADR-0003 §3's graph topology and
@@ -282,16 +284,15 @@ level.
 - When the "ambiguous — no silent selection" case (§3, step 4) needs a real
   resolution mechanism — an explicit human/CLI disambiguation choice, most
   likely — logged in `docs/state/OPEN_QUESTIONS.md`, not decided here.
-- **Narrowed by §12, not fired:** the "missing required input → no plan" V1
-  default (§3) is judged too silent in practice **for a caller who did not
-  know the value in advance.** §12 already closes the sub-case of a caller
-  who *does* know it ahead of time. What remains open is a caller who only
+- **Fired — see §13:** the "missing required input → no plan" V1 default
+  (§3) was judged too silent in practice **for a caller who did not know the
+  value in advance.** §12 closed the sub-case of a caller who *does* know it
+  ahead of time; §13 closes the remaining sub-case — a caller who only
   learns the value after seeing `planning_result.status ==
-  "missing_required_inputs"` and has no way to resume the same run with it —
-  the natural extension is still a third interrupt kind
-  (`provide_execution_inputs`), architecturally consistent with the existing
-  `clarify` interrupt but a distinct product decision — logged in
-  `docs/state/OPEN_QUESTIONS.md` Q17, not decided here.
+  "missing_required_inputs"` — via the third interrupt kind named here,
+  `provide_execution_inputs`, architecturally consistent with the existing
+  `clarify` interrupt. `docs/state/OPEN_QUESTIONS.md` Q17 is resolved by
+  §13.
 - When a second individually-verified `ExecutionRuntime`/`ExecutionBinding`
   exists (ADR-0009 §8's own per-skill revisit trigger) — the first real
   stress test of whether `InputField`'s flat required/optional shape
@@ -500,3 +501,287 @@ only the sub-case where it is learned mid-run (Q17, restated below).
   otherwise) for supplying `execution_inputs`; the Q17 interrupt-based
   mid-run recovery path; a cross-binding collision guard. All three remain
   open, named above rather than silently deferred.
+
+## 13. Status — same-session recovery from `missing_required_inputs`
+
+**Implemented (branch `feature/claude/q17-input-recovery`).** Closes
+`docs/state/OPEN_QUESTIONS.md` Q17's remaining sub-case: a caller who only
+learns a required execution input's value **after** `plan_execution` already
+produced `planning_result.status == "missing_required_inputs"` now has a
+same-session recovery path — a third interrupt kind,
+`provide_execution_inputs`, architecturally consistent with the existing
+`clarify` interrupt (ADR-0003) but a distinct namespace (never
+`clarification_answers`).
+
+### 13.1 Topology
+
+`plan_execution`'s existing plain edge to `approval_gate` becomes a
+conditional edge, `_route_after_planning`, with a new node,
+`provide_execution_inputs`, and a new plain edge back to `plan_execution`:
+
+```
+plan_execution ──status=="missing_required_inputs" AND not yet attempted──→ provide_execution_inputs
+     │  ↑                                                                           │
+     │  └────────────────(always loops back — exactly once, ever)──────────────────┘
+     │
+     ├──(execution_input_recovery.attempted == True)───┐
+     │                                                  │
+     │      recovery.terminal == False                  recovery.terminal == True
+     │               │                                          │
+     │               ▼                                          ▼
+     │         approval_gate → execute → END                   END
+     │
+     └──(recovery never attempted: planned / no_executable_candidate /
+          ambiguous_candidates / caller-supplied pending_execution)──→ approval_gate → execute → END
+          (unchanged from §10/§12)
+```
+
+`approval_gate`/`execute` node bodies, `SkillExecutor`, `ExecutionRuntime`,
+and `plan_execution()` itself (the pure function, `cv_agent.graph.planning`)
+are all byte-for-byte unchanged. `_node_plan_execution` gains an additive
+branch (only active when a recovery record is already present in state —
+see 13.3); it is otherwise identical to §10/§12's version.
+
+### 13.2 Data model
+
+`cv_agent.graph.planning.PlanningResult` gains three fields, populated
+whenever exactly one candidate was selected (status `"planned"` or
+`"missing_required_inputs"`; `None` for `"no_executable_candidate"`/
+`"ambiguous_candidates"`):
+
+```python
+selected_skill_id: str | None = None
+selected_binding_id: str | None = None
+selected_input_schema: tuple[InputField, ...] | None = None
+```
+
+`selected_input_schema` is a verbatim snapshot of the selected candidate's
+`ExecutionBinding.input_schema` at the moment of selection — not just its
+`binding_id`. This is deliberate: `binding_id` string equality alone does
+not prove the underlying contract is unchanged (the same `binding_id` could
+be re-registered with a renamed field, a changed `description`/`default`,
+or a flipped `required` flag) — see 13.4.
+
+**Serialization fidelity, verified on PR #33 review:** `dataclasses.asdict()`
+(the same serialization every other `AgentState` dict field already uses,
+ADR-0003 §3) converts each `InputField` in the tuple to a plain dict
+carrying all four attributes — `name`, `required`, `description`, `default`
+— never just the name; list order matches declaration order (a deliberate,
+documented consequence: reordering a binding's declared fields with no
+other change is itself treated as a contract change, per 13.5). Both the
+checkpointed side (`AgentState["planning_result"]["selected_input_schema"]`,
+read by `provide_execution_inputs` and stored into
+`execution_input_recovery["expected_input_schema"]`) and the retry side
+(freshly `asdict()`'d inside `_node_plan_execution`) are plain `list[dict]`
+before comparison — never compared as raw dataclass instances or via
+`repr()`/object identity — so `==` is a genuine, deterministic,
+value-based structural comparison, confirmed through a real `MemorySaver`
+checkpoint round-trip (`tests/test_workflow.py::
+test_full_input_field_contract_survives_the_real_checkpoint_round_trip`),
+not just an in-memory one.
+
+`cv_agent.graph.state.AgentState` gains `execution_input_recovery:
+Optional[dict[str, Any]]`:
+
+```python
+{
+    "attempted": bool,
+    "outcome": "supplied" | "incomplete" | "invalid" | "cancelled" | "binding_mismatch",
+    "terminal": bool | None,
+    "mismatch_detail": "identity_changed" | "schema_changed" | "still_incomplete_after_supply" | None,
+    "expected_skill_id": str,
+    "expected_binding_id": str,
+    "expected_input_schema": list[dict],
+    "requested": list[str],
+    "accepted": list[str],
+    "still_missing": list[str],
+    "rejected": list[dict],
+}
+```
+
+### 13.3 Field ownership / replay safety
+
+LangGraph's dynamic `interrupt()` re-runs a node's pre-interrupt code on
+resume (confirmed empirically — see 13.6). `provide_execution_inputs`
+therefore reads `expected_skill_id`/`expected_binding_id`/
+`expected_input_schema`/`requested` **only** from the already-checkpointed
+`AgentState["planning_result"]` — never a live `ExecutionBindingRegistry`
+lookup, which would be replay-unsafe (it could observe a registry mutated
+during the pause). It writes the record once, on resume: `attempted=True`,
+a raw `outcome` (never `"binding_mismatch"` at this point), and the
+classification fields; `terminal`/`mismatch_detail` are left `None` here —
+only `_node_plan_execution`'s retry, holding a fresh `plan_execution()`
+result, can finalize them. This intermediate shape is never externally
+observable: `provide_execution_inputs -> plan_execution` is a plain edge,
+so both nodes run inside one `resume_workflow()` call before control
+returns to any caller.
+
+### 13.4 Deterministic classification (ADR-0010 §13's rule)
+
+Relative to `requested` (the complete `missing_inputs` list from the one
+and only ask) and `declared_names` (every field name the checkpointed
+`expected_input_schema` snapshot declares):
+
+- A resume value that is not a `dict`, or an empty `dict`, →
+  `"cancelled"`.
+- Every `requested` name got a valid (declared, non-blank) value →
+  `"supplied"`.
+- At least one, but not all, `requested` names got a valid value →
+  `"incomplete"`.
+- Zero `requested` names got a valid value (whether because they were
+  never mentioned, or mentioned with an undeclared name/blank value) →
+  `"invalid"`.
+
+A field attempted-but-rejected (blank, or not a declared name) and a field
+never mentioned at all are treated identically for this verdict — both
+simply mean "not fulfilled" — but remain individually visible via
+`rejected` (why an attempt failed) and `still_missing` (`requested` minus
+`accepted`).
+
+`"binding_mismatch"` is never produced by this classification — it can only
+be applied afterward, by `_node_plan_execution`, overriding whatever the
+above produced.
+
+### 13.5 Identity + schema guard (the only path to `pending_execution`)
+
+On retry, `_node_plan_execution` calls `plan_execution()` fresh, then — only
+when a recovery record is present — determines the final outcome by
+re-deriving everything from checkpointed state, never trusting the raw
+classification alone:
+
+```python
+identity_ok = (fresh.selected_skill_id == expected_skill_id
+               and fresh.selected_binding_id == expected_binding_id)
+schema_ok = normalize(fresh.selected_input_schema) == expected_input_schema
+
+if not identity_ok:      final_outcome, terminal, detail = "binding_mismatch", True, "identity_changed"
+elif not schema_ok:      final_outcome, terminal, detail = "binding_mismatch", True, "schema_changed"
+elif raw_outcome != "supplied": final_outcome, terminal, detail = raw_outcome, True, None
+elif fresh.status != "planned": final_outcome, terminal, detail = "binding_mismatch", True, "still_incomplete_after_supply"
+else:                     final_outcome, terminal, detail = "supplied", False, None
+
+pending_execution = plan if (final_outcome == "supplied" and not terminal) else None
+```
+
+ID equality alone is deliberately **not** treated as sufficient — `schema_ok`
+performs a full structural comparison of the binding's declared
+`input_schema` (every field's name/required/description/default), so a
+same-`binding_id` binding whose contract changed shape underneath the
+pause is caught, not just a different `binding_id` entirely. A changed or
+missing binding is therefore structurally incapable of producing an
+executable plan under a different identity: the only write of
+`pending_execution` is gated on this comparison, and it happens strictly
+**before** `pending_execution` is ever constructed (verified on PR #33
+review — see `_node_plan_execution`'s own control flow: `plan_allowed` is
+recomputed from `final_outcome`/`terminal` before the block that builds
+`pending` ever runs).
+
+**`still_incomplete_after_supply` is an invariant/safety guard, not a
+normally-reachable branch** (raised explicitly on PR #33 review, kept
+deliberately): if `identity_ok` and `schema_ok` both hold, every requested
+field name is, by construction, a required field of the (unchanged)
+selected binding, and a raw `"supplied"` classification already means every
+one of those names has a valid value in the now-merged `execution_inputs`
+— so `plan_execution()`'s own missing-field check (§3) cannot find anything
+absent, and `fresh.status` must be `"planned"`. No test constructs a real
+scenario reaching this branch; it exists only to keep the "never fabricate
+a plan" guarantee unconditional rather than dependent on that reasoning
+continuing to hold as the codebase evolves.
+
+### 13.6 Confirmed LangGraph API characteristics (empirical, not assumed)
+
+Two findings from building and testing this feature, both confirmed by
+direct experimentation against the installed LangGraph, not assumed from
+documentation:
+
+- **Interrupt replay:** a node's code before `interrupt()` re-executes on
+  every resume (LangGraph matches `interrupt()` calls positionally against
+  the checkpoint) — this is why §13.3's read boundary matters; it is the
+  first node in this codebase whose pre-interrupt code could otherwise have
+  depended on a live, mutable object.
+- **`Command(resume=...)` does not reliably deliver a literal empty dict.**
+  `Command(resume={})` and `Command(resume=None)` are both **not**
+  delivered by the installed LangGraph — the graph silently re-pauses at
+  the same interrupt (or, for `None`, raises inside LangGraph's own
+  internals) instead of resuming with that value. This contradicts
+  `tests/test_workflow.py`'s pre-existing `clarify`-interrupt comment
+  ("`Command(resume=None)` itself is unsupported... an empty mapping is the
+  correct way to represent 'no answers supplied'") — that comment's second
+  half does not hold; `clarify`'s own existing test for this
+  (`test_empty_resume_value_produces_no_fabricated_answers`) happens to
+  still pass only because it never asserts `"__interrupt__" not in
+  resumed`. **Not fixed here** — `clarify`'s behavior is unchanged,
+  out of this task's scope — but `provide_execution_inputs`'s own tests
+  and `CVAgent.resume_workflow()`'s docstring document the correct,
+  actually-deliverable way to signal "declined/cancelled": any non-`dict`
+  falsy value (e.g. `""`), not a literal `{}`.
+
+### 13.7 What this does not change
+
+Caller-supplied `pending_execution` precedence (§10) is unaffected:
+`planning_result` stays `None` for that path, so `_route_after_planning`
+never engages recovery at all. First-pass `"planned"`/
+`"no_executable_candidate"`/`"ambiguous_candidates"` routing is unchanged.
+`approval_gate`/`execute` are never modified, never auto-approve, and never
+run for a terminal recovery outcome — `pending_execution`,
+`approval_decision`, and `execution_result` are all guaranteed `None`
+whenever `execution_input_recovery["terminal"] is True`. `TRT-perf-analysis`
+`input_schema` is deliberately left unpopulated — see 13.8.
+
+### 13.8 TRT `path`/`data` XOR contract — separate open question, not resolved here
+
+Inspected `cv_agent/execution/runtimes/trt_perf_analysis.py::_build_argv()`
+directly (not assumed): it requires **exactly one** of `path`/`data` —
+`ValueError` if both are given, `ValueError` if neither is given (confirmed
+by `tests/test_execution_trt_perf_analysis.py::test_both_path_and_data_raises`
+and its neighboring "neither given" test). This is a genuine XOR, not an
+unconditional requirement on `path`. `ExecutionBinding.input_schema`'s
+`InputField.required: bool` is deliberately flat (ADR-0009 §11) and cannot
+express "exactly one of A or B" — marking either field `required=True`
+would misrepresent the real contract (`[P§35]`), and marking both
+`required=False` would be truthful but never trigger
+`"missing_required_inputs"` for this binding at all, since `plan_execution()`
+only inspects `required=True` fields. **`trt_perf_analysis.build_binding()`
+is not changed by this work** — every test for this feature uses a
+synthetic fixture binding with a real `required=True` field, the same
+pattern `tests/test_execution_planning_contract.py`'s own pre-existing
+`plan_execution()` tests already use. A real, unfaked end-to-end test of
+this recovery flow against the actual installed `trt-perf-analysis` binding
+remains blocked until a separate, future decision resolves how (or
+whether) to extend `InputField`/`input_schema` with an XOR/oneOf construct
+— logged as new `docs/state/OPEN_QUESTIONS.md` Q20, not decided here.
+
+### 13.9 Tests
+
+`tests/test_execution_planning_contract.py::TestPlanningResultSelectedIdentity`
+(6 tests: populated for `"planned"`/`"missing_required_inputs"`, absent for
+`"no_executable_candidate"`/`"ambiguous_candidates"`, empty schema is `()`
+not `None`, and — added on PR #33 review —
+`test_asdict_preserves_the_full_input_field_contract_per_entry`, a unit-level
+proof that `dataclasses.asdict()` keeps all four `InputField` attributes
+per entry, not just names). `tests/test_workflow.py::
+TestProvideExecutionInputsRecovery` (18 tests: full valid resume reaches
+`approval_gate` unchanged including an `approval_required` binding; partial
+resume is `"incomplete"`; a field explicitly supplied-but-blank classifies
+identically to an omitted one (mixed valid/invalid); all-invalid resume is
+`"invalid"`; a LangGraph-deliverable falsy non-dict resume is `"cancelled"`;
+a non-mapping resume does not crash; the recovery round never interrupts
+twice; `clarification_answers`/`execution_inputs` stay separate; a
+different `binding_id` registered under the same `skill_id` during the
+pause is detected as `"identity_changed"`; the same `binding_id`
+re-registered with a structurally different `input_schema` during the
+pause is detected as `"schema_changed"`, even though a plain ID comparison
+would have missed it; caller-supplied `pending_execution` never engages
+this interrupt; and — added on PR #33 review —
+`test_full_input_field_contract_survives_the_real_checkpoint_round_trip`, a
+multi-field schema with a real `description`/`default` on each field,
+resumed through the real `MemorySaver` checkpoint via `_start()`/`_resume()`
+(not an in-memory/mocked shortcut), asserting no false-positive
+`"schema_changed"` for a binding that never actually changed). Two
+pre-existing tests updated, not rewritten:
+`test_one_executable_candidate_populates_pending_execution` (full
+`planning_result` dict-equality assertion extended with the three new
+fields) and `test_missing_required_input_no_plan_no_execution` (now also
+asserts the interrupt this exact fixture triggers, since it no longer
+terminates the run directly). Full suite 362 → 381 passing, zero
+regressions.

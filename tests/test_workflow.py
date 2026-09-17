@@ -119,6 +119,7 @@ def _start(
         "clarification_answers": {},
         "execution_inputs": execution_inputs or {},
         "planning_result": None,
+        "execution_input_recovery": None,
         "pending_execution": pending_execution,
         "approval_decision": None,
         "execution_result": None,
@@ -612,6 +613,7 @@ class TestPlanExecutionIntegration:
         *,
         approval_policy: str = "allowed",
         input_schema: tuple[InputField, ...] = (),
+        binding_id: str | None = None,
     ) -> "FakeRuntime":
         # A distinct runtime_id per skill_id — registering two bindings that
         # both default to "fake-runtime" would silently overwrite one
@@ -624,7 +626,7 @@ class TestPlanExecutionIntegration:
         execution_registry.register_binding(
             ExecutionBinding(
                 skill_id=skill_id,
-                binding_id=f"{skill_id}-v1",
+                binding_id=binding_id or f"{skill_id}-v1",
                 runtime_id=rt.runtime_id,
                 approval_policy=approval_policy,  # type: ignore[arg-type]
                 verified=True,
@@ -674,6 +676,9 @@ class TestPlanExecutionIntegration:
             },
             "candidate_skill_ids": (),
             "missing_inputs": (),
+            "selected_skill_id": "trt-perf-analysis",
+            "selected_binding_id": "trt-perf-analysis-v1",
+            "selected_input_schema": (),
         }
 
     def test_no_executable_candidate_reaches_end_without_execution(
@@ -722,6 +727,12 @@ class TestPlanExecutionIntegration:
         ]
 
     def test_missing_required_input_no_plan_no_execution(self, tmp_path: Path) -> None:
+        """Since ADR-0010 §13, a first-pass missing_required_inputs result
+        no longer terminates the run directly — it pauses at the new
+        provide_execution_inputs interrupt instead. This still proves "no
+        plan, no execution" up to the point of the pause; the recovery
+        round itself (resuming this interrupt) is covered by
+        TestProvideExecutionInputsRecovery below."""
         execution_registry = ExecutionBindingRegistry()
         self._register(
             execution_registry,
@@ -742,6 +753,13 @@ class TestPlanExecutionIntegration:
         assert result["planning_result"]["status"] == "missing_required_inputs"
         assert result["planning_result"]["plan"] is None
         assert list(result["planning_result"]["missing_inputs"]) == ["path"]
+
+        assert "__interrupt__" in result
+        payload = result["__interrupt__"][0].value
+        assert payload["type"] == "provide_execution_inputs"
+        assert payload["skill_id"] == "trt-perf-analysis"
+        assert payload["binding_id"] == "trt-perf-analysis-v1"
+        assert payload["missing_inputs"] == [{"name": "path", "description": "folder path"}]
 
     def test_execution_inputs_satisfy_missing_required_input_and_produce_a_plan(
         self, tmp_path: Path
@@ -939,3 +957,460 @@ class TestPlanExecutionIntegration:
         after = _normalized(resumed)
 
         assert after == before
+
+
+class TestProvideExecutionInputsRecovery:
+    """
+    ADR-0010 §13: same-session recovery from planning_result.status ==
+    "missing_required_inputs" via the new provide_execution_inputs
+    interrupt. Self-contained fixtures, same convention as
+    TestPlanExecutionIntegration (not reused directly, to keep each class's
+    tests independently readable/runnable).
+    """
+
+    def _graph_for(
+        self,
+        tmp_path: Path,
+        execution_registry: ExecutionBindingRegistry,
+        *,
+        skill_ids: tuple[str, ...],
+    ):
+        for skill_id in skill_ids:
+            _write_planning_skill(tmp_path, skill_id)
+        executor = SkillExecutor(execution_registry)
+        skill_inventory = SkillInventory(
+            sources=(LocalSkillSource(roots=(tmp_path,)),),
+            is_executable=executor.can_execute,
+        )
+        registry = CapabilityRegistry(_REGISTRY_PATH)
+        registry.load()
+        task_resolver = TaskResolver(capability_registry=registry, skill_inventory=skill_inventory)
+        analyzer = RequirementsAnalyzer(task_resolver=task_resolver, llm=None)
+        return build_requirements_workflow_graph(
+            requirements_analyzer=analyzer,
+            executor=executor,
+            skill_inventory=skill_inventory,
+            execution_registry=execution_registry,
+            checkpointer=MemorySaver(),
+        )
+
+    @staticmethod
+    def _register(
+        execution_registry: ExecutionBindingRegistry,
+        skill_id: str,
+        *,
+        approval_policy: str = "allowed",
+        input_schema: tuple[InputField, ...] = (),
+        binding_id: str | None = None,
+    ) -> "FakeRuntime":
+        rt = FakeRuntime(
+            runtime_id=f"fake-runtime-{skill_id}",
+            outcome=RuntimeOutcome(success=True, output={"ok": True}),
+        )
+        execution_registry.register_runtime(rt)
+        execution_registry.register_binding(
+            ExecutionBinding(
+                skill_id=skill_id,
+                binding_id=binding_id or f"{skill_id}-v1",
+                runtime_id=rt.runtime_id,
+                approval_policy=approval_policy,  # type: ignore[arg-type]
+                verified=True,
+                input_schema=input_schema,
+            )
+        )
+        return rt
+
+    _TWO_REQUIRED_SCHEMA = (
+        InputField(name="path", required=True, description="folder path"),
+        InputField(name="model_name", required=True, description="model label"),
+    )
+
+    # ── Full, valid resume ("supplied") ─────────────────────────────────
+
+    def test_full_valid_resume_produces_a_plan_and_reaches_approval_gate(
+        self, tmp_path: Path
+    ) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        started = _start(graph, _PLANNING_TASK, "rec-1")
+        assert started["__interrupt__"][0].value["type"] == "provide_execution_inputs"
+
+        resumed = _resume(graph, "rec-1", {"path": "/data/clips"})
+
+        assert "__interrupt__" not in resumed
+        assert resumed["status"] == "done"
+        assert resumed["pending_execution"] == {
+            "skill_id": "trt-perf-analysis",
+            "inputs": {"path": "/data/clips"},
+            "task": _PLANNING_TASK,
+        }
+        assert resumed["execution_result"]["status"] == "completed"
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "supplied"
+        assert recovery["terminal"] is False
+        assert recovery["accepted"] == ["path"]
+        assert recovery["still_missing"] == []
+
+    def test_full_input_field_contract_survives_the_real_checkpoint_round_trip(
+        self, tmp_path: Path
+    ) -> None:
+        """
+        Explicit verification (requested on PR #33 review): the
+        identity+schema guard's `expected_input_schema` snapshot must
+        preserve the FULL InputField contract — name, required, description,
+        AND default — not just field names, through the real checkpoint
+        (MemorySaver, via _start()/_resume(), not a bypassed/mocked path),
+        and the comparison must be deterministic (no false-positive
+        "schema_changed" for a genuinely unchanged binding). A multi-field
+        schema with a non-None default and real description text is used
+        deliberately, since a single bare-minimum field wouldn't exercise
+        default/description at all.
+        """
+        schema = (
+            InputField(name="path", required=True, description="folder containing layer JSON"),
+            InputField(
+                name="model_name",
+                required=True,
+                description="human-readable model label",
+                default="unnamed-model",
+            ),
+        )
+        execution_registry = ExecutionBindingRegistry()
+        self._register(execution_registry, "trt-perf-analysis", input_schema=schema)
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        started = _start(graph, _PLANNING_TASK, "rec-verify-1")
+        payload = started["__interrupt__"][0].value
+        # The payload itself (built pre-interrupt from the checkpointed
+        # planning_result, never a live lookup — ADR-0010 §13.3) already
+        # carries per-field descriptions, proving more than bare names
+        # reached this point.
+        assert {"name": "path", "description": "folder containing layer JSON"} in payload[
+            "missing_inputs"
+        ]
+        assert {
+            "name": "model_name",
+            "description": "human-readable model label",
+        } in payload["missing_inputs"]
+
+        resumed = _resume(
+            graph, "rec-verify-1", {"path": "/data/clips", "model_name": "resnet50"}
+        )
+
+        recovery = resumed["execution_input_recovery"]
+        # No false-positive mismatch for a binding that never actually
+        # changed — proves the structural comparison is correct, not just
+        # permissive.
+        assert recovery["outcome"] == "supplied"
+        assert recovery["terminal"] is False
+        assert recovery["mismatch_detail"] is None
+        # The stored snapshot itself carries all four InputField fields per
+        # entry, in declaration order — not just names.
+        assert recovery["expected_input_schema"] == [
+            {
+                "name": "path",
+                "required": True,
+                "description": "folder containing layer JSON",
+                "default": None,
+            },
+            {
+                "name": "model_name",
+                "required": True,
+                "description": "human-readable model label",
+                "default": "unnamed-model",
+            },
+        ]
+        assert resumed["pending_execution"] == {
+            "skill_id": "trt-perf-analysis",
+            "inputs": {"path": "/data/clips", "model_name": "resnet50"},
+            "task": _PLANNING_TASK,
+        }
+
+    def test_approval_required_binding_still_gates_after_successful_recovery(
+        self, tmp_path: Path
+    ) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        runtime = self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            approval_policy="approval_required",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-2")
+        after_recovery = _resume(graph, "rec-2", {"path": "/data/clips"})
+
+        # A valid recovery must not itself execute or auto-approve — a
+        # second, independent interrupt (approval) is still required.
+        assert "__interrupt__" in after_recovery
+        assert after_recovery["__interrupt__"][0].value["type"] == "approval"
+        assert runtime.calls == []
+
+        approved = _resume(graph, "rec-2", "approved")
+        assert approved["approval_decision"] == "approved"
+        assert approved["execution_result"]["status"] == "completed"
+        assert runtime.calls == [("trt-perf-analysis", {"path": "/data/clips"})]
+
+    # ── Incomplete / invalid / cancelled — all terminal, no second ask ────
+
+    def test_partial_resume_is_incomplete_and_terminates_without_approval(
+        self, tmp_path: Path
+    ) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry, "trt-perf-analysis", input_schema=self._TWO_REQUIRED_SCHEMA
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-3")
+        resumed = _resume(graph, "rec-3", {"path": "/data/clips"})  # model_name omitted
+
+        assert "__interrupt__" not in resumed
+        assert resumed["status"] == "done"
+        assert resumed["pending_execution"] is None
+        assert resumed["approval_decision"] is None
+        assert resumed["execution_result"] is None
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "incomplete"
+        assert recovery["terminal"] is True
+        assert recovery["accepted"] == ["path"]
+        assert recovery["still_missing"] == ["model_name"]
+        assert resumed["planning_result"]["status"] == "missing_required_inputs"
+
+    def test_mixed_valid_and_invalid_values_still_classify_as_incomplete(
+        self, tmp_path: Path
+    ) -> None:
+        """One field valid, the other explicitly attempted but blank — not
+        merely omitted. Must classify identically to a plain omission:
+        "incomplete", not a distinct category, per ADR-0010 §13's
+        deterministic classification rule."""
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry, "trt-perf-analysis", input_schema=self._TWO_REQUIRED_SCHEMA
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-4")
+        resumed = _resume(graph, "rec-4", {"path": "/data/clips", "model_name": "   "})
+
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "incomplete"
+        assert recovery["terminal"] is True
+        assert recovery["accepted"] == ["path"]
+        assert recovery["still_missing"] == ["model_name"]
+        assert recovery["rejected"] == [{"name": "model_name", "reason": "blank"}]
+        assert resumed["pending_execution"] is None
+
+    def test_all_invalid_values_result_in_invalid_outcome(self, tmp_path: Path) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-5")
+        resumed = _resume(
+            graph, "rec-5", {"path": "", "totally_unrelated_field": "x"}
+        )
+
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "invalid"
+        assert recovery["terminal"] is True
+        assert recovery["accepted"] == []
+        assert recovery["still_missing"] == ["path"]
+        assert {"name": "path", "reason": "blank"} in recovery["rejected"]
+        assert {"name": "totally_unrelated_field", "reason": "not_declared"} in recovery["rejected"]
+        assert resumed["pending_execution"] is None
+        assert resumed["approval_decision"] is None
+        assert resumed["execution_result"] is None
+
+    def test_empty_resume_is_cancelled(self, tmp_path: Path) -> None:
+        """Resume with a falsy, non-mapping value — an empty string, not a
+        literal `{}`. Confirmed empirically (not assumed): LangGraph's
+        `Command(resume=...)` does not actually deliver a literal empty
+        dict — the graph silently re-pauses at the same interrupt instead
+        of resuming, the same latent gap `clarify`'s own resume handling
+        has (its test suite's existing `Command(resume=None)` comment
+        claims "`{}` is the correct way to represent no answer", which this
+        node's own tests found does not hold for an empty *dict*
+        specifically — `None` and `{}` both fail to deliver; any other
+        falsy value, e.g. `""`, delivers correctly). This node's own
+        classification logic (`_classify_execution_input_resume`) already
+        handles a literal `{}` correctly *if* it were ever delivered — the
+        constraint is LangGraph's, not this node's — so this test exercises
+        the same "declined" code path through a value LangGraph actually
+        delivers, rather than asserting on an undeliverable one."""
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-6")
+        resumed = _resume(graph, "rec-6", "")
+
+        assert "__interrupt__" not in resumed
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "cancelled"
+        assert recovery["terminal"] is True
+        assert resumed["pending_execution"] is None
+        assert resumed["approval_decision"] is None
+        assert resumed["execution_result"] is None
+
+    def test_non_mapping_resume_is_treated_as_cancelled_no_crash(
+        self, tmp_path: Path
+    ) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-7")
+        resumed = _resume(graph, "rec-7", "oops not a dict")
+
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "cancelled"
+        assert recovery["terminal"] is True
+        assert resumed["pending_execution"] is None
+
+    def test_recovery_is_one_shot_no_second_interrupt(self, tmp_path: Path) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry, "trt-perf-analysis", input_schema=self._TWO_REQUIRED_SCHEMA
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-8")
+        # Deliberately still incomplete after this one resume.
+        resumed = _resume(graph, "rec-8", {"path": "/data/clips"})
+
+        assert "__interrupt__" not in resumed
+        assert resumed["status"] == "done"
+        assert [s["node"] for s in resumed["steps"]].count("provide_execution_inputs") == 1
+
+    def test_clarification_answers_and_execution_inputs_stay_separate(
+        self, tmp_path: Path
+    ) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-9")
+        resumed = _resume(graph, "rec-9", {"path": "/data/clips"})
+
+        assert resumed["clarification_answers"] == {}
+        assert resumed["execution_inputs"] == {"path": "/data/clips"}
+
+    # ── Binding identity / schema mutated during the pause ────────────────
+
+    def test_binding_identity_changed_during_pause_is_detected(
+        self, tmp_path: Path
+    ) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-10")
+
+        # Re-register a DIFFERENT binding_id under the same skill_id while
+        # the run sits paused — simulates a registry mutation mid-wait.
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+            binding_id="trt-perf-analysis-v2-different",
+        )
+
+        resumed = _resume(graph, "rec-10", {"path": "/data/clips"})
+
+        assert "__interrupt__" not in resumed
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "binding_mismatch"
+        assert recovery["mismatch_detail"] == "identity_changed"
+        assert recovery["terminal"] is True
+        assert resumed["pending_execution"] is None
+        assert resumed["approval_decision"] is None
+        assert resumed["execution_result"] is None
+        # Even though the fresh plan_execution() call itself would have
+        # reported "planned" for the new binding — the mismatch guard
+        # overrides it, never silently switching to a different binding.
+        assert resumed["planning_result"]["status"] == "planned"
+
+    def test_schema_changed_same_binding_id_is_detected(self, tmp_path: Path) -> None:
+        """ID equality alone must not be trusted: the same binding_id is
+        re-registered with a structurally different input_schema (an extra
+        required field) while the run is paused."""
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+            binding_id="stable-id-v1",
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-11")
+
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=self._TWO_REQUIRED_SCHEMA,  # path + model_name now
+            binding_id="stable-id-v1",  # same binding_id as before
+        )
+
+        resumed = _resume(graph, "rec-11", {"path": "/data/clips"})
+
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "binding_mismatch"
+        assert recovery["mismatch_detail"] == "schema_changed"
+        assert recovery["terminal"] is True
+        assert resumed["pending_execution"] is None
+        assert resumed["approval_decision"] is None
+        assert resumed["execution_result"] is None
+
+    # ── Precedence / first-pass regressions ───────────────────────────────
+
+    def test_caller_supplied_pending_execution_never_triggers_this_interrupt(
+        self, tmp_path: Path
+    ) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="folder path"),),
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        result = _start(
+            graph,
+            _PLANNING_TASK,
+            "rec-12",
+            pending_execution={"skill_id": "trt-perf-analysis", "inputs": {}, "task": "t"},
+        )
+
+        assert "__interrupt__" not in result
+        assert result["execution_input_recovery"] is None
+        assert result["planning_result"] is None
+        assert result["pending_execution"]["skill_id"] == "trt-perf-analysis"

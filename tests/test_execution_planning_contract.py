@@ -367,3 +367,106 @@ class TestPlanExecution:
         result = plan_execution(_analysis(()), _registry())
         with pytest.raises(dataclasses.FrozenInstanceError):
             result.status = "planned"  # type: ignore[misc]
+
+
+class TestPlanningResultSelectedIdentity:
+    """ADR-0010 §13: selected_skill_id/selected_binding_id/
+    selected_input_schema — the checkpointed identity+contract snapshot a
+    same-session recovery round compares against on retry."""
+
+    def test_populated_when_planned(self) -> None:
+        schema = (InputField(name="path", required=True, description="folder path"),)
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema)),
+            available_inputs={"path": "/tmp/x"},
+        )
+        assert result.status == "planned"
+        assert result.selected_skill_id == "skill-a"
+        assert result.selected_binding_id == "skill-a-fake-v1"
+        assert result.selected_input_schema == schema
+
+    def test_populated_when_missing_required_inputs(self) -> None:
+        schema = (InputField(name="path", required=True, description="folder path"),)
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links), _registry(_binding("skill-a", input_schema=schema))
+        )
+        assert result.status == "missing_required_inputs"
+        assert result.selected_skill_id == "skill-a"
+        assert result.selected_binding_id == "skill-a-fake-v1"
+        assert result.selected_input_schema == schema
+
+    def test_absent_when_no_executable_candidate(self) -> None:
+        result = plan_execution(_analysis(()), _registry())
+        assert result.status == "no_executable_candidate"
+        assert result.selected_skill_id is None
+        assert result.selected_binding_id is None
+        assert result.selected_input_schema is None
+
+    def test_absent_when_ambiguous(self) -> None:
+        links = (_skill_link("skill-a"), _skill_link("skill-b"))
+        result = plan_execution(
+            _analysis(links), _registry(_binding("skill-a"), _binding("skill-b"))
+        )
+        assert result.status == "ambiguous_candidates"
+        assert result.selected_skill_id is None
+        assert result.selected_binding_id is None
+        assert result.selected_input_schema is None
+
+    def test_empty_input_schema_is_a_real_empty_tuple_not_none(self) -> None:
+        """A binding with no declared input_schema at all (the default,
+        true of trt-perf-analysis today) still reports a real, empty
+        selected_input_schema — distinct from None, which means "no single
+        candidate was selected" (the two prior tests)."""
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(_analysis(links), _registry(_binding("skill-a")))
+        assert result.status == "planned"
+        assert result.selected_input_schema == ()
+
+    def test_asdict_preserves_the_full_input_field_contract_per_entry(self) -> None:
+        """Explicit verification (requested on PR #33 review): the
+        `dataclasses.asdict()` serialization the workflow layer stores into
+        AgentState (checkpointer-safe, per ADR-0003 §3) must preserve every
+        InputField attribute — name, required, description, AND default —
+        for every entry, in declaration order, not just field names. This
+        is what `_node_plan_execution`'s identity+schema guard (ADR-0010
+        §13.5) ultimately compares; if asdict() ever silently dropped a
+        field, the guard's structural comparison would be comparing an
+        incomplete contract without any test catching it here."""
+        schema = (
+            InputField(name="path", required=True, description="folder path"),
+            InputField(
+                name="model_name",
+                required=False,
+                description="model label",
+                default="unnamed",
+            ),
+        )
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema)),
+            available_inputs={"path": "/tmp/x"},
+        )
+        assert result.status == "planned"
+
+        serialized = dataclasses.asdict(result)
+        # dataclasses.asdict() applied directly (no LangGraph checkpoint
+        # involved here) preserves the tuple container itself — only a real
+        # checkpoint round-trip turns it into a list (ADR-0004's documented
+        # instability; also true for candidate_skill_ids/missing_inputs
+        # elsewhere in this same PlanningResult). The workflow-layer
+        # comparison in _node_plan_execution normalizes both sides to
+        # list[dict] before comparing regardless (ADR-0010 §13.5) — this
+        # test verifies the per-entry field contents, not container type.
+        assert serialized["selected_input_schema"] == (
+            {"name": "path", "required": True, "description": "folder path", "default": None},
+            {
+                "name": "model_name",
+                "required": False,
+                "description": "model label",
+                "default": "unnamed",
+            },
+        )

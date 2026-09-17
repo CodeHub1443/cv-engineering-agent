@@ -53,26 +53,6 @@ not.
 
 **Q10.** Dataset storage and versioning: DVC, Git LFS, or external object store? `[P§26]`
 
-**Q17.** *Narrowed 2026-09-17 (ADR-0010 §12):* a caller who already knows a required
-execution input's value **before** a run starts now has a real channel —
-`CVAgent.start_workflow(execution_inputs=...)`, keyed by `InputField.name`
-(ADR-0009 §11), read by the `plan_execution` node as `plan_execution()`'s
-`available_inputs`. That sub-case is closed. What remains open: a caller who only
-learns the missing value **after** `plan_execution` (`cv_agent/graph/workflow.py`)
-already produced `planning_result.status == "missing_required_inputs"` (ADR-0010
-§11) has no way to supply it and continue the *same* session — `plan_execution` never
-re-runs once the graph has moved past it (`approval_gate`/`END`), and V1 has no
-same-session retry (ADR-0010 §12, explicit V1 scope decision). Should this instead
-offer a **third interrupt kind** (`provide_execution_inputs`, architecturally
-consistent with the existing `clarify` interrupt, ADR-0003) that pauses and asks a
-human for the missing value before constructing the plan, in the same run? Still not
-decided — a real UX/product decision (how proactive should the agent be about asking
-vs. requiring a fresh call), not something ADR-0010's contract-only scope should
-decide unilaterally. *Blocks: adding interrupt-based, same-session recovery for the
-"missing input, not known in advance" case — does not block the current, shipped
-pre-supply channel (ADR-0010 §12) or the no-plan default when no value is ever
-supplied.*
-
 **Q18.** When ADR-0010's V1 selection rule finds **more than one** executable
 `SkillLink` candidate for a task component, it explicitly produces no plan rather than
 silently picking one (`[P§35]`) — surfaced via `AgentState.planning_result.
@@ -96,6 +76,22 @@ connector — or anything else — ever selects a candidate whose binding is
 `approval_required`. `[P§24]`, `[P§29.8]`. *Blocks: any `approval_required` binding
 being exercised through a real, non-fake approval flow with an actual estimate
 attached, including via ADR-0010's future planning connector.*
+
+**Q20.** *New 2026-09-17 (ADR-0010 §13, discovered while resolving Q17).*
+`ExecutionBinding.input_schema`/`InputField.required: bool` (ADR-0009 §11) is
+deliberately flat and cannot express `trt-perf-analysis`'s real input contract,
+confirmed by direct inspection of `_build_argv()`: exactly one of `path`/`data` is
+required (a genuine XOR), not `path` unconditionally. Marking either field
+`required=True` would misrepresent the contract (`[P§35]`); marking both
+`required=False` would be truthful but could never trigger
+`missing_required_inputs` for this binding at all. What should the schema model
+gain — a oneOf/XOR field-group construct, a separate validation callback, something
+else — and who owns designing it? Not decided; `trt_perf_analysis.build_binding()`
+is deliberately left with `input_schema=()` until this is resolved. *Blocks: a
+genuine, unfaked end-to-end test of ADR-0010 §13's same-session recovery flow
+against the real installed `trt-perf-analysis` binding (today's tests use a
+synthetic fixture binding instead) — does not block §13's recovery mechanism
+itself, which is binding-agnostic.*
 
 ## Deferrable
 
@@ -154,3 +150,19 @@ No external database/service is required for V1. This resolves Q8 for **project
 memory only** — the experiment ledger's own backend question is unaffected and spun
 off separately as **Q16** (Soon), since ADR-0004 does not move `EXPERIMENTS.md` into
 SQLite or change its contract. See D-017, ADR-0004.
+
+~~**Q17.** Same-session recovery when `plan_execution` returns
+`missing_required_inputs`.~~ *Narrowed 2026-09-17 (ADR-0010 §12):* a caller who
+already knows a required execution input's value **before** a run starts got a real
+channel — `CVAgent.start_workflow(execution_inputs=...)`. — **Answered 2026-09-17
+(ADR-0010 §13):** a caller who only learns the missing value **after**
+`plan_execution` already produced `planning_result.status ==
+"missing_required_inputs"` now has a same-session recovery path — a third interrupt
+kind, `provide_execution_inputs`, architecturally consistent with the existing
+`clarify` interrupt (ADR-0003), bounded to exactly one prompt per run, gated by an
+explicit identity+schema comparison against checkpointed state before any plan may
+be produced from it, and bypassing `approval_gate` entirely on any
+incomplete/invalid/cancelled/binding-mismatch outcome so a failed recovery can never
+be read as "approval not required." See ADR-0010 §13 for the full design. Spun off a
+new, separate, unresolved question, **Q20**, for the TRT `path`/`data` XOR contract
+this work found `InputField`'s flat schema model cannot express.

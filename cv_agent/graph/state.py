@@ -88,14 +88,19 @@ class AgentState(TypedDict, total=False):
     "deployment_target") mean different things, and treating one as the
     other would be exactly the kind of silent inference `[P§35]` forbids.
 
-    Set only via an explicit `CVAgent.start_workflow(execution_inputs=...)`
+    Set via an explicit `CVAgent.start_workflow(execution_inputs=...)`
     argument (ADR-0010 §12) — empty (`{}`) by default, never inferred or
     pre-filled by any node. `plan_execution` reads this verbatim as
-    `plan_execution()`'s `available_inputs` parameter; nothing else in the
-    graph writes to it. V1 is pre-supply only: there is no interrupt that
-    asks for a missing value mid-run (see `docs/state/OPEN_QUESTIONS.md`
-    Q17, still open) — a caller who did not know the value before
-    `start_workflow()` was called must retry with a new run once it does."""
+    `plan_execution()`'s `available_inputs` parameter. Since ADR-0010 §13,
+    this dict is also the one place `provide_execution_inputs` (a
+    same-session recovery interrupt, see `execution_input_recovery` below)
+    merges a human-supplied value into, on resume — still never inferred
+    from `clarification_answers`, still the exact same namespace/contract
+    as the pre-supplied case, just a second, later write source for the
+    same field. `docs/state/OPEN_QUESTIONS.md` Q17 is resolved by §13 for
+    the "missing value discovered only after planning" case; see §13's own
+    documented scope for what remains a fresh-run-only limitation (a second
+    interrupt/resume round is never offered)."""
 
     # ── Planning (ADR-0010) ──────────────────────────────────────────────
     planning_result: Optional[dict[str, Any]]
@@ -118,7 +123,60 @@ class AgentState(TypedDict, total=False):
     — a caller-supplied plan is never a `plan_execution()` decision, so
     there is no `PlanningResult` to report for it. `steps` still carries a
     `"caller_supplied_pending_execution_preserved"` entry for that case,
-    same as before this field existed."""
+    same as before this field existed.
+
+    Since ADR-0010 §13: also carries `selected_skill_id`/
+    `selected_binding_id`/`selected_input_schema`, populated whenever
+    exactly one candidate was selected (status "planned" or
+    "missing_required_inputs") — see `cv_agent.graph.planning.
+    PlanningResult`. This is what `execution_input_recovery` below compares
+    against on a retry."""
+
+    # ── Execution-input recovery (ADR-0010 §13) ──────────────────────────
+    execution_input_recovery: Optional[dict[str, Any]]
+    """Same-session recovery from `planning_result.status ==
+    "missing_required_inputs"` via a third interrupt kind,
+    `provide_execution_inputs` — architecturally consistent with `clarify`
+    but a distinct namespace: it only ever reads/writes `execution_inputs`
+    above, never `clarification_answers`, and never infers one from the
+    other (`[P§35]`). Limited to exactly one interrupt/resume round per
+    workflow run — a partial, invalid, or cancelled answer is a terminal
+    outcome, never a second prompt.
+
+    Shape: `{"attempted": bool, "outcome": "supplied" | "incomplete" |
+    "invalid" | "cancelled" | "binding_mismatch", "terminal": bool | None,
+    "mismatch_detail": "identity_changed" | "schema_changed" |
+    "still_incomplete_after_supply" | None, "expected_skill_id": str,
+    "expected_binding_id": str, "expected_input_schema": list[dict],
+    "requested": list[str], "accepted": list[str], "still_missing":
+    list[str], "rejected": list[dict]}`.
+
+    Field ownership/timeline: `provide_execution_inputs` writes the record
+    once, on resume, reading `expected_skill_id`/`expected_binding_id`/
+    `expected_input_schema`/`requested` **only** from the already-
+    checkpointed `planning_result` — never a live `ExecutionBindingRegistry`
+    lookup, which would be replay-unsafe (LangGraph's dynamic `interrupt()`
+    re-runs a node's pre-interrupt code on resume; nothing this node reads
+    before `interrupt()` may depend on a live, mutable object). `outcome`
+    at this point is never `"binding_mismatch"` and `terminal` is left
+    `None` — both are finalized only by `plan_execution` on the retry this
+    always routes back to, which is the *only* place `pending_execution`
+    may be set from a recovery round: gated on comparing the fresh
+    `plan_execution()` call's `selected_skill_id`/`selected_binding_id`/
+    `selected_input_schema` against this record's checkpointed
+    `expected_*` fields, structurally, not by ID equality alone. This
+    intermediate/unfinalized shape is never externally observable —
+    `provide_execution_inputs -> plan_execution` is a plain edge, so both
+    nodes run inside one `resume_workflow()` call.
+
+    Terminal contract: `terminal is True` for every outcome except
+    `"supplied"` with a confirmed identity+schema match. When `terminal`,
+    `pending_execution`/`approval_decision`/`execution_result` are all
+    guaranteed `None` — the run reaches `status == "done"` without ever
+    calling `approval_gate` or `execute`. A caller distinguishes a
+    recovery-failure terminal from ordinary completion by checking
+    `execution_input_recovery.get("terminal")` alone, without reasoning
+    about the nullability of unrelated fields."""
 
     # ── Approval + execution (ADR-0003, ADR-0009) ───────────────────────────
     pending_execution: Optional[dict[str, Any]]
