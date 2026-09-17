@@ -80,6 +80,13 @@ class TestCLISkillsCapabilitiesResolve:
             # (ADR-0004 §1 item 13) — pin it to the isolated skill_root so
             # no test ever creates .cv_agent/ in the real repository.
             cwd=str(skill_root),
+            # `workflow` (PR #34) falls back to a live `input()` prompt for
+            # any interrupt field no --answer/--input flag covers. Pin
+            # stdin closed so that fallback always sees immediate EOF and
+            # this test suite never blocks waiting on a real terminal,
+            # regardless of what the *parent* test-runner process's own
+            # stdin happens to be connected to.
+            stdin=subprocess.DEVNULL,
         )
 
     def _write_skill(self, root: Path, skill_id: str, description: str) -> None:
@@ -239,14 +246,51 @@ class TestCLISkillsCapabilitiesResolve:
         assert result.returncode == 0, result.stderr
         assert before == after
 
-    def test_workflow_command_demonstrates_interrupt_and_resume(self, tmp_path: Path) -> None:
+    def test_workflow_command_demonstrates_interrupt_and_aborts_cleanly_unanswered(
+        self, tmp_path: Path
+    ) -> None:
+        """No --answer supplied and no stdin available: every question falls
+        back to a live prompt, gets EOF, and is left unanswered — never a
+        fabricated placeholder (the pre-PR-#34 behavior this replaces).
+
+        With every question declined, `clarification_answers` stays empty
+        every round and `cv_agent/graph/workflow.py`'s own
+        `_route_after_analysis` (a pre-existing, documented gap, not
+        introduced here — see `_MAX_INTERRUPT_ROUNDS`'s docstring in
+        `cv_agent/__main__.py`) re-raises the same `clarify` interrupt
+        indefinitely rather than treating "asked and declined" as answered.
+        This CLI-only safety net aborts cleanly instead of hanging; it does
+        not — and, per this task's approved scope, must not — touch the
+        graph's own routing to fix the underlying gap."""
         result = self._run(
             ["workflow", "I have a prison project. Escape-attempt detection."], tmp_path
         )
+        assert result.returncode == 3, result.stdout
+        assert "[INTERRUPT] clarification" in result.stdout
+        assert "[demo answer" not in result.stdout
+        assert "Aborted: workflow raised more than" in result.stderr
+
+    def test_workflow_command_answers_real_clarification_questions_via_flag(
+        self, tmp_path: Path
+    ) -> None:
+        """A real, caller-supplied --answer is used verbatim and echoed as
+        such — never silently dropped, never confused with a live prompt."""
+        result = self._run(
+            [
+                "workflow",
+                "I have a prison project. Escape-attempt detection.",
+                "--answer",
+                "deployment_target=jetson-orin",
+                "--answer",
+                "accuracy_requirement=recall above 95%",
+            ],
+            tmp_path,
+        )
         assert result.returncode == 0, result.stderr
-        assert "[INTERRUPT] Clarification needed" in result.stdout
-        assert "[RESUME] Resuming the same paused run" in result.stdout
-        assert "Status after resume: done" in result.stdout
+        assert "deployment_target -> 'jetson-orin' (from --answer)" in result.stdout
+        assert "'deployment_target': 'jetson-orin'" in result.stdout
+        assert "Assumed fields:" in result.stdout
+        assert "deployment_target" in result.stdout.split("Assumed fields:")[1].split("\n")[0]
 
     def test_workflow_command_skips_interrupt_for_fully_specified_request(
         self, tmp_path: Path
@@ -261,7 +305,8 @@ class TestCLISkillsCapabilitiesResolve:
             tmp_path,
         )
         assert result.returncode == 0, result.stderr
-        assert "No clarification needed" in result.stdout
+        assert "[INTERRUPT]" not in result.stdout
+        assert "Final status: done" in result.stdout
 
     def test_resolve_command_does_not_trigger_execution(self, tmp_path: Path) -> None:
         """The resolve command must never invoke execution — 'Executable'

@@ -121,10 +121,16 @@ that actually pauses and waits for the human's answer, then re-runs the analysis
 it — `CVAgent.start_workflow()`/`.resume_workflow()` / `python -m cv_agent workflow`.
 ADR-0004 accepted; `start_workflow()` persists a `SessionRecord` and, when a run's
 requirements analysis changes, a `ProjectUnderstandingRevision`, to durable, SQLite-
-backed project memory. **Not done:** the CLI's `workflow` command only demonstrates the
-interrupt/resume mechanics with synthetic answers, not real ones (no CLI path accepts
-real clarification answers or a `pending_execution` payload yet), and this workflow
-graph is separate from `run()`'s own graph, not merged into it (ADR-0003 §4/§8).
+backed project memory. `python -m cv_agent workflow` now accepts real, caller-supplied
+input for all three interrupt kinds (`clarify`/`provide_execution_inputs`/
+`approval_gate`) via `--answer`/`--input`/`--approve`/`--reject` or a live stdin
+prompt — never a fabricated placeholder. **Not done:** this command still never
+registers an execution binding or accepts a `pending_execution` payload, so
+`approval_gate`/`provide_execution_inputs` remain unreachable through it against any
+real installed skill (a separate, not-yet-authorized decision); this workflow graph
+is separate from `run()`'s own graph, not merged into it (ADR-0003 §4/§8); and a
+real, pre-existing gap was found (not fixed, `docs/state/OPEN_QUESTIONS.md` Q21) where
+declining every clarification question can re-raise `clarify` indefinitely.
 
 **Exit test:** given "I have a prison project — escape-attempt detection", the agent asks
 targeted operational questions before naming any model, and produces a written
@@ -132,8 +138,8 @@ PROJECT UNDERSTANDING + CV TASK DECOMPOSITION persisted to project memory. If it
 YOLO before the questions, the phase fails. *(Questions + decomposition half: met via
 `analyze_requirements()`, now with a real pause-for-answer via `start_workflow()`/
 `resume_workflow()`. Persistence-to-memory half: met — `start_workflow()` writes to
-`cv_agent/memory/` — but only programmatically; the CLI `workflow` demo doesn't drive
-it with real answers.)*
+`cv_agent/memory/`, now driven by real CLI-supplied answers, not only
+programmatically.)*
 
 ---
 

@@ -788,3 +788,90 @@ status.
                branch via `git diff main` — not fixed, out of scope. Full suite 362
                → 379 passing, zero regressions. Branch
                `feature/claude/q17-input-recovery`, not `main`.
+
+## 2026-09-18 — Real CLI input handling for `workflow` (issue #34, PR pending)
+**Did:**       Replaced `python -m cv_agent workflow`'s auto-fabricated
+               placeholder clarification answers with real, caller-supplied
+               input across all three interrupt kinds (`clarify`,
+               `provide_execution_inputs` since ADR-0010 §13,
+               `approval_gate`) — `--answer`/`--input` KEY=VALUE flags
+               (repeatable, `--input` reusing `execute`'s existing
+               convention), `--approve`/`--reject` (mutually exclusive), and
+               a live stdin prompt for anything a flag doesn't cover, never a
+               fabricated value. New `_resume_value_for_interrupt` (pure
+               dispatch on the interrupt's own `payload["type"]`),
+               `_run_workflow_interactive` (drives the resume loop, duck-
+               typed to `CVAgent.start_workflow()`/`.resume_workflow()`),
+               `_print_workflow_summary`, all in `cv_agent/__main__.py`.
+               Also fixed a stale/self-contradictory `docs/state/STATUS.md`
+               (PR #33 shown as unmerged/pending when `main` was already at
+               `93549de`; two of its own "next actions" directly
+               contradicted its "do not start yet" list) — kept in its own
+               PR (#35) per explicit instruction, not mixed into this one.
+**Why:**       `docs/roadmap/ROADMAP.md` Phase 4 already named this
+               explicitly as the remaining gap: the CLI only ever
+               demonstrated interrupt/resume mechanics with synthetic
+               answers. Since PR #33, a third interrupt kind existed at the
+               graph level but was completely unreachable through any CLI
+               path. Pure CLI-layer glue over the already-accepted
+               `CVAgent` API (ADR-0003/ADR-0010 §10–§13) — no ADR needed, no
+               new module/interface/state shape `[P§34]`.
+**Broke:**     Found a genuine, pre-existing, unrelated bug while testing
+               the real (non-synthetic) path for the first time:
+               `cv_agent/graph/workflow.py`'s `_route_after_analysis`
+               decides whether to re-raise `clarify` using
+               `bool(state.get("clarification_answers"))` — truthiness, not
+               "already attempted." A human who declines every
+               clarification question resumes with an empty answers value,
+               stays falsy, and the graph re-raises the same `clarify`
+               interrupt **indefinitely** — reproduced directly (not a
+               hypothetical): a bare `python -m cv_agent workflow "<vague
+               task>"` with no `--answer` and closed stdin looped without
+               bound until manually killed. The prior CLI never surfaced
+               this because it always fabricated a non-empty placeholder
+               answer for every question, so `clarification_answers` was
+               never actually empty. Did **not** fix `_route_after_analysis`
+               itself — out of this issue's approved scope (CLI input
+               handling, not graph routing); instead added a CLI-only
+               `_MAX_INTERRUPT_ROUNDS` safety cap (`WorkflowStuckError`,
+               exit code 3, clear message) so the command aborts cleanly
+               instead of hanging. Filed as new `OPEN_QUESTIONS.md` Q21 for
+               the project owner to decide the real fix. Separately
+               confirmed (via `git stash` diff against `main`) that all
+               pre-existing `ruff`/`mypy` findings elsewhere in the repo
+               predate this branch; this branch's own two touched files are
+               fully clean, and actually fixed 2 of the old `__main__.py`
+               mypy errors as a side effect of properly typing the new code.
+**Learned:**   `_cmd_workflow` deliberately never registers any execution
+               binding (same honesty default as `analyze`/`resolve`/
+               `skills`), so `approval_gate`/`provide_execution_inputs` are
+               real and generic but **structurally unreachable** through
+               this CLI against any of the 84 real installed skills today —
+               independent of Q20 (even a hypothetically-wired binding
+               couldn't demonstrate them, since the only real one,
+               `trt-perf-analysis`, has no required inputs and an "allowed",
+               never-gated, policy). Verified both interrupt kinds for real
+               instead via (a) a fixture-graph-backed test double
+               (`_GraphAgent`, same construction `tests/test_workflow.py`
+               already uses) driving `_run_workflow_interactive` end-to-end
+               through a full clarify → provide_execution_inputs →
+               approval_gate → execute run in one call, and (b) one manual,
+               interactive-simulated run against a real `CVAgent` with a
+               synthetic binding registered directly on `agent.
+               execution_bindings` (mirroring `_cmd_execute`'s own real
+               registration pattern) — both honestly labeled as synthetic,
+               matching this codebase's existing Q20 posture.
+**Left open:** Q21 (the `_route_after_analysis` truthiness/infinite-loop
+               gap — real fix undecided). Q18/Q20 unchanged, not touched.
+               Wiring `pending_execution`/a binding choice into `workflow`
+               itself remains a separate, not-yet-authorized decision.
+               21 new/updated tests (2 rewritten + 1 new in `tests/
+               test_cli.py`, 21 new in new `tests/test_cli_workflow.py`).
+               Full suite 381 → 403 passing (381 was PR #33's merged
+               baseline, including its 2 post-review verification tests;
+               22 net new here), zero regressions. `ruff`/`mypy` clean on
+               both touched/new files.
+               Branch `feature/claude/workflow-cli-io`, not `main`. Issue
+               #34, PR pending; `docs/state/STATUS.md` correction is
+               separately PR #35, also pending — the two PRs' STATUS.md
+               diffs will need a rebase against whichever merges first.

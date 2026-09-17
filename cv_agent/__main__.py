@@ -9,13 +9,17 @@ Usage:
     python -m cv_agent analyze "<request>" requirements analysis + task decomposition
     python -m cv_agent executions          show execution bindings/runtimes + what's executable
     python -m cv_agent execute <skill_id>  run a verified skill through the real execution path
-    python -m cv_agent workflow "<task>"   demo: clarification interrupt -> answer -> resume
+    python -m cv_agent workflow "<task>"   requirements clarification / approval /
+                                            execution-input recovery, with real answers
+                                            (--answer, --input, --approve/--reject, or
+                                            interactive stdin — never a fabricated one)
     cv-agent ...                           (when installed via pip)
 """
 
 from __future__ import annotations
 
 import sys
+import uuid
 from argparse import ArgumentParser
 from typing import Any, Callable
 
@@ -406,14 +410,261 @@ def _cmd_execute(
     return 1
 
 
-def _cmd_workflow_demo(task: str) -> int:
+_MAX_INTERRUPT_ROUNDS = 8
+"""Generous upper bound over the graph's own documented maximum of three
+interrupt kinds per run — clarify, provide_execution_inputs, approval_gate,
+each at most once (ADR-0010 §13's own topology). This is a CLI-only safety
+net, not a fix, for a real, pre-existing gap this command is the first
+caller to actually reach: `_route_after_analysis` (`cv_agent/graph/
+workflow.py`) decides whether to route back to `clarify` again using
+`bool(state.get("clarification_answers"))` — truthiness, not "was this
+already attempted" (contrast `execution_input_recovery["attempted"]`,
+ADR-0010 §13's own hard-coded, never-truthiness-based bound, same file). A
+human who declines every clarification question resumes with an empty
+answers value, `clarification_answers` stays falsy, and the graph re-pauses
+at the same `clarify` interrupt indefinitely. The previous CLI never
+surfaced this because it always fabricated a non-empty placeholder answer
+for every question. Fixing the routing itself is a graph-layer change,
+out of this command's scope (`docs/state/STATUS.md`'s "do not start yet"
+already separately lists `clarify`'s related, also-documented, not-yet-fixed
+empty-dict-resume delivery gap) — this constant only stops the CLI from
+hanging forever on it."""
+
+
+class WorkflowStuckError(RuntimeError):
+    """Raised by `_run_workflow_interactive` when a workflow run re-raises
+    more interrupts than `_MAX_INTERRUPT_ROUNDS` allows for — see that
+    constant's own docstring for why this can happen at all."""
+
+
+def _resume_value_for_interrupt(
+    payload: dict[str, Any],
+    *,
+    answers: dict[str, str],
+    inputs: dict[str, str],
+    approve: bool,
+    reject: bool,
+    prompt: Callable[[str], str] = input,
+    out: Callable[[str], None] = print,
+) -> Any:
     """
-    Single-process smoke demo: request -> clarification interrupt -> answer
-    -> resume. Necessarily single-process — the default checkpointer
-    (MemorySaver) does not persist across process restarts, so a two-CLI-
-    invocation demo could not actually resume anything (see ADR-0003 §7).
-    Answers here are synthetic placeholders, clearly labeled as such; this
-    proves the interrupt/resume mechanics, not real requirements gathering.
+    Compute the real `Command(resume=...)` value for one paused interrupt —
+    never a fabricated placeholder. Dispatches on the interrupt's own
+    `payload["type"]` (ADR-0003 `clarify`/`approval`, ADR-0010 §13
+    `provide_execution_inputs`) — this function itself never talks to
+    LangGraph; `resume_workflow()` is generic across all three kinds
+    (see its own docstring), so this is the one place a caller's answer
+    is actually decided.
+
+    `answers`/`inputs` are the caller's pre-supplied `--answer`/`--input`
+    KEY=VALUE flags — reused verbatim for whichever field they name,
+    across however many rounds of that field's own interrupt kind occur
+    (at most one clarify round, at most one provide_execution_inputs
+    round, per ADR-0003/ADR-0010 §13). A field neither flag covers falls
+    back to a single live `prompt()` call — same "ask once, stop, never
+    silently approve" posture `_confirm_approval` already uses for
+    approval_gate, `docs/APPROVALS.md`, `[P§24]`.
+
+    A blank/EOF answer to a clarification question is simply omitted (an
+    empty-that-field, not a whole-interrupt cancel) — `_node_clarify`
+    already treats a missing field as "no answer for it", never
+    fabricating one (ADR-0003). For provide_execution_inputs, if every
+    field ends up blank/EOF, the resume value is `""` (a non-dict falsy
+    value) rather than `{}` — `resume_workflow()`'s own docstring
+    documents that a literal empty dict is not reliably delivered by the
+    installed LangGraph, so `""` is the correct way to signal "declined
+    to supply anything" and is classified "cancelled" the same way.
+    """
+    kind = payload.get("type")
+
+    if kind == "clarification":
+        collected: dict[str, str] = {}
+        for question in payload["questions"]:
+            field = question["relates_to_field"]
+            if field in answers:
+                out(f"  - {field} -> {answers[field]!r} (from --answer)")
+                collected[field] = answers[field]
+                continue
+            try:
+                value = prompt(
+                    f"  {question['question']} (why: {question['why_it_matters']})\n  > "
+                )
+            except EOFError:
+                value = ""
+            if value.strip():
+                collected[field] = value
+        return collected
+
+    if kind == "provide_execution_inputs":
+        collected = {}
+        for field in payload["missing_inputs"]:
+            name = field["name"]
+            if name in inputs:
+                out(f"  - {name} -> {inputs[name]!r} (from --input)")
+                collected[name] = inputs[name]
+                continue
+            try:
+                value = prompt(f"  {name} ({field['description']})\n  > ")
+            except EOFError:
+                value = ""
+            if value.strip():
+                collected[name] = value
+        return collected if collected else ""
+
+    if kind == "approval":
+        if approve:
+            return "approved"
+        if reject:
+            return "rejected"
+        try:
+            answer = prompt(
+                f"Approval required for skill '{payload['skill_id']}' via binding "
+                f"'{payload['binding_id']}' (policy=approval_required). "
+                "Approve execution? [y/N]: "
+            )
+        except EOFError:
+            return "rejected"
+        return "approved" if answer.strip().lower() in ("y", "yes") else "rejected"
+
+    raise ValueError(f"unrecognized interrupt type: {kind!r}")
+
+
+def _run_workflow_interactive(
+    agent: Any,
+    task: str,
+    session_id: str,
+    *,
+    answers: dict[str, str],
+    inputs: dict[str, str],
+    approve: bool,
+    reject: bool,
+    prompt: Callable[[str], str] = input,
+    out: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    """
+    Drive one workflow run to completion, resolving every interrupt it
+    actually raises (zero to three: `clarify`, `provide_execution_inputs`,
+    `approval_gate` — ADR-0010 §13's own topology diagram) with a real
+    answer from `_resume_value_for_interrupt`, never a synthetic one.
+
+    `agent` is duck-typed to `CVAgent.start_workflow()`/`.resume_workflow()`
+    (ADR-0003/ADR-0010) — this function never imports `CVAgent` itself, so
+    a test can pass any object with that shape (e.g. one built directly
+    from `build_requirements_workflow_graph()`, the same construction
+    `tests/test_workflow.py` already uses for a fixture binding) without
+    needing real skill discovery or a registered `ExecutionRuntime`.
+
+    `inputs` doubles as the pre-supplied `execution_inputs` channel
+    (ADR-0010 §12) for this run's `start_workflow()` call — a caller who
+    already knows a required value before the run starts never has to
+    wait for a `provide_execution_inputs` interrupt to supply it.
+    """
+    state = agent.start_workflow(task, session_id=session_id, execution_inputs=inputs or None)
+    rounds = 0
+    while "__interrupt__" in state:
+        rounds += 1
+        if rounds > _MAX_INTERRUPT_ROUNDS:
+            raise WorkflowStuckError(
+                f"workflow raised more than {_MAX_INTERRUPT_ROUNDS} interrupts without "
+                "finishing — most likely every clarification question was left "
+                "unanswered (see _MAX_INTERRUPT_ROUNDS's own docstring); supply at "
+                "least one real --answer and try again."
+            )
+        payload = state["__interrupt__"][0].value
+        kind = payload.get("type")
+        out(f"[INTERRUPT] {kind}")
+        if kind == "clarification":
+            for question in payload["questions"]:
+                out(f"  - {question['question']} (why: {question['why_it_matters']})")
+        elif kind == "provide_execution_inputs":
+            out(f"  skill={payload['skill_id']} binding={payload['binding_id']}")
+            for field in payload["missing_inputs"]:
+                out(f"  - missing: {field['name']} ({field['description']})")
+        elif kind == "approval":
+            out(
+                f"  skill={payload['skill_id']} binding={payload['binding_id']} "
+                f"inputs={payload['inputs']}"
+            )
+
+        resume_value = _resume_value_for_interrupt(
+            payload,
+            answers=answers,
+            inputs=inputs,
+            approve=approve,
+            reject=reject,
+            prompt=prompt,
+            out=out,
+        )
+        out(f"[RESUME] {kind} -> {resume_value!r}")
+        state = agent.resume_workflow(session_id, resume_value)
+    return state
+
+
+def _print_workflow_summary(state: dict[str, Any], *, out: Callable[[str], None] = print) -> None:
+    """Report what actually happened — including a terminal recovery
+    failure's real reason (ADR-0010 §13), never silently folded into
+    ordinary completion."""
+    out(f"Final status: {state.get('status')}")
+    out(f"Steps: {[s['node'] for s in state.get('steps', [])]}")
+
+    analysis = state.get("requirements_analysis")
+    if analysis:
+        fields = analysis.get("fields", [])
+        known = [f["name"] for f in fields if f["status"] == "known"]
+        assumed = [f["name"] for f in fields if f["status"] == "assumed"]
+        out(f"Known fields: {known}")
+        out(f"Assumed fields: {assumed}")
+
+    planning = state.get("planning_result")
+    if planning:
+        out(f"Planning status: {planning.get('status')}")
+
+    recovery = state.get("execution_input_recovery")
+    if recovery is not None:
+        line = f"Execution-input recovery: outcome={recovery.get('outcome')} "
+        line += f"terminal={recovery.get('terminal')}"
+        if recovery.get("mismatch_detail"):
+            line += f" detail={recovery['mismatch_detail']}"
+        out(line)
+
+    if state.get("pending_execution") is not None:
+        out(f"Approval decision: {state.get('approval_decision')}")
+
+    result = state.get("execution_result")
+    if result is not None:
+        out(f"Execution result status: {result.get('status')}")
+
+
+def _cmd_workflow(
+    task: str,
+    *,
+    answer_kv: list[str],
+    input_kv: list[str],
+    approve: bool,
+    reject: bool,
+) -> int:
+    """
+    The real requirements-clarification / execution-input-recovery /
+    approval-gated workflow entrypoint — `--answer`/`--input` pre-supply
+    values, `--approve`/`--reject` pre-supply an approval decision, and a
+    live stdin prompt covers whatever a flag didn't (see
+    `_resume_value_for_interrupt`). Never fabricates an answer.
+
+    Single-process only — the default checkpointer (MemorySaver) does not
+    persist across process restarts (ADR-0003 §7), so a resumed run only
+    ever means "still within this one invocation's interrupt loop", not
+    "resumed from a prior CLI call".
+
+    This constructs a plain, unregistered `CVAgent` — same honesty default
+    as `analyze`/`resolve`/`skills` (no binding is ever auto-registered,
+    ADR-0009 §5) — so `plan_execution` can reach `no_executable_candidate`
+    but never `planned`/`missing_required_inputs` against a real skill
+    here; wiring a `pending_execution`/binding choice into this command is
+    a separate, not-yet-authorized decision (see issue #34's own stated
+    scope). `provide_execution_inputs`/`approval_gate` input handling is
+    still fully real and generic — it is simply not reachable through this
+    command against any of the 84 real installed skills today, the same
+    honest limitation `analyze`/`resolve` already report for "executable".
 
     This is the one CLI command that touches durable Project Memory
     (ADR-0004) — start_workflow()/resume_workflow() persist a SessionRecord
@@ -428,45 +679,37 @@ def _cmd_workflow_demo(task: str) -> int:
     from cv_agent.config.settings import load_config
     from cv_agent.runtime.agent import CVAgent
 
+    try:
+        answers = _parse_input_kv(answer_kv)
+        inputs = _parse_input_kv(input_kv)
+    except ValueError as exc:
+        print(f"Invalid --answer/--input value: {exc}", file=sys.stderr)
+        return 2
+
     config = replace(load_config(), workspace_root=Path.cwd())
     agent = CVAgent(config)
-    print(f'CV Agent workflow demo — task: "{task}"')
+    session_id = str(uuid.uuid4())
+    print(f'CV Agent workflow — task: "{task}"')
+    print(f"Session: {session_id}")
     print()
 
-    started = agent.start_workflow(task, session_id="cli-demo")
-
-    if "__interrupt__" not in started:
-        print("No clarification needed — request was already fully specified.")
-        print(f"Status: {started['status']}")
-        return 0
-
-    payload = started["__interrupt__"][0].value
-    questions = payload["questions"]
-    print(f"[INTERRUPT] Clarification needed ({len(questions)} question(s)):")
-    for q in questions:
-        print(f"  - {q['question']}")
-        print(f"      why it matters: {q['why_it_matters']}")
-
-    print()
-    print("[DEMO] Auto-supplying synthetic placeholder answers (non-interactive):")
-    answers = {}
-    for q in questions:
-        placeholder = f"[demo answer for {q['relates_to_field']}]"
-        answers[q["relates_to_field"]] = placeholder
-        print(f"  - {q['relates_to_field']} -> {placeholder!r}")
+    try:
+        state = _run_workflow_interactive(
+            agent,
+            task,
+            session_id,
+            answers=answers,
+            inputs=inputs,
+            approve=approve,
+            reject=reject,
+        )
+    except WorkflowStuckError as exc:
+        print(file=sys.stderr)
+        print(f"Aborted: {exc}", file=sys.stderr)
+        return 3
 
     print()
-    print("[RESUME] Resuming the same paused run with these answers...")
-    resumed = agent.resume_workflow("cli-demo", answers)
-
-    print()
-    print(f"Status after resume: {resumed['status']}")
-    print(f"Steps taken: {[s['node'] for s in resumed['steps']]}")
-    fields = resumed["requirements_analysis"]["fields"]
-    known = [f["name"] for f in fields if f["status"] == "known"]
-    assumed = [f["name"] for f in fields if f["status"] == "assumed"]
-    print(f"Known fields (from the original request text): {known}")
-    print(f"Assumed fields (from the resume answers just supplied): {assumed}")
+    _print_workflow_summary(state)
     return 0
 
 
@@ -519,9 +762,41 @@ def main(argv: list[str] | None = None) -> int:
     )
     workflow_parser = subparsers.add_parser(
         "workflow",
-        help="Demo: request -> clarification interrupt -> synthetic answer -> resume.",
+        help="Requirements clarification / approval / execution-input recovery, "
+        "with real answers.",
     )
     workflow_parser.add_argument("task", help="Natural-language CV problem description.")
+    workflow_parser.add_argument(
+        "--answer",
+        dest="answer_kv",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Pre-supplied clarification answer, repeatable "
+        "(e.g. --answer deployment_target=jetson-orin).",
+    )
+    workflow_parser.add_argument(
+        "--input",
+        dest="input_kv",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Pre-supplied execution input, repeatable (e.g. --input path=/data/run1) — "
+        "used both up front (ADR-0010 §12) and for a provide_execution_inputs recovery "
+        "round (ADR-0010 §13).",
+    )
+    workflow_approval_group = workflow_parser.add_mutually_exclusive_group()
+    workflow_approval_group.add_argument(
+        "--approve",
+        action="store_true",
+        help="Pre-supply an 'approved' decision for an approval_gate interrupt "
+        "(never applied automatically).",
+    )
+    workflow_approval_group.add_argument(
+        "--reject",
+        action="store_true",
+        help="Pre-supply a 'rejected' decision for an approval_gate interrupt.",
+    )
 
     args = parser.parse_args(argv)
 
@@ -547,7 +822,13 @@ def main(argv: list[str] | None = None) -> int:
             approve=args.approve,
         )
     if args.command == "workflow":
-        return _cmd_workflow_demo(args.task)
+        return _cmd_workflow(
+            args.task,
+            answer_kv=args.answer_kv,
+            input_kv=args.input_kv,
+            approve=args.approve,
+            reject=args.reject,
+        )
 
     parser.error(f"unrecognized command: {args.command}")  # pragma: no cover
     return 2
