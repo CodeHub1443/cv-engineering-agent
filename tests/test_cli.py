@@ -246,29 +246,32 @@ class TestCLISkillsCapabilitiesResolve:
         assert result.returncode == 0, result.stderr
         assert before == after
 
-    def test_workflow_command_demonstrates_interrupt_and_aborts_cleanly_unanswered(
+    def test_workflow_command_declining_every_clarification_question_completes_cleanly(
         self, tmp_path: Path
     ) -> None:
         """No --answer supplied and no stdin available: every question falls
         back to a live prompt, gets EOF, and is left unanswered — never a
         fabricated placeholder (the pre-PR-#34 behavior this replaces).
 
-        With every question declined, `clarification_answers` stays empty
-        every round and `cv_agent/graph/workflow.py`'s own
-        `_route_after_analysis` (a pre-existing, documented gap, not
-        introduced here — see `_MAX_INTERRUPT_ROUNDS`'s docstring in
-        `cv_agent/__main__.py`) re-raises the same `clarify` interrupt
-        indefinitely rather than treating "asked and declined" as answered.
-        This CLI-only safety net aborts cleanly instead of hanging; it does
-        not — and, per this task's approved scope, must not — touch the
-        graph's own routing to fix the underlying gap."""
+        ADR-0003 §9 (Q21 fix): declining every question must resume with a
+        single `clarify` interrupt, not loop indefinitely — `clarify` is
+        resumed with `""` (never a literal `{}}`, which is not reliably
+        delivered by the installed LangGraph — confirmed empirically) and
+        `AgentState["clarification_attempted"]` lets the graph's own
+        routing tell "attempted, declined everything" apart from "never
+        attempted", so a second `clarify` interrupt is never raised. The
+        run reaches a normal, non-error completion — never
+        `WorkflowStuckError`/exit 3, which is now unreachable via this
+        path (the safety cap that used to catch this remains only as
+        defense-in-depth, see `_MAX_INTERRUPT_ROUNDS`'s docstring)."""
         result = self._run(
             ["workflow", "I have a prison project. Escape-attempt detection."], tmp_path
         )
-        assert result.returncode == 3, result.stdout
-        assert "[INTERRUPT] clarification" in result.stdout
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.count("[INTERRUPT] clarification") == 1
         assert "[demo answer" not in result.stdout
-        assert "Aborted: workflow raised more than" in result.stderr
+        assert "[RESUME] clarification -> ''" in result.stdout
+        assert "Final status: done" in result.stdout
 
     def test_workflow_command_answers_real_clarification_questions_via_flag(
         self, tmp_path: Path

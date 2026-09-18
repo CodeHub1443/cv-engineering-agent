@@ -77,6 +77,16 @@ class AgentState(TypedDict, total=False):
     supplied assumption (ADR-0008 — the analyzer still never self-promotes
     a field on its own)."""
 
+    clarification_attempted: bool
+    """True once the `clarify` interrupt has been resumed at least once
+    this run, regardless of whether any answers were actually supplied —
+    distinct from `clarification_answers`' own non-emptiness, which cannot
+    represent "asked and declined everything" versus "never asked yet".
+    Set unconditionally by `_node_clarify` on every resume, mirroring
+    `execution_input_recovery["attempted"]`'s existing bound in the same
+    file (ADR-0010 §13). `_route_after_analysis` routes on this flag, not
+    on `clarification_answers` truthiness — see ADR-0003 §9 (Q21 fix)."""
+
     # ── Execution inputs (ADR-0010 §12) ─────────────────────────────────
     execution_inputs: dict[str, Any]
     """Caller-supplied values for a candidate skill's declared

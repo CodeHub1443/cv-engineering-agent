@@ -14,7 +14,7 @@ Topology:
     START -> initialize -> analyze_requirements
                                 |
                     (unanswered clarification questions
-                     and none answered yet this run?)
+                     and clarify not yet attempted this run?)
                         yes  /        \\  no
                             v          v
                         clarify   plan_execution <──────────────────┐
@@ -58,6 +58,15 @@ caller hasn't already supplied one, reading any caller-supplied
 — never `clarification_answers`, a distinct namespace keyed by
 `RequirementField.name`) as its `available_inputs`.
 
+Since ADR-0003 §9 (Q21 fix): `clarify`'s own loop bound is likewise an
+explicit `AgentState["clarification_attempted"]` flag, not
+`clarification_answers`' emptiness — a human who declines *every*
+clarification question still counts as "attempted", so `_route_after_
+analysis` does not re-raise the same interrupt indefinitely. Prior to this
+fix, the bound was `clarification_answers`' own truthiness, which could not
+distinguish "asked and declined everything" from "never asked" and looped
+forever on the former — confirmed empirically, not theoretical.
+
 Since ADR-0010 §13: when `plan_execution()` reports
 `"missing_required_inputs"` and no recovery has been attempted yet this
 run, the graph routes to `provide_execution_inputs` instead of
@@ -66,8 +75,8 @@ run, the graph routes to `provide_execution_inputs` instead of
 routes back to `plan_execution` for a fresh, authoritative retry (never
 straight to `approval_gate` — a retry re-derives everything, it is never
 assumed). This happens **at most once** per run, hard-coded
-(`AgentState["execution_input_recovery"]["attempted"]`, not
-`clarification_answers`' emptiness-based bound) — a second `"missing_
+(`AgentState["execution_input_recovery"]["attempted"]`, the same explicit-
+flag pattern `clarification_attempted` now also uses) — a second `"missing_
 required_inputs"` result after a recovery attempt routes straight through
 to the terminal check below, never a second interrupt. `pending_execution`
 may be set from a recovery round **only** when the retry's freshly-selected
@@ -143,8 +152,15 @@ def _make_analyze_requirements_node(analyzer: RequirementsAnalyzer):
 def _route_after_analysis(state: AgentState) -> Literal["clarify", "plan_execution"]:
     analysis = state.get("requirements_analysis") or {}
     questions = analysis.get("clarification_questions") or []
-    already_answered = bool(state.get("clarification_answers"))
-    if questions and not already_answered:
+    # ADR-0003 §9 (Q21 fix): route on whether clarify was already attempted
+    # this run, never on clarification_answers' own emptiness — an empty
+    # answers dict is a legitimate "asked and declined everything" outcome,
+    # not "never asked". See _node_clarify, which sets this flag
+    # unconditionally on every resume, and clarification_attempted's own
+    # docstring (cv_agent.graph.state) for why clarification_answers alone
+    # cannot represent this distinction.
+    already_attempted = bool(state.get("clarification_attempted"))
+    if questions and not already_attempted:
         return "clarify"
     return "plan_execution"
 
@@ -164,11 +180,22 @@ def _node_clarify(state: AgentState) -> dict[str, Any]:
     answers = interrupt(payload)
     # `answers` is whatever the caller passed to Command(resume=...) — must
     # be a mapping of field name -> answer text. An empty/None resume value
-    # is treated as "no answers supplied", not fabricated.
+    # is treated as "no answers supplied", not fabricated. NOTE: a literal
+    # empty dict `{}` (or `None`) is not reliably delivered by the installed
+    # LangGraph's Command(resume=...) at all — confirmed empirically (ADR-
+    # 0003 §9, Q21): the graph silently re-pauses here instead of resuming.
+    # A caller declining every question must pass a non-dict falsy value
+    # (e.g. `""`), same convention `provide_execution_inputs` already uses
+    # — see CVAgent.resume_workflow()'s docstring.
     answers_dict: dict[str, str] = dict(answers) if answers else {}
 
     return {
         "clarification_answers": answers_dict,
+        # ADR-0003 §9 (Q21 fix): set unconditionally, regardless of whether
+        # answers_dict ended up empty — this is what lets _route_after_
+        # analysis distinguish "attempted, declined everything" from "never
+        # attempted", which clarification_answers' own truthiness cannot.
+        "clarification_attempted": True,
         "pending_human_input": None,
         "status": "clarified",
         "steps": _append_step(
@@ -183,8 +210,10 @@ def _node_clarify(state: AgentState) -> dict[str, Any]:
 def _route_after_clarify(state: AgentState) -> Literal["analyze_requirements"]:
     # Always loop back exactly once to fold the human's answers into a
     # fresh analysis. _route_after_analysis will not route back to
-    # "clarify" a second time because clarification_answers is now set —
-    # this prevents an infinite interrupt loop even if unknowns remain.
+    # "clarify" a second time because clarification_attempted is now set —
+    # this prevents an infinite interrupt loop even if unknowns remain, and
+    # even if the human declined every question (ADR-0003 §9, Q21 fix;
+    # clarification_answers being empty no longer re-triggers this edge).
     return "analyze_requirements"
 
 
