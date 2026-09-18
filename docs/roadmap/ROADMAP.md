@@ -127,10 +127,10 @@ input for all three interrupt kinds (`clarify`/`provide_execution_inputs`/
 prompt — never a fabricated placeholder. **Not done:** this command still never
 registers an execution binding or accepts a `pending_execution` payload, so
 `approval_gate`/`provide_execution_inputs` remain unreachable through it against any
-real installed skill (a separate, not-yet-authorized decision); this workflow graph
-is separate from `run()`'s own graph, not merged into it (ADR-0003 §4/§8); and a
-real, pre-existing gap was found (not fixed, `docs/state/OPEN_QUESTIONS.md` Q21) where
-declining every clarification question can re-raise `clarify` indefinitely.
+real installed skill (a separate, not-yet-authorized decision); and this workflow
+graph is separate from `run()`'s own graph, not merged into it (ADR-0003 §4/§8). A
+real, pre-existing gap where declining every clarification question could re-raise
+`clarify` indefinitely (`docs/state/OPEN_QUESTIONS.md` Q21) is now fixed (ADR-0003 §9).
 
 **Exit test:** given "I have a prison project — escape-attempt detection", the agent asks
 targeted operational questions before naming any model, and produces a written

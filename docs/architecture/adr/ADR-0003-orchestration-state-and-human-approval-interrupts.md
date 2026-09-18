@@ -126,11 +126,17 @@ START -> initialize -> analyze_requirements
 
 `clarify` and `approval_gate` are the only interrupt points, both using
 `langgraph.types.interrupt()`. The loop back from `clarify` to `analyze_requirements`
-happens **exactly once** — `_route_after_analysis` only routes to `clarify` when
-`clarification_answers` is still empty, so a second pass through `analyze_requirements`
-(even with unknowns remaining, if the human answered only some questions) always routes
-to `approval_gate` instead. This is a deliberate, hard-coded loop bound to prevent an
-infinite interrupt loop; it is not configurable in this ADR.
+is *intended* to happen **exactly once** per run — a deliberate, hard-coded loop bound
+to prevent an infinite interrupt loop, not configurable in this ADR.
+
+**Correction (§9, 2026-09-19 — Q21):** this section originally stated the bound was
+enforced by `_route_after_analysis` routing to `clarify` only while `clarification_answers`
+is still empty. That claim was wrong for exactly the case it was meant to cover: a human
+declining *every* question resumes with an empty answers value, which is indistinguishable
+by truthiness from "never asked" — the graph re-raised `clarify` indefinitely instead of
+routing to `approval_gate`. Confirmed empirically, not theoretical. See §9 for the actual
+fix; the loop bound is now an explicit `clarification_attempted` flag, not
+`clarification_answers`' emptiness.
 
 `CVAgent` gains `.start_workflow(task, *, session_id=None, pending_execution=None)`,
 `.resume_workflow(session_id, resume_value)`, `.get_workflow_state(session_id)`
@@ -222,3 +228,59 @@ interrupt for a fully-specified request).
 - When ADR-0004 (project memory) is written — `requirements_analysis` currently vanishes
   when a session's checkpoint is discarded; persisting it beyond one run's checkpoint is
   explicitly that ADR's job, not this one's.
+
+## 9. Status — clarification loop-bound fix (Q21)
+
+Found while implementing #34 (real CLI input handling, `docs/state/OPEN_QUESTIONS.md`
+Q21, filed 2026-09-18): `_route_after_analysis`'s loop bound (§3) was implemented as
+`bool(state.get("clarification_answers"))` — truthiness, not "was `clarify` already
+attempted this run." A human declining *every* clarification question resumes with an
+empty answers value; `clarification_answers` stays falsy, indistinguishable from "never
+asked," and the graph re-raised `clarify` indefinitely. Confirmed empirically via direct
+graph invocation (not synthesized): five consecutive `Command(resume={})` calls left the
+run interrupted every time.
+
+A second, independent, transport-level gap was confirmed in the same investigation:
+`Command(resume={})` (a literal empty dict) is not delivered to `clarify` at all — the
+graph silently re-pauses without `_node_clarify`'s body ever running (`steps` gains no
+new entry). `Command(resume="")` (a non-dict falsy value) *is* delivered correctly. This
+is the same LangGraph `Command(resume=...)` characteristic ADR-0010 §13 already documented
+for `provide_execution_inputs`, now confirmed for `clarify` too — not a coincidence, the
+same LangGraph mechanism underlies both interrupts.
+
+**Fix (both, one PR, not a broadened contract):**
+1. New `AgentState` field `clarification_attempted: bool` (`cv_agent/graph/state.py`),
+   set unconditionally by `_node_clarify` on every resume — mirrors
+   `execution_input_recovery["attempted"]`'s existing pattern (§13 of ADR-0010) rather
+   than inventing a new one. `_route_after_analysis` routes on this flag, never on
+   `clarification_answers`' truthiness. `CVAgent.start_workflow()` initializes it to
+   `False`.
+2. `cv_agent/__main__.py`'s `_resume_value_for_interrupt` resumes with `""`, never `{}`,
+   when every clarification question is declined — the existing `provide_execution_inputs`
+   convention, now applied symmetrically to `clarify`.
+
+No interrupt payload shape changed, no resume-value contract changed, no new interrupt
+kind — `AgentState` gains one additive, optional field. Verified in advance (before
+implementing) by monkeypatching the routing predicate against the real graph: reaches
+`status == "done"` in exactly one `clarify` round when every question is declined; valid/
+partial-answer paths are unaffected (existing tests pass unmodified). Manually verified
+end to end against the real CLI post-fix: `python -m cv_agent workflow "..."` with stdin
+closed now exits 0 with `Final status: done`, one `[INTERRUPT] clarification`, never
+`WorkflowStuckError`.
+
+`_MAX_INTERRUPT_ROUNDS` (`cv_agent/__main__.py`, introduced by #34 as a CLI-only
+mitigation before this fix existed) is kept as defense-in-depth, not as the fix — the
+graph itself is now bounded to at most three interrupts per run (clarify,
+provide_execution_inputs, approval_gate, each at most once), deterministically.
+
+**Tests:** `tests/test_workflow.py` — declining every question interrupts exactly once
+and reaches `status == "done"` with unknowns still genuinely unknown
+(`test_declining_every_question_does_not_repeat_the_interrupt`); a literal `{}` resume
+is pinned as non-delivering (`test_literal_empty_dict_resume_does_not_clear_the_clarify_interrupt`);
+the pre-existing empty-resume test now resumes with `""` and asserts the interrupt
+actually clears, not just that the answers dict looks right
+(`test_empty_resume_value_produces_no_fabricated_answers`, corrected — the prior version
+resumed with `{}` and only checked `clarification_answers`, which passed even under
+total non-delivery because that's the field's own pre-clarify default). `tests/test_cli.py`
+— the CLI's decline-everything path now asserts exit 0 and clean completion, replacing
+the version that asserted `WorkflowStuckError`/exit 3 as the (then-)expected outcome.

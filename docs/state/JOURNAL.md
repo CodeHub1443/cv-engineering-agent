@@ -875,3 +875,77 @@ status.
                #34, PR pending; `docs/state/STATUS.md` correction is
                separately PR #35, also pending — the two PRs' STATUS.md
                diffs will need a rebase against whichever merges first.
+
+---
+
+## 2026-09-19 — Q21 fix: clarify attempted-flag, not answers-truthiness (fix/claude/q21-clarify-attempted-flag)
+
+**Did:**       Fixed the pre-existing infinite-loop bug documented as Q21
+               (found while building #34, filed 2026-09-18). Added
+               `AgentState["clarification_attempted"]: bool`
+               (`cv_agent/graph/state.py`), set unconditionally by
+               `_node_clarify` on every resume — mirrors
+               `execution_input_recovery["attempted"]`'s existing pattern
+               (ADR-0010 §13) rather than inventing a new one.
+               `_route_after_analysis` (`cv_agent/graph/workflow.py`) now
+               routes on this flag, never on `clarification_answers`'
+               truthiness. `CVAgent.start_workflow()` initializes it to
+               `False`. CLI (`_resume_value_for_interrupt`'s
+               `"clarification"` branch, `cv_agent/__main__.py`) resumes
+               with `""`, never `{}`, when every question is declined —
+               the same convention already used for
+               `provide_execution_inputs`. Corrected ADR-0003 §3's own
+               wrong claim about the loop bound and appended a new §9
+               documenting the fix (mirrors ADR-0010's own pattern of
+               appended `## N. Status —` sections instead of a new ADR
+               file). `_MAX_INTERRUPT_ROUNDS` kept as defense-in-depth;
+               its docstring updated to say so, not describe an active bug.
+**Why:**       ADR-0003 §9 (Q21) — a human declining every clarification
+               question must reach a normal completion, not hang the
+               graph indefinitely. `[P§21]`, `[P§34]`.
+**Broke:**     Nothing new — this *is* the bug fix. Two pre-existing tests
+               encoded the buggy behavior as expected and had to be
+               rewritten: `tests/test_cli.py`'s workflow-declines-everything
+               test previously asserted exit 3/`WorkflowStuckError` (now
+               asserts exit 0/clean completion); `tests/test_cli_workflow.py`'s
+               all-blank-clarification test previously asserted `{}` (now
+               asserts `""`, matching the corrected CLI contract).
+**Learned:**   Empirically confirmed *two* independent bugs behind the one
+               symptom, not one: (1) `_route_after_analysis`'s routing
+               logic (the one Q21 named), and (2) `Command(resume={})`
+               never reaching `_node_clarify`'s body at all — confirmed via
+               direct graph invocation, 5/5 trials, not "unreliable," just
+               never delivered. `Command(resume="")` *does* reach the node
+               but, without fix (1), still loops via fix (1)'s bug — so
+               neither fix alone is sufficient; both were needed together.
+               Also found `tests/test_workflow.py::
+               test_empty_resume_value_produces_no_fabricated_answers`
+               resumed with `{}` and only asserted the answers dict's
+               value, never `"__interrupt__" not in resumed` — this passed
+               even under total non-delivery, because that's the field's
+               own `start_workflow()` default; the assertion gave zero
+               actual coverage of what its name claimed. Fixed to resume
+               with `""` and check the interrupt actually clears; added a
+               dedicated regression test pinning the `{}`-never-delivered
+               characteristic separately, so it can't silently regress
+               either way. Verified the fix concept *before* implementing
+               it, by monkeypatching the routing predicate against the
+               real graph — cheap and caught nothing wrong, but confirmed
+               the design before writing it for real.
+**Left open:** Q18 (candidate disambiguation), Q20 (TRT XOR/oneOf schema),
+               Q3 (durable checkpointer) — unrelated, untouched. `docs/
+               state/STATUS.md` rewritten as part of this PR (was stale,
+               still describing #35/#36 as pending — corrected here rather
+               than as a separate PR since nothing else is in flight this
+               time). 4 new/updated tests in `tests/test_workflow.py`
+               (2 new regression tests, 2 corrected), 1 rewritten in
+               `tests/test_cli.py`, 1 rewritten in `tests/test_cli_workflow.py`.
+               Full suite 403 → 405 passing, zero regressions. `ruff`/`mypy`
+               clean on all touched files (3 pre-existing findings outside
+               this diff's own lines confirmed unchanged from `main` via
+               direct comparison, not touched by this branch). Manually
+               verified against the real, unfaked CLI: `python -m cv_agent
+               workflow "..."` with stdin closed now exits 0 with `Final
+               status: done`, exactly one `[INTERRUPT] clarification`.
+               Branch `fix/claude/q21-clarify-attempted-flag`, not `main`.
+               Issue #37, PR pending.

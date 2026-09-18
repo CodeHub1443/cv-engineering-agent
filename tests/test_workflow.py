@@ -192,13 +192,65 @@ class TestClarificationInterruptResume:
         assert resumed["status"] == "done"
 
     def test_empty_resume_value_produces_no_fabricated_answers(self, graph) -> None:
-        """An empty answers dict must never be inflated into fabricated
-        field values. (Command(resume=None) itself is unsupported by
-        LangGraph's Command API — an empty mapping is the correct way to
-        represent 'no answers supplied'.)"""
+        """Declining every clarification question (resume with `""`, the
+        correct non-dict falsy sentinel — see the next test for why not
+        `{}}`) must never be inflated into fabricated field values, and must
+        actually resume the run — not just leave `clarification_answers` at
+        its pre-clarify default (ADR-0003 §9, Q21: a prior version of this
+        test resumed with `{}` and only checked the answers dict, which
+        passed even when the interrupt silently never cleared at all — see
+        `test_literal_empty_dict_resume_does_not_clear_the_clarify_interrupt`
+        below for that failure mode, now pinned separately)."""
         _start(graph, _VAGUE_TASK, "s7")
-        resumed = _resume(graph, "s7", {})
+        resumed = _resume(graph, "s7", "")
+        assert "__interrupt__" not in resumed
         assert resumed["clarification_answers"] == {}
+        assert resumed["clarification_attempted"] is True
+        assert resumed["status"] == "done"
+
+    def test_literal_empty_dict_resume_does_not_clear_the_clarify_interrupt(self, graph) -> None:
+        """Pins a real LangGraph characteristic, confirmed empirically
+        (ADR-0003 §9, Q21): `Command(resume={})` — a literal empty dict —
+        is not delivered to `clarify` at all; the graph silently re-pauses
+        at the same interrupt instead of resuming, and `_node_clarify`'s
+        body never runs (no new `clarify` entry in `steps`). This is why
+        every caller (the CLI, `resume_workflow()`'s own docstring) must use
+        a non-dict falsy value like `""`, never `{}}`, to decline every
+        question — see the previous test for the value that actually
+        works."""
+        started = _start(graph, _VAGUE_TASK, "s7b")
+        steps_before = [s["node"] for s in started["steps"]]
+
+        resumed = _resume(graph, "s7b", {})
+
+        assert "__interrupt__" in resumed
+        assert [s["node"] for s in resumed["steps"]] == steps_before
+
+    def test_declining_every_question_does_not_repeat_the_interrupt(self, graph) -> None:
+        """The actual Q21 regression: previously, declining every question
+        made the graph re-raise `clarify` indefinitely. Now it must
+        interrupt exactly once, reach a normal completion, and leave the
+        unanswered fields genuinely unknown — never silently promoted to
+        "known" or "assumed" just because the human was asked and didn't
+        answer."""
+        started = _start(graph, _VAGUE_TASK, "s7c")
+        unknown_before = {
+            f["name"] for f in started["requirements_analysis"]["fields"] if f["status"] == "unknown"
+        }
+        assert unknown_before  # sanity: the vague task really has unknowns
+
+        resumed = _resume(graph, "s7c", "")
+
+        assert "__interrupt__" not in resumed
+        assert [s["node"] for s in resumed["steps"]].count("clarify") == 1
+        assert resumed["status"] == "done"
+        unknown_after = {
+            f["name"] for f in resumed["requirements_analysis"]["fields"] if f["status"] == "unknown"
+        }
+        # Same task, same (still-empty) assumptions in both analyze_
+        # requirements calls -> identical unknowns. Declining is never
+        # silently read as an answer.
+        assert unknown_after == unknown_before
 
 
 class TestApprovalGate:

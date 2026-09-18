@@ -110,7 +110,14 @@ class TestResumeValueForInterrupt:
         assert result == {"deployment_target": "jetson-orin", "accuracy_requirement": "live-answer"}
         assert len(prompts) == 1
 
-    def test_clarification_blank_or_eof_prompt_answer_is_simply_omitted(self) -> None:
+    def test_clarification_all_blank_or_eof_returns_empty_string_not_empty_dict(self) -> None:
+        """Every question declined must resume with `""`, never a literal
+        `{}` — ADR-0003 §9 (Q21): `Command(resume={})` is not reliably
+        delivered by the installed LangGraph for the clarify interrupt
+        (confirmed empirically), so `""` is the only value that actually
+        reaches `_node_clarify` and lets the run proceed instead of
+        silently re-pausing at the same interrupt forever."""
+
         def eof_prompt(msg: str) -> str:
             raise EOFError
 
@@ -122,7 +129,7 @@ class TestResumeValueForInterrupt:
             reject=False,
             prompt=eof_prompt,
         )
-        assert result == {}
+        assert result == ""
 
     def _provide_execution_inputs_payload(self) -> dict[str, Any]:
         return {

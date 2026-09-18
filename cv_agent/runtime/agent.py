@@ -323,6 +323,7 @@ class CVAgent:
             "human_feedback": None,
             "requirements_analysis": None,
             "clarification_answers": {},
+            "clarification_attempted": False,
             "execution_inputs": execution_inputs or {},
             "planning_result": None,
             "execution_input_recovery": None,
@@ -355,14 +356,20 @@ class CVAgent:
         error if there is nothing to resume.
 
         Caveat, confirmed empirically while building the `provide_
-        execution_inputs` interrupt: `resume_value=None` and a literal
-        empty dict `resume_value={}` are **not reliably delivered** by the
-        installed LangGraph's `Command(resume=...)` — the graph can
-        silently re-pause at the same interrupt instead of resuming. To
-        decline/cancel a `provide_execution_inputs` prompt, pass a
-        non-`dict` falsy value (e.g. `""`), which *is* delivered correctly
-        and is classified as "cancelled" the same way. This is a LangGraph
-        API characteristic, not specific to any one interrupt kind.
+        execution_inputs` interrupt and re-confirmed for `clarify` while
+        fixing Q21 (ADR-0003 §9): `resume_value=None` and a literal empty
+        dict `resume_value={}` are **not reliably delivered** by the
+        installed LangGraph's `Command(resume=...)` for either interrupt
+        kind — the graph silently re-pauses at the same interrupt instead
+        of resuming (confirmed reliably non-delivered across repeated
+        trials for `clarify`, not merely occasional). To decline/cancel a
+        `clarify` or `provide_execution_inputs` prompt, pass a non-`dict`
+        falsy value (e.g. `""`), which *is* delivered correctly — for
+        `clarify` this produces an empty `clarification_answers`, for
+        `provide_execution_inputs` it is classified "cancelled". This is a
+        LangGraph API characteristic, not specific to any one interrupt
+        kind — `cv_agent`'s own CLI (`python -m cv_agent workflow`) already
+        applies this for both.
 
         Updates the same durable `SessionRecord` `start_workflow()` created
         (ADR-0004) — this call does not create a new one. See

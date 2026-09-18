@@ -413,22 +413,16 @@ def _cmd_execute(
 _MAX_INTERRUPT_ROUNDS = 8
 """Generous upper bound over the graph's own documented maximum of three
 interrupt kinds per run — clarify, provide_execution_inputs, approval_gate,
-each at most once (ADR-0010 §13's own topology). This is a CLI-only safety
-net, not a fix, for a real, pre-existing gap this command is the first
-caller to actually reach: `_route_after_analysis` (`cv_agent/graph/
-workflow.py`) decides whether to route back to `clarify` again using
-`bool(state.get("clarification_answers"))` — truthiness, not "was this
-already attempted" (contrast `execution_input_recovery["attempted"]`,
-ADR-0010 §13's own hard-coded, never-truthiness-based bound, same file). A
-human who declines every clarification question resumes with an empty
-answers value, `clarification_answers` stays falsy, and the graph re-pauses
-at the same `clarify` interrupt indefinitely. The previous CLI never
-surfaced this because it always fabricated a non-empty placeholder answer
-for every question. Fixing the routing itself is a graph-layer change,
-out of this command's scope (`docs/state/STATUS.md`'s "do not start yet"
-already separately lists `clarify`'s related, also-documented, not-yet-fixed
-empty-dict-resume delivery gap) — this constant only stops the CLI from
-hanging forever on it."""
+each at most once (ADR-0010 §13's own topology). Originally added as a
+CLI-only safety net for a real, pre-existing gap (`_route_after_analysis`
+routing on `clarification_answers` truthiness instead of "was clarify
+already attempted"): declining every clarification question re-paused at
+the same `clarify` interrupt indefinitely. That gap is now fixed at its
+source (`AgentState["clarification_attempted"]`, ADR-0003 §9, Q21) — the
+graph itself is bounded to at most three interrupts per run, deterministically.
+This constant stays as defense-in-depth only: cheap, already written and
+tested, and a reasonable safety net against any future regression of that
+bound, not a workaround for a known bug anymore."""
 
 
 class WorkflowStuckError(RuntimeError):
@@ -468,12 +462,16 @@ def _resume_value_for_interrupt(
     A blank/EOF answer to a clarification question is simply omitted (an
     empty-that-field, not a whole-interrupt cancel) — `_node_clarify`
     already treats a missing field as "no answer for it", never
-    fabricating one (ADR-0003). For provide_execution_inputs, if every
-    field ends up blank/EOF, the resume value is `""` (a non-dict falsy
-    value) rather than `{}` — `resume_workflow()`'s own docstring
-    documents that a literal empty dict is not reliably delivered by the
-    installed LangGraph, so `""` is the correct way to signal "declined
-    to supply anything" and is classified "cancelled" the same way.
+    fabricating one (ADR-0003). If *every* field ends up blank/EOF, the
+    resume value for both `clarification` and `provide_execution_inputs`
+    is `""` (a non-dict falsy value) rather than `{}` — `resume_workflow()`'s
+    own docstring documents that a literal empty dict is not reliably
+    delivered by the installed LangGraph for either interrupt kind (ADR-0003
+    §9, Q21), so `""` is the correct way to signal "declined to supply
+    anything"; for clarification this reaches `_node_clarify` and produces
+    an empty `clarification_answers` with `clarification_attempted=True`
+    (the run proceeds, unknowns stay unknown — never a second `clarify`
+    interrupt), for provide_execution_inputs it is classified "cancelled".
     """
     kind = payload.get("type")
 
@@ -493,7 +491,13 @@ def _resume_value_for_interrupt(
                 value = ""
             if value.strip():
                 collected[field] = value
-        return collected
+        # ADR-0003 §9 (Q21 fix): a literal `{}` is not reliably delivered by
+        # the installed LangGraph's Command(resume=...) — the graph would
+        # silently re-pause at the same clarify interrupt instead of
+        # resuming (confirmed empirically). `""` is delivered correctly and
+        # is what _node_clarify treats as "no answers supplied" — same
+        # convention already used below for provide_execution_inputs.
+        return collected if collected else ""
 
     if kind == "provide_execution_inputs":
         collected = {}
