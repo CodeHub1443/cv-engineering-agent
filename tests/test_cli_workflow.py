@@ -1,0 +1,550 @@
+"""
+Tests for the real (non-synthetic) interrupt input-handling `python -m
+cv_agent workflow` gained in this change (issue #34): `_resume_value_for_
+interrupt`, `_run_workflow_interactive`, `_print_workflow_summary`, and
+`WorkflowStuckError`, all in `cv_agent/__main__.py`.
+
+Three layers, matching `tests/test_cli_execute.py`'s own convention of
+testing pure CLI helper functions directly (no subprocess, no argparse)
+alongside end-to-end CLI-as-subprocess tests (those live in
+`tests/test_cli.py::TestCLISkillsCapabilitiesResolve`, extended by this
+same change):
+
+1. TestResumeValueForInterrupt — pure dispatch logic, one payload at a
+   time, no graph involved.
+2. TestRunWorkflowInteractiveStuckGuard — the CLI-only safety cap against
+   a real, pre-existing, out-of-scope gap in `cv_agent/graph/workflow.py`'s
+   own `_route_after_analysis` (see `_MAX_INTERRUPT_ROUNDS`'s docstring),
+   using a fake agent so the cap itself is tested deterministically and
+   fast, independent of actually reproducing that gap.
+3. TestRunWorkflowInteractiveFixtureGraph — a real, unfaked
+   `build_requirements_workflow_graph()` graph with a synthetic fixture
+   binding (same honesty posture `tests/test_workflow.py`'s own
+   `TestProvideExecutionInputsRecovery` already uses for Q20 — no real
+   installed skill has a required input or an approval_required policy
+   today), driving `_run_workflow_interactive` through
+   provide_execution_inputs and approval_gate — interrupt kinds no CLI
+   subprocess test can reach, since `_cmd_workflow` deliberately never
+   registers a binding (see its own docstring).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import pytest
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Command
+
+from cv_agent.__main__ import (
+    WorkflowStuckError,
+    _MAX_INTERRUPT_ROUNDS,
+    _print_workflow_summary,
+    _resume_value_for_interrupt,
+    _run_workflow_interactive,
+)
+from cv_agent.capabilities.registry import CapabilityRegistry
+from cv_agent.execution.binding import ExecutionBinding, ExecutionBindingRegistry, InputField
+from cv_agent.execution.executor import SkillExecutor
+from cv_agent.execution.models import RuntimeOutcome
+from cv_agent.graph.workflow import build_requirements_workflow_graph
+from cv_agent.requirements.analyzer import RequirementsAnalyzer
+from cv_agent.skills.inventory import SkillInventory
+from cv_agent.skills.local import LocalSkillSource
+from cv_agent.skills.resolver import TaskResolver
+
+_REGISTRY_PATH = Path(__file__).parent.parent / "spec" / "capability_registry.json"
+
+
+class TestResumeValueForInterrupt:
+    """Pure dispatch logic — no graph, no subprocess."""
+
+    def _clarification_payload(self) -> dict[str, Any]:
+        return {
+            "type": "clarification",
+            "questions": [
+                {
+                    "relates_to_field": "deployment_target",
+                    "question": "Where will this run?",
+                    "why_it_matters": "because",
+                },
+                {
+                    "relates_to_field": "accuracy_requirement",
+                    "question": "What recall is needed?",
+                    "why_it_matters": "because",
+                },
+            ],
+        }
+
+    def test_clarification_uses_flag_answer_without_prompting(self) -> None:
+        def unreachable_prompt(msg: str) -> str:
+            raise AssertionError("should not prompt: both fields are flag-covered")
+
+        result = _resume_value_for_interrupt(
+            self._clarification_payload(),
+            answers={"deployment_target": "jetson-orin", "accuracy_requirement": "95%"},
+            inputs={},
+            approve=False,
+            reject=False,
+            prompt=unreachable_prompt,
+        )
+        assert result == {"deployment_target": "jetson-orin", "accuracy_requirement": "95%"}
+
+    def test_clarification_falls_back_to_prompt_for_unflagged_field(self) -> None:
+        prompts: list[str] = []
+
+        def prompt(msg: str) -> str:
+            prompts.append(msg)
+            return "live-answer"
+
+        result = _resume_value_for_interrupt(
+            self._clarification_payload(),
+            answers={"deployment_target": "jetson-orin"},
+            inputs={},
+            approve=False,
+            reject=False,
+            prompt=prompt,
+        )
+        assert result == {"deployment_target": "jetson-orin", "accuracy_requirement": "live-answer"}
+        assert len(prompts) == 1
+
+    def test_clarification_blank_or_eof_prompt_answer_is_simply_omitted(self) -> None:
+        def eof_prompt(msg: str) -> str:
+            raise EOFError
+
+        result = _resume_value_for_interrupt(
+            self._clarification_payload(),
+            answers={},
+            inputs={},
+            approve=False,
+            reject=False,
+            prompt=eof_prompt,
+        )
+        assert result == {}
+
+    def _provide_execution_inputs_payload(self) -> dict[str, Any]:
+        return {
+            "type": "provide_execution_inputs",
+            "skill_id": "trt-perf-analysis",
+            "binding_id": "trt-perf-analysis-v1",
+            "missing_inputs": [
+                {"name": "path", "description": "folder path"},
+                {"name": "model_name", "description": "model label"},
+            ],
+        }
+
+    def test_provide_execution_inputs_uses_flag_input_without_prompting(self) -> None:
+        result = _resume_value_for_interrupt(
+            self._provide_execution_inputs_payload(),
+            answers={},
+            inputs={"path": "/data/run1", "model_name": "yolov8"},
+            approve=False,
+            reject=False,
+            prompt=lambda msg: (_ for _ in ()).throw(AssertionError("should not prompt")),
+        )
+        assert result == {"path": "/data/run1", "model_name": "yolov8"}
+
+    def test_provide_execution_inputs_all_blank_returns_empty_string_not_empty_dict(
+        self,
+    ) -> None:
+        """`resume_workflow()`'s own docstring: a literal empty dict is not
+        reliably delivered by the installed LangGraph — `""` is the
+        documented, correctly-delivered way to signal "declined"."""
+        result = _resume_value_for_interrupt(
+            self._provide_execution_inputs_payload(),
+            answers={},
+            inputs={},
+            approve=False,
+            reject=False,
+            prompt=lambda msg: "",
+        )
+        assert result == ""
+
+    def test_provide_execution_inputs_partial_flag_partial_prompt(self) -> None:
+        result = _resume_value_for_interrupt(
+            self._provide_execution_inputs_payload(),
+            answers={},
+            inputs={"path": "/data/run1"},
+            approve=False,
+            reject=False,
+            prompt=lambda msg: "yolov8",
+        )
+        assert result == {"path": "/data/run1", "model_name": "yolov8"}
+
+    def _approval_payload(self) -> dict[str, Any]:
+        return {
+            "type": "approval",
+            "skill_id": "trt-perf-analysis",
+            "binding_id": "trt-perf-analysis-v1",
+            "task": "bench it",
+            "inputs": {},
+        }
+
+    def test_approval_flag_approve_wins_without_prompting(self) -> None:
+        result = _resume_value_for_interrupt(
+            self._approval_payload(),
+            answers={},
+            inputs={},
+            approve=True,
+            reject=False,
+            prompt=lambda msg: (_ for _ in ()).throw(AssertionError("should not prompt")),
+        )
+        assert result == "approved"
+
+    def test_approval_flag_reject_wins_without_prompting(self) -> None:
+        result = _resume_value_for_interrupt(
+            self._approval_payload(),
+            answers={},
+            inputs={},
+            approve=False,
+            reject=True,
+            prompt=lambda msg: (_ for _ in ()).throw(AssertionError("should not prompt")),
+        )
+        assert result == "rejected"
+
+    @pytest.mark.parametrize("answer,expected", [("y", "approved"), ("yes", "approved"),
+                                                  ("YES", "approved"), ("n", "rejected"),
+                                                  ("", "rejected")])
+    def test_approval_live_prompt_answer(self, answer: str, expected: str) -> None:
+        result = _resume_value_for_interrupt(
+            self._approval_payload(),
+            answers={},
+            inputs={},
+            approve=False,
+            reject=False,
+            prompt=lambda msg: answer,
+        )
+        assert result == expected
+
+    def test_approval_eof_prompt_is_rejected_never_silently_approved(self) -> None:
+        def eof_prompt(msg: str) -> str:
+            raise EOFError
+
+        result = _resume_value_for_interrupt(
+            self._approval_payload(),
+            answers={},
+            inputs={},
+            approve=False,
+            reject=False,
+            prompt=eof_prompt,
+        )
+        assert result == "rejected"
+
+    def test_unrecognized_interrupt_type_raises(self) -> None:
+        with pytest.raises(ValueError):
+            _resume_value_for_interrupt(
+                {"type": "something_new"},
+                answers={},
+                inputs={},
+                approve=False,
+                reject=False,
+                prompt=lambda msg: "",
+            )
+
+
+class _FakeInterrupt:
+    def __init__(self, value: dict[str, Any]) -> None:
+        self.value = value
+
+
+class _StuckAgent:
+    """Never advances past its one clarification interrupt — reproduces
+    the *symptom* of `cv_agent/graph/workflow.py`'s own pre-existing
+    `_route_after_analysis` truthiness gap without depending on the real
+    graph, so this test is fast and deterministic."""
+
+    def __init__(self) -> None:
+        self.resume_calls = 0
+
+    def _state(self) -> dict[str, Any]:
+        return {
+            "__interrupt__": [
+                _FakeInterrupt(
+                    {
+                        "type": "clarification",
+                        "questions": [
+                            {
+                                "relates_to_field": "x",
+                                "question": "?",
+                                "why_it_matters": "?",
+                            }
+                        ],
+                    }
+                )
+            ]
+        }
+
+    def start_workflow(self, task, *, session_id, execution_inputs=None):
+        return self._state()
+
+    def resume_workflow(self, session_id, resume_value):
+        self.resume_calls += 1
+        return self._state()
+
+
+class TestRunWorkflowInteractiveStuckGuard:
+    def test_raises_workflow_stuck_error_instead_of_hanging_forever(self) -> None:
+        agent = _StuckAgent()
+        with pytest.raises(WorkflowStuckError):
+            _run_workflow_interactive(
+                agent,
+                "task",
+                "sid",
+                answers={},
+                inputs={},
+                approve=False,
+                reject=False,
+                prompt=lambda msg: "",
+                out=lambda msg: None,
+            )
+        # Exactly _MAX_INTERRUPT_ROUNDS resumes are attempted before the
+        # (_MAX_INTERRUPT_ROUNDS + 1)-th interrupt trips the guard.
+        assert agent.resume_calls == _MAX_INTERRUPT_ROUNDS
+
+
+def _write_fixture_skill(root: Path, skill_id: str, description: str) -> None:
+    skill_dir = root / skill_id
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {skill_id}\ndescription: {description}\n---\n", encoding="utf-8"
+    )
+
+
+_PLANNING_SKILL_DESCRIPTION = "TensorRT performance benchmarking and layer analysis tool."
+
+_PLANNING_TASK = (
+    "Detect intruders using our 8 outdoor CCTV cameras at 1080p/15fps, "
+    "deploy on a Jetson Orin, need real-time response with recall above 95%, "
+    "and we have 2000 labeled clips already. Also evaluate deployment "
+    "optimization performance benchmarking of the model."
+)
+"""Fully-specified (no clarification questions — verified empirically in
+tests/test_workflow.py) plus benchmarking vocabulary matching the fixture
+skill's description, so plan_execution is reached directly."""
+
+_VAGUE_PLANNING_TASK = (
+    "Detect escape attempts. Also evaluate deployment optimization "
+    "performance benchmarking of the model."
+)
+"""Same benchmarking-vocabulary/fixture-skill match as _PLANNING_TASK, but
+missing environment/camera/deployment-target/latency/accuracy/data fields,
+so it raises a real clarify interrupt first (field names verified directly
+against RequirementsAnalyzer: environment_context, camera_data,
+latency_requirement, accuracy_requirement, data_availability)."""
+
+
+@dataclass
+class _FakeRuntime:
+    runtime_id: str = "fake-runtime"
+    outcome: RuntimeOutcome | None = None
+    calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+
+    def invoke(self, skill, request):
+        self.calls.append((skill.skill_id, dict(request.inputs)))
+        assert self.outcome is not None
+        return self.outcome
+
+
+class _GraphAgent:
+    """Minimal `CVAgent.start_workflow()`/`.resume_workflow()` duck-type
+    backed directly by a compiled `build_requirements_workflow_graph()`
+    graph (same construction `tests/test_workflow.py` already uses) —
+    proves `_run_workflow_interactive` against a real, unfaked graph run
+    without needing real skill discovery or `CVAgent`'s own registration
+    machinery."""
+
+    def __init__(self, graph: Any) -> None:
+        self._graph = graph
+
+    def start_workflow(
+        self, task: str, *, session_id: str, execution_inputs: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        initial: dict[str, Any] = {
+            "session_id": session_id,
+            "task": task,
+            "steps": [],
+            "requirements_analysis": None,
+            "clarification_answers": {},
+            "execution_inputs": execution_inputs or {},
+            "planning_result": None,
+            "execution_input_recovery": None,
+            "pending_execution": None,
+            "approval_decision": None,
+            "execution_result": None,
+        }
+        cfg = {"configurable": {"thread_id": session_id}}
+        return self._graph.invoke(initial, config=cfg)
+
+    def resume_workflow(self, session_id: str, resume_value: Any) -> dict[str, Any]:
+        cfg = {"configurable": {"thread_id": session_id}}
+        return self._graph.invoke(Command(resume=resume_value), config=cfg)
+
+
+def _build_graph(
+    tmp_path: Path,
+    execution_registry: ExecutionBindingRegistry,
+    *,
+    skill_id: str = "trt-perf-analysis",
+    approval_policy: str = "approval_required",
+    input_schema: tuple[InputField, ...] = (
+        InputField(name="path", required=True, description="folder path"),
+        InputField(name="model_name", required=True, description="model label"),
+    ),
+) -> Any:
+    _write_fixture_skill(tmp_path, skill_id, _PLANNING_SKILL_DESCRIPTION)
+    executor = SkillExecutor(execution_registry)
+    rt = _FakeRuntime(
+        runtime_id=f"fake-runtime-{skill_id}",
+        outcome=RuntimeOutcome(success=True, output={"ok": True}),
+    )
+    execution_registry.register_runtime(rt)
+    execution_registry.register_binding(
+        ExecutionBinding(
+            skill_id=skill_id,
+            binding_id=f"{skill_id}-v1",
+            runtime_id=rt.runtime_id,
+            approval_policy=approval_policy,  # type: ignore[arg-type]
+            verified=True,
+            input_schema=input_schema,
+        )
+    )
+    skill_inventory = SkillInventory(
+        sources=(LocalSkillSource(roots=(tmp_path,)),), is_executable=executor.can_execute
+    )
+    registry = CapabilityRegistry(_REGISTRY_PATH)
+    registry.load()
+    task_resolver = TaskResolver(capability_registry=registry, skill_inventory=skill_inventory)
+    analyzer = RequirementsAnalyzer(task_resolver=task_resolver, llm=None)
+    return build_requirements_workflow_graph(
+        requirements_analyzer=analyzer,
+        executor=executor,
+        skill_inventory=skill_inventory,
+        execution_registry=execution_registry,
+        checkpointer=MemorySaver(),
+    )
+
+
+class TestRunWorkflowInteractiveFixtureGraph:
+    """Real graph, synthetic fixture binding (no real installed skill has a
+    required input or an approval_required policy — Q20/STATUS.md's own
+    documented reason). Proves `_run_workflow_interactive` actually drives
+    `provide_execution_inputs` and `approval_gate`, which no CLI-as-
+    subprocess test can reach through `_cmd_workflow`'s deliberately
+    unregistered `CVAgent`."""
+
+    def test_full_multi_round_run_clarify_then_recovery_then_approval(
+        self, tmp_path: Path
+    ) -> None:
+        """All three interrupt kinds in one single run: clarify (answered
+        via --answer-equivalent `answers`), provide_execution_inputs
+        (answered partly via --input-equivalent `inputs` — "path" is
+        pre-supplied and therefore never even asked about, "model_name" is
+        not, so the recovery round asks only for it, answered via a live
+        prompt), approval_gate (answered via --approve)."""
+        execution_registry = ExecutionBindingRegistry()
+        graph = _build_graph(tmp_path, execution_registry)
+        agent = _GraphAgent(graph)
+
+        out_lines: list[str] = []
+        state = _run_workflow_interactive(
+            agent,
+            _VAGUE_PLANNING_TASK,
+            "multi-round-1",
+            answers={"accuracy_requirement": "recall above 95%"},
+            inputs={"path": "/data/run1"},
+            approve=True,
+            reject=False,
+            prompt=lambda msg: "yolov8",
+            out=out_lines.append,
+        )
+
+        assert state["status"] == "done"
+        assert state["execution_input_recovery"]["outcome"] == "supplied"
+        assert state["execution_input_recovery"]["terminal"] is False
+        assert state["approval_decision"] == "approved"
+        assert state["execution_result"]["status"] == "completed"
+        assert any("[INTERRUPT] clarification" in line for line in out_lines)
+        assert any("[INTERRUPT] provide_execution_inputs" in line for line in out_lines)
+        assert any("[INTERRUPT] approval" in line for line in out_lines)
+
+    def test_terminal_recovery_outcome_never_reaches_approval_gate(
+        self, tmp_path: Path
+    ) -> None:
+        """A provide_execution_inputs round left entirely blank is a
+        terminal "cancelled" outcome — the run must finish without ever
+        raising an approval interrupt, per ADR-0010 §13."""
+        execution_registry = ExecutionBindingRegistry()
+        graph = _build_graph(tmp_path, execution_registry)
+        agent = _GraphAgent(graph)
+
+        state = _run_workflow_interactive(
+            agent,
+            _PLANNING_TASK,
+            "terminal-1",
+            answers={},
+            inputs={},
+            approve=False,
+            reject=False,
+            prompt=lambda msg: "",
+            out=lambda msg: None,
+        )
+
+        assert state["status"] == "done"
+        assert state["execution_input_recovery"]["outcome"] == "cancelled"
+        assert state["execution_input_recovery"]["terminal"] is True
+        assert state["approval_decision"] is None
+        assert state["execution_result"] is None
+
+    def test_approval_gate_rejected_via_reject_flag(self, tmp_path: Path) -> None:
+        """Both required inputs pre-supplied (no recovery round needed) so
+        this test isolates approval_gate's own reject path. SkillExecutor
+        (ADR-0009) still runs `execute` on a rejected decision — it is what
+        actually enforces the rejection (D-013) — so `execution_result` is
+        populated with status "rejected", not `None`."""
+        execution_registry = ExecutionBindingRegistry()
+        graph = _build_graph(tmp_path, execution_registry)
+        agent = _GraphAgent(graph)
+
+        state = _run_workflow_interactive(
+            agent,
+            _PLANNING_TASK,
+            "reject-1",
+            answers={},
+            inputs={"path": "/data/run1", "model_name": "yolov8"},
+            approve=False,
+            reject=True,
+            prompt=lambda msg: "",
+            out=lambda msg: None,
+        )
+
+        assert state["execution_input_recovery"] is None
+        assert state["approval_decision"] == "rejected"
+        assert state["execution_result"]["status"] == "rejected"
+
+
+class TestPrintWorkflowSummary:
+    def test_reports_terminal_recovery_reason(self) -> None:
+        lines: list[str] = []
+        _print_workflow_summary(
+            {
+                "status": "done",
+                "steps": [{"node": "plan_execution", "action": "x"}],
+                "execution_input_recovery": {
+                    "outcome": "binding_mismatch",
+                    "terminal": True,
+                    "mismatch_detail": "schema_changed",
+                },
+            },
+            out=lines.append,
+        )
+        joined = "\n".join(lines)
+        assert "outcome=binding_mismatch" in joined
+        assert "terminal=True" in joined
+        assert "detail=schema_changed" in joined
+
+    def test_no_recovery_key_prints_no_recovery_line(self) -> None:
+        lines: list[str] = []
+        _print_workflow_summary({"status": "done", "steps": []}, out=lines.append)
+        assert not any("Execution-input recovery" in line for line in lines)

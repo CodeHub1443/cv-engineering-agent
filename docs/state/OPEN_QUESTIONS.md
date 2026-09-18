@@ -93,6 +93,31 @@ against the real installed `trt-perf-analysis` binding (today's tests use a
 synthetic fixture binding instead) — does not block §13's recovery mechanism
 itself, which is binding-agnostic.*
 
+**Q21.** *New 2026-09-18, found while implementing #34 (real CLI input handling
+for `python -m cv_agent workflow`).* `cv_agent/graph/workflow.py`'s
+`_route_after_analysis` decides whether to route back to the `clarify` interrupt
+again using `bool(state.get("clarification_answers"))` — truthiness, not "was
+clarify already attempted this run" (contrast `execution_input_recovery
+["attempted"]`, ADR-0010 §13's own hard-coded, never-truthiness-based bound in
+the same file). A human who declines to answer *every* clarification question
+resumes with an empty answers value; `clarification_answers` stays falsy, and
+the graph re-raises the same `clarify` interrupt indefinitely rather than
+treating "asked and declined" as answered — confirmed empirically: reproduced a
+genuine, unbounded loop via the real graph (not a synthetic worst case). Every
+prior caller of this interrupt (the old CLI demo, `tests/test_workflow.py`)
+always supplied a non-empty answers dict, so this was never triggered before.
+Not fixed here — out of #34's approved scope (that issue is CLI input handling,
+not graph routing); #34's CLI instead added its own caller-side iteration cap
+(`_MAX_INTERRUPT_ROUNDS`) so the command aborts cleanly rather than hanging,
+without touching this file. What should the real fix be — an `attempted`-style
+flag mirroring ADR-0010 §13's own pattern, a one-shot bound like `clarify`
+arguably should have had from ADR-0003 onward, or something else — and does
+`clarify`'s own separately-documented empty-dict-`Command(resume=...)`-not-
+reliably-delivered gap (`CVAgent.resume_workflow()`'s docstring) need fixing in
+the same pass? *Blocks: a human being able to cleanly decline every
+clarification question through `workflow` and still reach a normal, non-
+error completion.*
+
 ## Deferrable
 
 **Q11.** Multi-camera / multi-stream orchestration model. `[P§9]`
