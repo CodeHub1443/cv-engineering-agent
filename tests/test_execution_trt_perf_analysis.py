@@ -322,6 +322,24 @@ class TestRegistryAndApprovalWiring:
         assert binding.verified is True
         assert binding.approval_policy == "allowed"
 
+    def test_build_binding_declares_the_real_path_data_xor_contract(self) -> None:
+        """ADR-0009 §12 (Q20): the real input_schema/input_field_groups now
+        match _build_argv()'s actual contract — path/data each optional
+        individually, grouped as exactly_one; model_name genuinely optional,
+        no group."""
+        binding = build_binding()
+
+        by_name = {f.name: f for f in binding.input_schema}
+        assert set(by_name) == {"path", "data", "model_name"}
+        assert by_name["path"].required is False
+        assert by_name["data"].required is False
+        assert by_name["model_name"].required is False
+
+        assert len(binding.input_field_groups) == 1
+        group = binding.input_field_groups[0]
+        assert group.kind == "exactly_one"
+        assert group.field_names == ("path", "data")
+
     def test_register_makes_skill_executable_through_executor(self) -> None:
         registry = ExecutionBindingRegistry()
         register(registry)
@@ -524,3 +542,185 @@ class TestRealInvocation:
         assert outcome.success is True
         assert outcome.output["validation"]["status"] == "failed"
         assert outcome.output["validation"]["failed_count"] == 1
+
+
+_TRT_PERF_WORKFLOW_REQUEST = (
+    "Detect intruders using our 8 outdoor CCTV cameras at 1080p/15fps, "
+    "deploy on a Jetson Orin, need real-time response with recall above 95%, "
+    "and we have 2000 labeled clips already. Also evaluate deployment "
+    "optimization performance benchmarking of the model."
+)
+"""Same wording as tests/test_workflow.py's own _PLANNING_TASK — deliberately
+fully-specified (zero clarification questions, verified empirically there)
+plus benchmarking/deployment-optimization vocabulary, so this reaches
+plan_execution directly through the real workflow graph without an
+intervening clarify interrupt."""
+
+
+@requires_real_skill
+class TestRealPlanningAndRecovery:
+    """
+    Genuine, unfaked end-to-end test of ADR-0010's planning/recovery flow
+    against the real, installed trt-perf-analysis binding — the exact
+    scenario ADR-0010 §13.8 named as blocked and `docs/state/
+    OPEN_QUESTIONS.md` Q20 tracked: build_binding()'s input_schema was
+    deliberately left unpopulated because InputField.required alone could
+    not express the real path/data XOR contract, so every prior recovery
+    test used a synthetic fixture binding with a plain required=True field
+    instead. Now that ADR-0009 §12/ADR-0010 §14 add RequiredFieldGroup and
+    populate the real schema, this exercises CVAgent.start_workflow()/
+    resume_workflow() against the real skill, the real registered binding,
+    and a real subprocess invocation — not a fixture, not a mock runtime.
+    """
+
+    def test_pre_supplied_path_alone_satisfies_the_real_xor_group_and_executes(
+        self, tmp_path: Path
+    ) -> None:
+        from cv_agent.config.settings import AgentConfig
+        from cv_agent.execution.runtimes.trt_perf_analysis import register
+        from cv_agent.runtime.agent import CVAgent
+
+        _write_valid_layers_fixture(tmp_path)
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
+        register(agent.execution_bindings)
+
+        result = agent.start_workflow(
+            _TRT_PERF_WORKFLOW_REQUEST,
+            session_id="q20-presupply",
+            execution_inputs={"path": str(tmp_path)},
+        )
+
+        assert "__interrupt__" not in result
+        planning_result = result["planning_result"]
+        assert planning_result is not None
+        assert planning_result["status"] == "planned"
+        assert result["pending_execution"] == {
+            "skill_id": DEFAULT_SKILL_ID,
+            "inputs": {"path": str(tmp_path)},
+            "task": _TRT_PERF_WORKFLOW_REQUEST,
+        }
+        assert result["status"] == "done"
+        execution_result = result["execution_result"]
+        assert execution_result is not None
+        assert execution_result["status"] == "completed"
+        assert execution_result["output"]["schema_version"] == "1.0"
+
+    def test_recovery_interrupt_asks_for_the_group_and_supplying_data_alone_recovers(
+        self, tmp_path: Path
+    ) -> None:
+        """No execution_inputs pre-supplied at all -> plan_execution() finds
+        the real path/data group entirely unsatisfied -> provide_execution_
+        inputs interrupts, naming both path and data (never a composite
+        string) -> resuming with only 'data' (the other XOR member) is
+        enough to reach status == 'supplied' and a real completed
+        execution — proving the group-aware fulfillment check, not just the
+        group-aware missing-input detection, works end to end."""
+        from cv_agent.config.settings import AgentConfig
+        from cv_agent.execution.runtimes.trt_perf_analysis import register
+        from cv_agent.runtime.agent import CVAgent
+
+        _write_valid_layers_fixture(tmp_path, label="recovery")
+        layers_path = tmp_path / "layers_recovery.json"
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
+        register(agent.execution_bindings)
+
+        paused = agent.start_workflow(
+            _TRT_PERF_WORKFLOW_REQUEST, session_id="q20-recovery"
+        )
+
+        assert "__interrupt__" in paused
+        interrupt_payload = paused["__interrupt__"][0].value
+        assert interrupt_payload["type"] == "provide_execution_inputs"
+        assert {m["name"] for m in interrupt_payload["missing_inputs"]} == {"path", "data"}
+        assert interrupt_payload["field_groups"] == [
+            {"kind": "exactly_one", "field_names": ["path", "data"]}
+        ]
+
+        resumed = agent.resume_workflow(
+            "q20-recovery", {"data": [[str(layers_path)]]}
+        )
+
+        assert "__interrupt__" not in resumed
+        recovery = resumed["execution_input_recovery"]
+        assert recovery is not None
+        assert recovery["outcome"] == "supplied"
+        assert recovery["terminal"] is False
+        assert resumed["pending_execution"] == {
+            "skill_id": DEFAULT_SKILL_ID,
+            "inputs": {"data": [[str(layers_path)]]},
+            "task": _TRT_PERF_WORKFLOW_REQUEST,
+        }
+        assert resumed["status"] == "done"
+        execution_result = resumed["execution_result"]
+        assert execution_result is not None
+        assert execution_result["status"] == "completed"
+        assert execution_result["output"]["schema_version"] == "1.0"
+
+    def test_pre_supplying_both_path_and_data_together_is_rejected_before_execution(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-0010 §15 (review correction on PR #40): against the real
+        binding, supplying both XOR alternatives together must be caught
+        as "conflicting_inputs" and reach status == "done" without the
+        real subprocess ever being invoked — no execution_result at all,
+        not even a failed one. Deliberately passes no fixture layer file:
+        if the runtime were reached despite the conflict, it would either
+        crash trying to build conflicting argv or fail on missing input
+        files, either of which this test's `execution_result is None`
+        assertion would already catch as a false pass without needing to
+        inspect *why* it failed."""
+        from cv_agent.config.settings import AgentConfig
+        from cv_agent.execution.runtimes.trt_perf_analysis import register
+        from cv_agent.runtime.agent import CVAgent
+
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
+        register(agent.execution_bindings)
+
+        result = agent.start_workflow(
+            _TRT_PERF_WORKFLOW_REQUEST,
+            session_id="q20-conflict-presupply",
+            execution_inputs={"path": str(tmp_path), "data": [["layers.json"]]},
+        )
+
+        assert "__interrupt__" not in result
+        planning_result = result["planning_result"]
+        assert planning_result is not None
+        assert planning_result["status"] == "conflicting_inputs"
+        assert sorted(planning_result["conflicting_inputs"]) == ["data", "path"]
+        assert planning_result["plan"] is None
+        assert result["pending_execution"] is None
+        assert result["approval_decision"] == "not_required"
+        assert result["execution_result"] is None
+        assert result["status"] == "done"
+
+    def test_recovery_supplying_both_path_and_data_together_is_rejected_before_execution(
+        self, tmp_path: Path
+    ) -> None:
+        """Same real-binding proof via the recovery path: the interrupt
+        fires because neither alternative was pre-supplied, and the human
+        answers with BOTH at once — must be rejected, never executed."""
+        from cv_agent.config.settings import AgentConfig
+        from cv_agent.execution.runtimes.trt_perf_analysis import register
+        from cv_agent.runtime.agent import CVAgent
+
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
+        register(agent.execution_bindings)
+
+        paused = agent.start_workflow(
+            _TRT_PERF_WORKFLOW_REQUEST, session_id="q20-conflict-recovery"
+        )
+        assert "__interrupt__" in paused
+
+        resumed = agent.resume_workflow(
+            "q20-conflict-recovery",
+            {"path": str(tmp_path), "data": [["layers.json"]]},
+        )
+
+        assert "__interrupt__" not in resumed
+        recovery = resumed["execution_input_recovery"]
+        assert recovery is not None
+        assert recovery["outcome"] == "conflicting"
+        assert recovery["terminal"] is True
+        assert resumed["pending_execution"] is None
+        assert resumed["execution_result"] is None
+        assert resumed["status"] == "done"

@@ -119,12 +119,16 @@ class AgentState(TypedDict, total=False):
     this run — same serialization rationale as `requirements_analysis`/
     `execution_result` below. Shape: `{"status": PlanningStatus, "plan":
     dict | None, "candidate_skill_ids": tuple/list[str], "missing_inputs":
-    tuple/list[str]}` (tuple on a fresh, non-checkpoint-restored run; may
-    come back as a list after a checkpoint save/restore, same instability
-    `requirements_analysis`'s own tuple fields already have — see
-    `CVAgent._sync_memory_after_run()`); `plan`/`candidate_skill_ids`/
-    `missing_inputs` are only meaningfully populated for the `PlanningStatus`
-    value they document (see `cv_agent.graph.planning.PlanningResult`).
+    tuple/list[str], "conflicting_inputs": tuple/list[str]}` (tuple on a
+    fresh, non-checkpoint-restored run; may come back as a list after a
+    checkpoint save/restore, same instability `requirements_analysis`'s own
+    tuple fields already have — see `CVAgent._sync_memory_after_run()`);
+    `plan`/`candidate_skill_ids`/`missing_inputs`/`conflicting_inputs` are
+    only meaningfully populated for the `PlanningStatus` value they document
+    (see `cv_agent.graph.planning.PlanningResult`) — `conflicting_inputs`
+    (ADR-0010 §15, Q20 true-XOR correction) is set only for status ==
+    "conflicting_inputs", never alongside `missing_inputs` in the same
+    result.
 
     `None` has two causes, exactly the same ambiguity `execution_result`
     already carries for `execute`: this run's `plan_execution` node has
@@ -137,10 +141,12 @@ class AgentState(TypedDict, total=False):
 
     Since ADR-0010 §13: also carries `selected_skill_id`/
     `selected_binding_id`/`selected_input_schema`, populated whenever
-    exactly one candidate was selected (status "planned" or
-    "missing_required_inputs") — see `cv_agent.graph.planning.
-    PlanningResult`. This is what `execution_input_recovery` below compares
-    against on a retry."""
+    exactly one candidate was selected (status "planned",
+    "missing_required_inputs", or "conflicting_inputs") — see
+    `cv_agent.graph.planning.PlanningResult`. Since ADR-0010 §14 (Q20): also carries
+    `selected_input_field_groups`, the same snapshot pattern for
+    `ExecutionBinding.input_field_groups` (ADR-0009 §12). This is what
+    `execution_input_recovery` below compares against on a retry."""
 
     # ── Execution-input recovery (ADR-0010 §13) ──────────────────────────
     execution_input_recovery: Optional[dict[str, Any]]
@@ -150,16 +156,26 @@ class AgentState(TypedDict, total=False):
     but a distinct namespace: it only ever reads/writes `execution_inputs`
     above, never `clarification_answers`, and never infers one from the
     other (`[P§35]`). Limited to exactly one interrupt/resume round per
-    workflow run — a partial, invalid, or cancelled answer is a terminal
-    outcome, never a second prompt.
+    workflow run — a partial, invalid, cancelled, or conflicting answer is
+    a terminal outcome, never a second prompt.
 
     Shape: `{"attempted": bool, "outcome": "supplied" | "incomplete" |
-    "invalid" | "cancelled" | "binding_mismatch", "terminal": bool | None,
-    "mismatch_detail": "identity_changed" | "schema_changed" |
-    "still_incomplete_after_supply" | None, "expected_skill_id": str,
+    "invalid" | "cancelled" | "conflicting" | "binding_mismatch",
+    "terminal": bool | None, "mismatch_detail": "identity_changed" |
+    "schema_changed" | "still_incomplete_after_supply" |
+    "conflicting_inputs_supplied" | None, "expected_skill_id": str,
     "expected_binding_id": str, "expected_input_schema": list[dict],
-    "requested": list[str], "accepted": list[str], "still_missing":
-    list[str], "rejected": list[dict]}`.
+    "expected_input_field_groups": list[dict], "requested": list[str],
+    "accepted": list[str], "still_missing": list[str], "conflicting":
+    list[str], "rejected": list[dict]}`. `expected_input_field_groups`
+    (ADR-0009 §12/ADR-0010 §14, Q20) is the same checkpointed-snapshot
+    pattern as `expected_input_schema` — a group counts as fulfilled only
+    when EXACTLY one of its member names is supplied (ADR-0010 §15, true
+    oneOf/XOR semantics): zero is folded into the ordinary "missing"
+    handling, two or more is `"conflicting"` — `conflicting` names the
+    member(s) supplied together that violate the constraint, a distinct
+    field from `still_missing` (never populated for the same group
+    simultaneously).
 
     Field ownership/timeline: `provide_execution_inputs` writes the record
     once, on resume, reading `expected_skill_id`/`expected_binding_id`/

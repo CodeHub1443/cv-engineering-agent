@@ -47,7 +47,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from cv_agent.execution.binding import ExecutionBinding, ExecutionBindingRegistry
+from cv_agent.execution.binding import (
+    ExecutionBinding,
+    ExecutionBindingRegistry,
+    InputField,
+    RequiredFieldGroup,
+)
 from cv_agent.execution.models import ApprovalPolicy, RuntimeOutcome, SkillExecutionRequest
 from cv_agent.skills.models import Skill
 
@@ -208,6 +213,18 @@ def build_binding(
     `approval_policy="approval_required"` explicitly (see
     `tests/test_execution_trt_perf_analysis.py`) without that changing this
     module's own recommended default.
+
+    `input_schema`/`input_field_groups` (ADR-0009 §11/§12, resolving
+    `docs/state/OPEN_QUESTIONS.md` Q20) declare the real contract verified
+    directly against `_build_argv()`: `path`/`data` are each `required=False`
+    individually (neither is unconditionally required) but grouped as
+    `"exactly_one"` — a flat `required=True` on either would have
+    misrepresented the contract, and this is the first binding to actually
+    populate this field (ADR-0009 §11 left it `()` pending this decision).
+    `model_name` is genuinely optional, no group. Presence of `path` or
+    `data` (not both) is all `plan_execution()` checks (ADR-0010 §3/§14) —
+    `_build_argv()` itself remains the authoritative enforcement that
+    exactly one, not both, was actually given.
     """
     return ExecutionBinding(
         skill_id=skill_id,
@@ -220,6 +237,36 @@ def build_binding(
             "skill's scripts/analyze_trt_perf.py — validates and analyzes "
             "TensorRT layer/profile JSON, Python-stdlib only, read-only, "
             "local, deterministic. See ADR-0009 §8."
+        ),
+        input_schema=(
+            InputField(
+                name="path",
+                required=False,
+                description="Folder containing layers_*.json/profile_*.json files to analyze.",
+            ),
+            InputField(
+                name="data",
+                required=False,
+                description=(
+                    "List of [layer_json_path, profile_json_path?] path lists, "
+                    "one per backend."
+                ),
+            ),
+            InputField(
+                name="model_name",
+                required=False,
+                description="Optional model name label, forwarded as --model-name.",
+            ),
+        ),
+        input_field_groups=(
+            RequiredFieldGroup(
+                kind="exactly_one",
+                field_names=("path", "data"),
+                description=(
+                    "Exactly one of path/data is required — see "
+                    "TrtPerfAnalysisRuntime._build_argv()."
+                ),
+            ),
         ),
     )
 

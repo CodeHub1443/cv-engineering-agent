@@ -409,3 +409,108 @@ registered binding, what inputs it requires *before* attempting to construct a
 populating its own real `input_schema`; any code that reads
 `ExecutionBinding.input_schema` for a real decision. Both are the
 implementation PR's job (ADR-0010 §9), not this contract-only change's.
+
+## 12. Status — mutually-exclusive field groups (`RequiredFieldGroup`), resolving Q20
+
+**Added (branch `feature/claude/q20-input-field-groups`, issue #39).** §11's own
+"not yet populated" gap and its later-documented revisit trigger (`docs/state/
+OPEN_QUESTIONS.md` Q20, raised while building ADR-0010 §13): `InputField.required:
+bool` is flat and cannot express trt-perf-analysis's real `path`/`data` contract
+(`_build_argv()`, verified directly: exactly one of the two, `ValueError` for both
+or neither) — marking either `required=True` would misrepresent it, and marking
+both `required=False` would be truthful but could never trigger
+`"missing_required_inputs"` at all. Resolved by owner decision (asked directly,
+not invented): a "oneOf/XOR field-group construct" on the schema model.
+
+- **New type**, module `cv_agent.execution.binding`:
+
+  ```python
+  @dataclass(frozen=True)
+  class RequiredFieldGroup:
+      kind: Literal["exactly_one"]
+      field_names: tuple[str, ...]
+      description: str = ""
+  ```
+
+  Presence-only, deliberately mirroring `InputField.required`'s own presence-only
+  contract: a group is satisfied the moment ANY one member has a known value. It
+  does **not** reject "more than one supplied" at the planning layer — that
+  stricter half of a true XOR stays `TrtPerfAnalysisRuntime._build_argv()`'s own
+  job (already enforced, unchanged), the same "coarser, earlier check, not a
+  substitute for the runtime's own validation" posture §11 already established for
+  individual fields.
+
+- **`ExecutionBinding` gains one new field:** `input_field_groups: tuple[
+  RequiredFieldGroup, ...] = ()`. Default empty tuple — additive, not a breaking
+  change to any existing construction site. Validated in a new
+  `ExecutionBinding.__post_init__`: every `field_names` entry must name an already-
+  declared `InputField.name` in the same `input_schema`, and that field must be
+  `required=False` — a field cannot be both unconditionally required and one
+  option among several, a contradictory contract rejected at **construction** time,
+  not discovered later at planning time. `RequiredFieldGroup` itself rejects fewer
+  than two names or duplicate names in its own `__post_init__` — a group of one
+  name is meaningless.
+
+- **`trt_perf_analysis.build_binding()` now populates its real contract** — the
+  gap §11 explicitly left open: `input_schema` gains `path`/`data` (each
+  `required=False`) and `model_name` (genuinely optional, no group);
+  `input_field_groups` gains one `RequiredFieldGroup(kind="exactly_one",
+  field_names=("path", "data"))`. This is the first binding in the codebase to
+  populate either field.
+
+- **`plan_execution()` (ADR-0010 §3) and the `provide_execution_inputs` recovery
+  interrupt (ADR-0010 §13) are both extended to be group-aware** — see ADR-0010
+  §14 for the planning/recovery half of this decision; this section covers only
+  the schema/binding-layer type and its validation.
+
+**What this is NOT:** still planning metadata, not a replacement for runtime
+validation — `TrtPerfAnalysisRuntime._build_argv()` remains the actual,
+authoritative enforcement of "exactly one, not both." `SkillExecutionRequest.
+inputs` is untouched by this change.
+
+**Backward compatibility:** every existing `ExecutionBinding` construction site
+that does not pass `input_field_groups` is unaffected — the default `()` means
+`__post_init__`'s group-validation loop never executes, and every existing test
+asserting `binding.input_field_groups == ()` still holds true for a binding that
+does not populate it.
+
+## 13. Status — group-membership overlap validation + true XOR correction
+
+**Added (branch `feature/claude/q20-input-field-groups`, PR #40 review).** An
+independent review of §12's first implementation found two things that needed
+correcting before merge, both addressed here and in ADR-0010 §15 together:
+
+- **§12's own "at least one" wording did not satisfy the Q20 decision.** The
+  owner's decision (recorded in `docs/state/DECISIONS.md` D-027) was
+  explicitly "a declarative oneOf/XOR field-group construct" — a real XOR
+  means *exactly* one, not merely *at least* one. §12's first cut deliberately
+  checked presence only, deferring "reject more than one" entirely to
+  `TrtPerfAnalysisRuntime._build_argv()`. This under-enforced the decision:
+  `plan_execution()` could produce a plan (and, for an `approval_required`
+  binding, reach a human approval interrupt) for an input combination that
+  was always going to fail at the runtime. See ADR-0010 §15 for the
+  planning/recovery-layer fix — `RequiredFieldGroup` itself (this module) is
+  unchanged in shape, only in how strictly `plan_execution()`/the recovery
+  interrupt now read it (exactly one, not at least one). The runtime remains
+  the final, authoritative content-level check either way — this correction
+  moves *count* enforcement earlier, it does not remove the runtime's own
+  *value* enforcement.
+
+- **`ExecutionBinding.__post_init__` gains group-membership-overlap
+  validation:** a field may belong to at most one `RequiredFieldGroup`.
+  Rejected at construction with a `ValueError` naming the field and both
+  conflicting groups. This closes a real, reviewer-identified gap: `cv_agent.
+  graph.workflow._node_provide_execution_inputs` reconstructs which groups are
+  still "in play" during a recovery interrupt from a flat `requested` name
+  list, relying on the invariant "an unsatisfied group's members are, by
+  construction, entirely present in `missing_inputs`" — a field shared across
+  two groups with different satisfaction states could violate that invariant
+  in a way no existing test would have caught, since only one binding (with
+  one, non-overlapping group) exists in the codebase today. Not a live bug —
+  a latent gap closed before a second grouped binding could ever hit it.
+
+Both fixes are additive/stricter, not shape changes: `RequiredFieldGroup`'s
+fields are unchanged; `trt_perf_analysis.build_binding()`'s real
+`input_field_groups=(RequiredFieldGroup(kind="exactly_one", field_names=
+("path", "data")),)` entry is a single, non-overlapping group and remains
+valid under the new construction-time check without modification.

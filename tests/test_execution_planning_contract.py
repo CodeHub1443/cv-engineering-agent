@@ -19,9 +19,14 @@ import dataclasses
 
 import pytest
 
-from cv_agent.execution.binding import ExecutionBinding, ExecutionBindingRegistry, InputField
+from cv_agent.execution.binding import (
+    ExecutionBinding,
+    ExecutionBindingRegistry,
+    InputField,
+    RequiredFieldGroup,
+)
 from cv_agent.execution.runtimes.trt_perf_analysis import build_binding
-from cv_agent.graph.planning import ExecutionPlan, PlanningResult, plan_execution
+from cv_agent.graph.planning import ExecutionPlan, plan_execution
 from cv_agent.requirements.models import RequirementsAnalysis, SkillLink
 
 
@@ -108,12 +113,16 @@ class TestExecutionBindingInputSchema:
         )
         assert binding.input_schema == schema
 
-    def test_existing_trt_perf_analysis_binding_is_unaffected(self) -> None:
-        """ADR-0009 §11: the one real ExecutionBinding construction site in
-        this codebase must keep working, unchanged, with input_schema
-        defaulting to empty — this ADR does not (yet) populate it."""
+    def test_existing_trt_perf_analysis_binding_declares_its_real_contract(self) -> None:
+        """ADR-0009 §12 (Q20): build_binding() now populates its real
+        path/data/model_name input_schema plus the path/data exactly_one
+        group — see tests/test_execution_trt_perf_analysis.py for the full
+        shape assertions; this just confirms the one real construction site
+        still constructs and is still verified."""
         binding = build_binding()
-        assert binding.input_schema == ()
+        assert {f.name for f in binding.input_schema} == {"path", "data", "model_name"}
+        assert len(binding.input_field_groups) == 1
+        assert binding.input_field_groups[0].field_names == ("path", "data")
         assert binding.skill_id == "trt-perf-analysis"
         assert binding.verified is True
 
@@ -151,7 +160,10 @@ def _analysis(
 
 
 def _binding(
-    skill_id: str, *, input_schema: tuple[InputField, ...] = ()
+    skill_id: str,
+    *,
+    input_schema: tuple[InputField, ...] = (),
+    input_field_groups: tuple[RequiredFieldGroup, ...] = (),
 ) -> ExecutionBinding:
     return ExecutionBinding(
         skill_id=skill_id,
@@ -160,6 +172,7 @@ def _binding(
         approval_policy="allowed",
         verified=True,
         input_schema=input_schema,
+        input_field_groups=input_field_groups,
     )
 
 
@@ -329,6 +342,94 @@ class TestPlanExecution:
         assert result.status == "missing_required_inputs"
         assert result.missing_inputs == ("model_name", "path")
 
+    # ── Field groups (ADR-0009 §12 / ADR-0010 §14, Q20) ─────────────────
+
+    def _xor_schema_and_group(self) -> tuple[tuple[InputField, ...], tuple[RequiredFieldGroup, ...]]:
+        schema = (
+            InputField(name="path", required=False, description="folder path"),
+            InputField(name="data", required=False, description="data list"),
+        )
+        groups = (RequiredFieldGroup(kind="exactly_one", field_names=("path", "data")),)
+        return schema, groups
+
+    def test_group_satisfied_by_either_member_alone(self) -> None:
+        schema, groups = self._xor_schema_and_group()
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema, input_field_groups=groups)),
+            available_inputs={"data": [["layers.json"]]},
+        )
+        assert result.status == "planned"
+        assert result.plan is not None
+        assert result.plan.inputs == {"data": [["layers.json"]]}
+
+    def test_group_unsatisfied_reports_every_member_name_missing(self) -> None:
+        schema, groups = self._xor_schema_and_group()
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema, input_field_groups=groups)),
+        )
+        assert result.status == "missing_required_inputs"
+        assert result.missing_inputs == ("data", "path")
+
+    def test_supplying_both_group_members_together_is_conflicting_inputs(self) -> None:
+        """ADR-0010 §15 (review correction on PR #40): the Q20 decision was
+        a true oneOf/XOR construct — "both given" is a genuine violation
+        plan_execution() itself now catches and reports, before any plan,
+        approval, or execution is ever attempted. plan_execution() still
+        checks presence/count only, never value content — rejecting a
+        structurally-invalid *value* for either field stays the runtime's
+        job (e.g. TrtPerfAnalysisRuntime._build_argv())."""
+        schema, groups = self._xor_schema_and_group()
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema, input_field_groups=groups)),
+            available_inputs={"path": "/tmp/x", "data": [["layers.json"]]},
+        )
+        assert result.status == "conflicting_inputs"
+        assert result.plan is None
+        assert result.conflicting_inputs == ("data", "path")
+        assert result.missing_inputs == ()
+        assert result.selected_skill_id == "skill-a"
+
+    def test_conflict_takes_priority_over_a_separate_missing_required_field(self) -> None:
+        """A conflict on one group and a genuinely missing, unrelated
+        required field on the same candidate: the conflict is reported
+        (status == "conflicting_inputs"), not silently dropped in favor of
+        "missing_required_inputs" — a contradictory answer needs
+        correcting regardless of what else is still missing."""
+        schema, groups = self._xor_schema_and_group()
+        schema = schema + (
+            InputField(name="model_name", required=True, description="model label"),
+        )
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema, input_field_groups=groups)),
+            available_inputs={"path": "/tmp/x", "data": [["layers.json"]]},
+        )
+        assert result.status == "conflicting_inputs"
+        assert result.conflicting_inputs == ("data", "path")
+
+    def test_group_and_individually_required_field_both_enforced(self) -> None:
+        schema = (
+            InputField(name="path", required=False, description="folder path"),
+            InputField(name="data", required=False, description="data list"),
+            InputField(name="model_name", required=True, description="model label"),
+        )
+        groups = (RequiredFieldGroup(kind="exactly_one", field_names=("path", "data")),)
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema, input_field_groups=groups)),
+            available_inputs={"path": "/tmp/x"},
+        )
+        assert result.status == "missing_required_inputs"
+        assert result.missing_inputs == ("model_name",)
+
     # ── source_task mapping ──────────────────────────────────────────────
 
     def test_source_task_comes_from_original_request(self) -> None:
@@ -343,10 +444,10 @@ class TestPlanExecution:
     # ── Compatibility with the real binding shape ────────────────────────
 
     def test_plans_against_the_real_trt_perf_analysis_binding_shape(self) -> None:
-        """build_binding()'s empty input_schema (ADR-0009 §11: not yet
-        populated) means no required input can ever be reported missing
-        today — an accurate reflection of the current contract, not a
-        planner bug (see plan_execution()'s own docstring)."""
+        """build_binding()'s real path/data exactly_one group (ADR-0009 §12,
+        Q20) is satisfied by supplying just one of them — the group check,
+        not a planner bug, is what makes this "planned" rather than
+        "missing_required_inputs"."""
         links = (_skill_link("trt-perf-analysis"),)
         result = plan_execution(
             _analysis(links),
@@ -360,6 +461,15 @@ class TestPlanExecution:
             inputs={"path": "/tmp/perf-data"},
             source_task="Detect people.",
         )
+
+    def test_neither_path_nor_data_reports_both_as_missing(self) -> None:
+        """The real trt-perf-analysis binding with no path/data supplied:
+        the unsatisfied exactly_one group reports both member names, not a
+        composite string — matching plan_execution()'s documented shape."""
+        links = (_skill_link("trt-perf-analysis"),)
+        result = plan_execution(_analysis(links), _registry(build_binding()))
+        assert result.status == "missing_required_inputs"
+        assert result.missing_inputs == ("data", "path")
 
     # ── Result type itself ───────────────────────────────────────────────
 
@@ -424,6 +534,36 @@ class TestPlanningResultSelectedIdentity:
         result = plan_execution(_analysis(links), _registry(_binding("skill-a")))
         assert result.status == "planned"
         assert result.selected_input_schema == ()
+        assert result.selected_input_field_groups == ()
+
+    def test_selected_input_field_groups_populated_when_planned(self) -> None:
+        schema = (
+            InputField(name="path", required=False, description="folder path"),
+            InputField(name="data", required=False, description="data list"),
+        )
+        groups = (RequiredFieldGroup(kind="exactly_one", field_names=("path", "data")),)
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema, input_field_groups=groups)),
+            available_inputs={"path": "/tmp/x"},
+        )
+        assert result.status == "planned"
+        assert result.selected_input_field_groups == groups
+
+    def test_selected_input_field_groups_populated_when_missing_required_inputs(self) -> None:
+        schema = (
+            InputField(name="path", required=False, description="folder path"),
+            InputField(name="data", required=False, description="data list"),
+        )
+        groups = (RequiredFieldGroup(kind="exactly_one", field_names=("path", "data")),)
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema, input_field_groups=groups)),
+        )
+        assert result.status == "missing_required_inputs"
+        assert result.selected_input_field_groups == groups
 
     def test_asdict_preserves_the_full_input_field_contract_per_entry(self) -> None:
         """Explicit verification (requested on PR #33 review): the
