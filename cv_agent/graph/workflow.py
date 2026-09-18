@@ -86,7 +86,9 @@ full `input_schema`/`input_field_groups` snapshot (ADR-0009 §12, ADR-0010
 (`AgentState["execution_input_recovery"]["expected_*"]`, themselves sourced
 only from the checkpointed `planning_result`, never a live registry lookup
 at comparison time) — any mismatch, along with an
-incomplete/invalid/cancelled answer, is a terminal outcome
+incomplete/invalid/cancelled/conflicting answer (ADR-0010 §15: two or more
+members of an "exactly_one" `RequiredFieldGroup` supplied together), is a
+terminal outcome
 (`execution_input_recovery["terminal"] is True`) that routes straight to
 `END`, **bypassing `approval_gate` entirely** so a failed recovery can
 never be read as "approval not required" for a plan that was never
@@ -236,17 +238,21 @@ def _classify_execution_input_resume(
     every one of its members was reported missing — see the caller).
 
     Returns (outcome, accepted, rejected). `outcome` is one of "cancelled"/
-    "invalid"/"incomplete"/"supplied" — never "binding_mismatch", which
-    only `_node_plan_execution` can determine, on the retry, by comparing
-    identity/schema; this function has no visibility into that.
+    "invalid"/"incomplete"/"conflicting"/"supplied" — never
+    "binding_mismatch", which only `_node_plan_execution` can determine, on
+    the retry, by comparing identity/schema; this function has no
+    visibility into that.
 
-    Fulfillment is no longer "every requested name answered": a name that
-    belongs to a `field_groups` entry is satisfied the moment ANY one
-    member of its group is accepted (mirroring `plan_execution()`'s own
-    "exactly_one" presence check) — requiring all of `path`/`data` to be
-    supplied to recover from a real XOR contract would misrepresent it.
-    Every `requested` name outside any group still needs its own value, as
-    before this parameter existed.
+    True oneOf/XOR fulfillment (ADR-0010 §15, correcting an earlier
+    "at least one" version): a `field_groups` entry is satisfied only when
+    EXACTLY one of its members is accepted — zero accepted is "not
+    fulfilled" (folds into "invalid"/"incomplete" below, same as any other
+    unanswered `requested` name); two or more accepted together is
+    "conflicting", checked and returned ahead of "supplied"/"invalid"/
+    "incomplete" even if some other part of `requested` was answered fine,
+    since a contradictory answer needs correcting regardless. Every
+    `requested` name outside any group still needs its own single value,
+    unchanged from before this parameter existed.
 
     A field attempted-but-rejected (blank, or not a declared name) and a
     field never mentioned at all are treated identically for the outcome
@@ -278,12 +284,15 @@ def _classify_execution_input_resume(
     grouped_names = set().union(*field_groups) if field_groups else set()
     ungrouped_requested = set(requested) - grouped_names
 
-    groups_ok = all(group & accepted_names for group in field_groups)
+    any_group_conflicting = any(len(group & accepted_names) > 1 for group in field_groups)
+    groups_ok = all(len(group & accepted_names) == 1 for group in field_groups)
     individual_ok = ungrouped_requested <= accepted_names
     fulfilled = accepted_names & set(requested)
 
     if not isinstance(resume_value, dict) or not supplied:
         outcome = "cancelled"
+    elif any_group_conflicting:
+        outcome = "conflicting"
     elif individual_ok and groups_ok:
         outcome = "supplied"
     elif not fulfilled:
@@ -362,15 +371,27 @@ def _make_provide_execution_inputs_node():
         merged_execution_inputs = dict(state.get("execution_inputs") or {})
         merged_execution_inputs.update(accepted)
 
-        # A satisfied group's OTHER, unanswered member(s) are not "still
-        # missing" — the group as a whole is fulfilled the moment any one
-        # member is accepted (§14.1's own rule), so e.g. supplying only
-        # "data" from a path/data group must not still list "path" here.
+        # A satisfied (or conflicting) group's OTHER, unanswered member(s)
+        # are not "still missing" — the group as a whole is no longer
+        # awaiting an answer once at least one member is accepted, whether
+        # that turns out to be exactly one (satisfied) or more than one
+        # (conflicting, see below) — so e.g. supplying only "data" from a
+        # path/data group must not still list "path" here.
         accepted_names = set(accepted)
         satisfied_group_members: set[str] = set()
+        conflicting_members: set[str] = set()
         for group in field_groups:
-            if group & accepted_names:
+            present = group & accepted_names
+            if present:
                 satisfied_group_members |= group
+            if len(present) > 1:
+                # ADR-0010 §15: true XOR — reported here immediately (not
+                # only via the retry's fresh plan_execution() call) so
+                # execution_input_recovery is self-descriptive the moment
+                # this node writes it, consistent with "invalid"/
+                # "still_missing" already being computed here rather than
+                # deferred.
+                conflicting_members |= present
         still_missing = sorted(set(requested) - accepted_names - satisfied_group_members)
 
         # terminal/mismatch_detail are deliberately left unset here — only
@@ -392,6 +413,7 @@ def _make_provide_execution_inputs_node():
             "requested": requested,
             "accepted": sorted(accepted.keys()),
             "still_missing": still_missing,
+            "conflicting": sorted(conflicting_members),
             "rejected": rejected,
         }
 
@@ -548,20 +570,44 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
                 final_outcome, terminal, detail = "binding_mismatch", True, "schema_changed"
             elif raw_outcome != "supplied":
                 final_outcome, terminal, detail = raw_outcome, True, None
+            elif result.status == "conflicting_inputs":
+                # ADR-0010 §15: reachable even when the interrupt node's own
+                # `_classify_execution_input_resume()` call reported
+                # "supplied" — that check only inspects the group(s) THIS
+                # round's `field_groups` reconstructed (groups fully absent
+                # from `requested`, i.e. still unsatisfied at plan time). A
+                # resume payload may legally include a declared name beyond
+                # what was actually asked (accepted, not rejected, by that
+                # function); if it names the OTHER member of a group already
+                # satisfied by a prior round's `execution_inputs`, the
+                # per-round check has no visibility into that — only this
+                # retry's fresh, authoritative plan_execution() call, run
+                # against the fully merged execution_inputs, can catch it.
+                # Labeled precisely rather than folded into the generic
+                # "still_incomplete_after_supply" guard below, so a human
+                # who over-answers sees "conflicting," not a misleading
+                # "binding mismatch."
+                final_outcome, terminal, detail = (
+                    "conflicting",
+                    True,
+                    "conflicting_inputs_supplied",
+                )
             elif result.status != "planned":
                 # Invariant/safety guard, not a reachable branch under
                 # normal operation (verified on PR #33 review, extended for
-                # field groups in ADR-0010 §14): if identity_ok and
+                # field groups in ADR-0010 §14/§15): if identity_ok and
                 # schema_ok both hold, every requested name is, by
                 # construction, either a required field or a member of a
                 # group of the (unchanged) selected binding, and the
                 # interrupt node's own "supplied" classification already
-                # means every individually-required name — and at least one
-                # member of every group — has a valid value in the
-                # now-merged execution_inputs — so plan_execution()'s own
-                # missing-field/group check (ADR-0010 §3/§14) cannot find
-                # anything unsatisfied, and result.status must be "planned".
-                # This branch exists only
+                # means every individually-required name — and exactly one
+                # member of every group it saw — has a valid value in the
+                # now-merged execution_inputs; the branch above handles the
+                # one known way `result.status` can still be
+                # "conflicting_inputs" here, so plan_execution()'s own
+                # missing-field/group check (ADR-0010 §3/§14/§15) cannot
+                # find anything else unsatisfied, and result.status must be
+                # "planned". This branch exists only
                 # to keep the "never fabricate a plan" guarantee
                 # unconditional rather than dependent on that reasoning
                 # continuing to hold as the codebase evolves — belt and
@@ -598,6 +644,8 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
             log_extra["candidate_skill_ids"] = list(result.candidate_skill_ids)
         elif result.status == "missing_required_inputs":
             log_extra["missing_inputs"] = list(result.missing_inputs)
+        elif result.status == "conflicting_inputs":
+            log_extra["conflicting_inputs"] = list(result.conflicting_inputs)
 
         if updated_recovery is not None:
             log_extra["recovery_outcome"] = updated_recovery["outcome"]
@@ -640,14 +688,19 @@ def _route_after_planning(state: AgentState) -> str:
     if already_attempted:
         # A recovery round just finalized (or this pass is the retry that
         # follows one). terminal is the single, authoritative signal — an
-        # incomplete/invalid/cancelled/binding_mismatch outcome bypasses
-        # approval_gate entirely, so a failed recovery can never be read as
-        # "approval not required" for a plan that was never produced.
+        # incomplete/invalid/cancelled/conflicting/binding_mismatch outcome
+        # bypasses approval_gate entirely, so a failed recovery can never
+        # be read as "approval not required" for a plan that was never
+        # produced.
         assert recovery is not None
         return END if recovery.get("terminal") else "approval_gate"
 
-    # First-pass planned / no_executable_candidate / ambiguous_candidates —
-    # unchanged from before ADR-0010 §13.
+    # First-pass planned / no_executable_candidate / ambiguous_candidates /
+    # conflicting_inputs (ADR-0010 §15: a true XOR violation, caught before
+    # any plan is ever produced) — approval_gate no-ops for all of these
+    # except "planned" (no pending_execution was set, so it sets
+    # approval_decision="not_required"/status="done" without interrupting
+    # or executing anything) — unchanged from before ADR-0010 §13/§15.
     return "approval_gate"
 
 

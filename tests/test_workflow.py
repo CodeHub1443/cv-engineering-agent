@@ -670,6 +670,7 @@ class TestPlanExecutionIntegration:
         *,
         approval_policy: str = "allowed",
         input_schema: tuple[InputField, ...] = (),
+        input_field_groups: tuple[RequiredFieldGroup, ...] = (),
         binding_id: str | None = None,
     ) -> "FakeRuntime":
         # A distinct runtime_id per skill_id — registering two bindings that
@@ -688,6 +689,7 @@ class TestPlanExecutionIntegration:
                 approval_policy=approval_policy,  # type: ignore[arg-type]
                 verified=True,
                 input_schema=input_schema,
+                input_field_groups=input_field_groups,
             )
         )
         return rt
@@ -733,6 +735,7 @@ class TestPlanExecutionIntegration:
             },
             "candidate_skill_ids": (),
             "missing_inputs": (),
+            "conflicting_inputs": (),
             "selected_skill_id": "trt-perf-analysis",
             "selected_binding_id": "trt-perf-analysis-v1",
             "selected_input_schema": (),
@@ -818,6 +821,53 @@ class TestPlanExecutionIntegration:
         assert payload["skill_id"] == "trt-perf-analysis"
         assert payload["binding_id"] == "trt-perf-analysis-v1"
         assert payload["missing_inputs"] == [{"name": "path", "description": "folder path"}]
+
+    def test_conflicting_pre_supplied_inputs_reject_before_approval_or_execution(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-0010 §15 (review correction on PR #40): true oneOf/XOR — two
+        group members pre-supplied together via execution_inputs (ADR-0010
+        §12) at start_workflow() time, before any interrupt is even
+        possible, must be rejected as "conflicting_inputs" and reach
+        status == "done" without ever calling approval_gate's real gating
+        logic or the runtime — no interrupt fires at all (unlike
+        "missing_required_inputs", "conflicting_inputs" never routes to
+        provide_execution_inputs; there is nothing to ask for, only
+        something to remove)."""
+        execution_registry = ExecutionBindingRegistry()
+        runtime = self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=(
+                InputField(name="path", required=False, description="folder path"),
+                InputField(name="data", required=False, description="data list"),
+            ),
+            input_field_groups=(
+                RequiredFieldGroup(kind="exactly_one", field_names=("path", "data")),
+            ),
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        result = _start(
+            graph,
+            _PLANNING_TASK,
+            "plan-conflict-1",
+            execution_inputs={"path": "/data/clips", "data": [["layers.json"]]},
+        )
+
+        assert "__interrupt__" not in result
+        assert result["pending_execution"] is None
+        assert result["execution_result"] is None
+        assert result["approval_decision"] == "not_required"
+        assert result["status"] == "done"
+        assert result["planning_result"]["status"] == "conflicting_inputs"
+        assert result["planning_result"]["plan"] is None
+        assert sorted(result["planning_result"]["conflicting_inputs"]) == ["data", "path"]
+        assert sorted(result["planning_result"]["missing_inputs"]) == []
+        plan_step = next(s for s in result["steps"] if s["node"] == "plan_execution")
+        assert plan_step["planning_status"] == "conflicting_inputs"
+        assert sorted(plan_step["conflicting_inputs"]) == ["data", "path"]
+        assert runtime.calls == []
 
     def test_execution_inputs_satisfy_missing_required_input_and_produce_a_plan(
         self, tmp_path: Path
@@ -1295,6 +1345,89 @@ class TestProvideExecutionInputsRecovery:
         assert recovery["outcome"] == "invalid"
         assert recovery["terminal"] is True
         assert resumed["pending_execution"] is None
+
+    def test_supplying_both_group_members_at_the_interrupt_is_conflicting(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-0010 §15 (review correction on PR #40): true oneOf/XOR — a
+        human who answers a provide_execution_inputs interrupt with BOTH
+        path and data must not recover as "supplied"; the run terminates
+        with an actionable "conflicting" outcome, never reaching
+        approval_gate or execute."""
+        execution_registry = ExecutionBindingRegistry()
+        runtime = self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=self._XOR_SCHEMA,
+            input_field_groups=self._XOR_GROUP,
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-group-6")
+        resumed = _resume(
+            graph, "rec-group-6", {"path": "/data/clips", "data": [["layers.json"]]}
+        )
+
+        assert "__interrupt__" not in resumed
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "conflicting"
+        assert recovery["terminal"] is True
+        assert recovery["conflicting"] == ["data", "path"]
+        assert resumed["pending_execution"] is None
+        assert resumed["approval_decision"] is None
+        assert resumed["execution_result"] is None
+        assert resumed["status"] == "done"
+        assert runtime.calls == []
+
+    def test_conflict_introduced_by_an_unsolicited_extra_field_is_still_caught(
+        self, tmp_path: Path
+    ) -> None:
+        """A subtler path to the same violation: `path` is already known
+        (pre-supplied via execution_inputs, satisfying the group before the
+        interrupt ever fires) and a genuinely missing, unrelated field
+        (model_name) triggers the interrupt. The human answers the actual
+        ask (model_name) but ALSO includes "data" — a declared name the
+        interrupt never requested, since the group looked satisfied at plan
+        time. _classify_execution_input_resume's own per-round check has no
+        visibility into a group outside `requested`, so it reports
+        "supplied" — only the retry's fresh, authoritative plan_execution()
+        call (run against the fully merged execution_inputs) can catch that
+        this now conflicts. Proves the ADR-0010 §15 conflicting_inputs
+        branch in _node_plan_execution's retry, not just the classify-layer
+        shortcut."""
+        schema = self._XOR_SCHEMA + (
+            InputField(name="model_name", required=True, description="model label"),
+        )
+        execution_registry = ExecutionBindingRegistry()
+        runtime = self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=schema,
+            input_field_groups=self._XOR_GROUP,
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        started = _start(
+            graph, _PLANNING_TASK, "rec-group-7", execution_inputs={"path": "/data/clips"}
+        )
+        assert started["__interrupt__"][0].value["missing_inputs"] == [
+            {"name": "model_name", "description": "model label"}
+        ]
+
+        resumed = _resume(
+            graph, "rec-group-7", {"model_name": "resnet50", "data": [["layers.json"]]}
+        )
+
+        assert "__interrupt__" not in resumed
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "conflicting"
+        assert recovery["terminal"] is True
+        assert recovery["mismatch_detail"] == "conflicting_inputs_supplied"
+        assert resumed["pending_execution"] is None
+        assert resumed["execution_result"] is None
+        assert resumed["planning_result"]["status"] == "conflicting_inputs"
+        assert sorted(resumed["planning_result"]["conflicting_inputs"]) == ["data", "path"]
+        assert runtime.calls == []
 
     def test_group_and_individually_required_field_together_incomplete_when_only_group_met(
         self, tmp_path: Path

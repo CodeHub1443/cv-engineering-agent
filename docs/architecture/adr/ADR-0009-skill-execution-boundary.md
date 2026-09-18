@@ -473,3 +473,44 @@ that does not pass `input_field_groups` is unaffected — the default `()` means
 `__post_init__`'s group-validation loop never executes, and every existing test
 asserting `binding.input_field_groups == ()` still holds true for a binding that
 does not populate it.
+
+## 13. Status — group-membership overlap validation + true XOR correction
+
+**Added (branch `feature/claude/q20-input-field-groups`, PR #40 review).** An
+independent review of §12's first implementation found two things that needed
+correcting before merge, both addressed here and in ADR-0010 §15 together:
+
+- **§12's own "at least one" wording did not satisfy the Q20 decision.** The
+  owner's decision (recorded in `docs/state/DECISIONS.md` D-027) was
+  explicitly "a declarative oneOf/XOR field-group construct" — a real XOR
+  means *exactly* one, not merely *at least* one. §12's first cut deliberately
+  checked presence only, deferring "reject more than one" entirely to
+  `TrtPerfAnalysisRuntime._build_argv()`. This under-enforced the decision:
+  `plan_execution()` could produce a plan (and, for an `approval_required`
+  binding, reach a human approval interrupt) for an input combination that
+  was always going to fail at the runtime. See ADR-0010 §15 for the
+  planning/recovery-layer fix — `RequiredFieldGroup` itself (this module) is
+  unchanged in shape, only in how strictly `plan_execution()`/the recovery
+  interrupt now read it (exactly one, not at least one). The runtime remains
+  the final, authoritative content-level check either way — this correction
+  moves *count* enforcement earlier, it does not remove the runtime's own
+  *value* enforcement.
+
+- **`ExecutionBinding.__post_init__` gains group-membership-overlap
+  validation:** a field may belong to at most one `RequiredFieldGroup`.
+  Rejected at construction with a `ValueError` naming the field and both
+  conflicting groups. This closes a real, reviewer-identified gap: `cv_agent.
+  graph.workflow._node_provide_execution_inputs` reconstructs which groups are
+  still "in play" during a recovery interrupt from a flat `requested` name
+  list, relying on the invariant "an unsatisfied group's members are, by
+  construction, entirely present in `missing_inputs`" — a field shared across
+  two groups with different satisfaction states could violate that invariant
+  in a way no existing test would have caught, since only one binding (with
+  one, non-overlapping group) exists in the codebase today. Not a live bug —
+  a latent gap closed before a second grouped binding could ever hit it.
+
+Both fixes are additive/stricter, not shape changes: `RequiredFieldGroup`'s
+fields are unchanged; `trt_perf_analysis.build_binding()`'s real
+`input_field_groups=(RequiredFieldGroup(kind="exactly_one", field_names=
+("path", "data")),)` entry is a single, non-overlapping group and remains
+valid under the new construction-time check without modification.

@@ -440,3 +440,54 @@ class TestExecutionBindingFieldGroupValidation:
             verified=True,
         )
         assert binding.input_field_groups == ()
+
+    def test_field_belonging_to_two_groups_is_rejected(self) -> None:
+        """Review finding on PR #40: a field shared across two groups would
+        break the "an unsatisfied group's members are, by construction,
+        entirely present in missing_inputs" invariant
+        cv_agent.graph.workflow._node_provide_execution_inputs relies on to
+        reconstruct which groups are still in play — rejected at
+        construction, not left as a latent gap."""
+        schema = (
+            InputField(name="a", required=False, description=""),
+            InputField(name="b", required=False, description=""),
+            InputField(name="c", required=False, description=""),
+        )
+        with pytest.raises(ValueError, match="more than one RequiredFieldGroup"):
+            ExecutionBinding(
+                skill_id="fixture-skill",
+                binding_id="fixture-skill-v1",
+                runtime_id="fixture-runtime",
+                approval_policy="allowed",
+                verified=True,
+                input_schema=schema,
+                input_field_groups=(
+                    RequiredFieldGroup(kind="exactly_one", field_names=("a", "b")),
+                    RequiredFieldGroup(kind="exactly_one", field_names=("b", "c")),
+                ),
+            )
+
+    def test_two_disjoint_groups_are_still_accepted(self) -> None:
+        """Confirms the overlap check rejects only actual sharing, not
+        every binding with more than one group — a real, valid, multi-group
+        contract (no field belonging to more than one group) still
+        constructs cleanly."""
+        schema = (
+            InputField(name="a", required=False, description=""),
+            InputField(name="b", required=False, description=""),
+            InputField(name="c", required=False, description=""),
+            InputField(name="d", required=False, description=""),
+        )
+        binding = ExecutionBinding(
+            skill_id="fixture-skill",
+            binding_id="fixture-skill-v1",
+            runtime_id="fixture-runtime",
+            approval_policy="allowed",
+            verified=True,
+            input_schema=schema,
+            input_field_groups=(
+                RequiredFieldGroup(kind="exactly_one", field_names=("a", "b")),
+                RequiredFieldGroup(kind="exactly_one", field_names=("c", "d")),
+            ),
+        )
+        assert len(binding.input_field_groups) == 2

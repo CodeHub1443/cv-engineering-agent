@@ -189,12 +189,19 @@ required (a genuine XOR), not `path` unconditionally. Marking either field
 gain — a oneOf/XOR field-group construct, a separate validation callback, something
 else — and who owns designing it?~~ — **Answered 2026-09-18 (owner decision, asked
 directly alongside Q18): a oneOf/XOR field-group construct.** New
-`RequiredFieldGroup` (ADR-0009 §12) on `ExecutionBinding.input_field_groups` —
-presence-only, satisfied the moment any one member is supplied; "more than one
-supplied" stays the runtime's own job, not this schema layer's. `plan_execution()`
-and the `provide_execution_inputs` recovery interrupt are both made group-aware
-(ADR-0010 §14). `trt_perf_analysis.build_binding()` now populates its real
-`path`/`data`/`model_name` contract. The blocked genuine, unfaked end-to-end
-recovery test against the real binding is now written and passing (skipped, not
-faked, on a machine without the skill installed) — see ADR-0009 §12, ADR-0010 §14,
-D-027.
+`RequiredFieldGroup` (ADR-0009 §12) on `ExecutionBinding.input_field_groups`.
+**Corrected 2026-09-18, same day, on independent PR #40 review (D-028):** the
+first implementation checked presence only ("at least one member supplied"),
+deferring "reject more than one" entirely to the runtime — this under-enforced
+the decision's own "EXACTLY ONE alternative" wording. Fixed before merge: a
+group is now satisfied only when *exactly* one member is present; two or more
+together is a new, distinct `"conflicting_inputs"`/`"conflicting"` outcome,
+caught and reported before any plan, approval interrupt, or execution is ever
+attempted (ADR-0010 §15). `plan_execution()` and the `provide_execution_inputs`
+recovery interrupt are both group-aware (ADR-0010 §14/§15); `ExecutionBinding.
+__post_init__` also rejects a field belonging to more than one group (ADR-0009
+§13). `trt_perf_analysis.build_binding()` populates its real `path`/`data`/
+`model_name` contract. The blocked genuine, unfaked end-to-end recovery test
+against the real binding — including the true-XOR "both supplied" rejection
+path — is now written and passing (skipped, not faked, on a machine without
+the skill installed) — see ADR-0009 §12/§13, ADR-0010 §14/§15, D-027, D-028.

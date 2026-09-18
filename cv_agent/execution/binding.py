@@ -77,23 +77,26 @@ class InputField:
 @dataclass(frozen=True)
 class RequiredFieldGroup:
     """
-    Declares that at least one of `field_names` must be supplied for the
-    binding's input contract to be satisfiable — ADR-0009 §12, resolving
-    `docs/state/OPEN_QUESTIONS.md` Q20: `InputField.required: bool` alone is
-    flat and cannot express a genuine XOR/oneOf contract, e.g.
-    trt-perf-analysis's real `path`/`data` choice (`_build_argv()`: exactly
-    one, `ValueError` for both or neither).
+    Declares that EXACTLY ONE of `field_names` must be supplied for the
+    binding's input contract to be satisfiable — ADR-0009 §12/§13,
+    resolving `docs/state/OPEN_QUESTIONS.md` Q20: `InputField.required:
+    bool` alone is flat and cannot express a genuine XOR/oneOf contract,
+    e.g. trt-perf-analysis's real `path`/`data` choice (`_build_argv()`:
+    exactly one, `ValueError` for both or neither).
 
-    Deliberately presence-only, mirroring `InputField.required`'s own
-    presence-only contract (ADR-0009 §11) — `plan_execution()` treats a
-    group as satisfied the moment any one of its fields has a known value.
-    It does NOT reject "more than one supplied" (e.g. both `path` and
-    `data`) at planning time; that stricter, true-XOR "not more than one"
-    half stays the runtime's own job (`TrtPerfAnalysisRuntime._build_argv()`
-    already raises `ValueError` for that case) — the same "coarser, earlier
-    check, not a substitute for the runtime's own validation" posture
-    `ExecutionBinding.input_schema` already documents for individual
-    required fields.
+    True oneOf/XOR semantics at the planning layer (ADR-0010 §15):
+    `plan_execution()` treats a group as satisfied only when exactly one
+    of its fields has a known value — zero present is
+    `"missing_required_inputs"`, two or more present together is
+    `"conflicting_inputs"`, both reported as a distinct, actionable
+    `PlanningResult` status before any plan is produced or `approval_gate`
+    is ever reached. This still checks *presence and count* only, never a
+    field's *value* — `TrtPerfAnalysisRuntime._build_argv()` remains the
+    final, authoritative content-level enforcement (already raises
+    `ValueError` for both/neither, independent of and unaffected by this
+    layer's own check), the same "coarser, earlier check, not a substitute
+    for the runtime's own validation" posture `ExecutionBinding.
+    input_schema` already documents for individual required fields.
     """
 
     kind: Literal["exactly_one"]
@@ -154,6 +157,7 @@ class ExecutionBinding:
 
     def __post_init__(self) -> None:
         declared = {f.name for f in self.input_schema}
+        seen_in_group: dict[str, tuple[str, ...]] = {}
         for group in self.input_field_groups:
             unknown = [name for name in group.field_names if name not in declared]
             if unknown:
@@ -174,6 +178,23 @@ class ExecutionBinding:
                     "contract: an unconditionally required field cannot also "
                     "be one option among several."
                 )
+            # A field belonging to more than one group would break the
+            # "unsatisfied group's members are, by construction, entirely
+            # present in missing_inputs" invariant cv_agent.graph.workflow's
+            # _node_provide_execution_inputs relies on to reconstruct which
+            # groups are still in play from a flat requested-names list —
+            # rejected here, at construction, rather than left as a latent
+            # correctness gap discovered only if a second grouped binding
+            # ever needed it (review finding on PR #40/ADR-0009 §13).
+            for name in group.field_names:
+                if name in seen_in_group:
+                    raise ValueError(
+                        f"InputField {name!r} belongs to more than one "
+                        f"RequiredFieldGroup ({seen_in_group[name]!r} and "
+                        f"{group.field_names!r}) — a field may be a member of "
+                        "at most one group."
+                    )
+                seen_in_group[name] = group.field_names
 
 
 @dataclass

@@ -75,10 +75,15 @@ class ExecutionPlan:
 
 
 PlanningStatus = Literal[
-    "planned", "no_executable_candidate", "ambiguous_candidates", "missing_required_inputs"
+    "planned",
+    "no_executable_candidate",
+    "ambiguous_candidates",
+    "missing_required_inputs",
+    "conflicting_inputs",
 ]
 """
-- planned: exactly one executable candidate, every required input known —
+- planned: exactly one executable candidate, every required input known,
+  and every `"exactly_one"` group has exactly one member present —
   `PlanningResult.plan` is set.
 - no_executable_candidate: zero SkillLinks in `skill_links` are both
   `executable=True` and have a registered binding.
@@ -87,8 +92,16 @@ PlanningStatus = Literal[
   `PlanningResult.candidate_skill_ids` names them.
 - missing_required_inputs: exactly one candidate, but its binding's
   `input_schema` declares a `required=True` field with no value in
-  `available_inputs`. `PlanningResult.missing_inputs` names them.
-"""
+  `available_inputs`, or an `"exactly_one"` `RequiredFieldGroup` has ZERO
+  members present. `PlanningResult.missing_inputs` names them.
+- conflicting_inputs: exactly one candidate, but an `"exactly_one"`
+  `RequiredFieldGroup` has TWO OR MORE members present in
+  `available_inputs` — a genuine XOR violation, caught here rather than
+  left to the runtime (ADR-0009 §12/§13, ADR-0010 §15). Takes priority
+  over `missing_required_inputs` when both would otherwise apply, since a
+  contradictory answer needs correcting regardless of what else is
+  missing. `PlanningResult.conflicting_inputs` names the offending
+  members that were actually supplied together."""
 
 
 @dataclass(frozen=True)
@@ -113,21 +126,32 @@ class PlanningResult:
     missing_inputs: tuple[str, ...] = ()
     """Set only when status == "missing_required_inputs" — the names of
     every InputField.required field with no value in available_inputs,
-    sorted."""
+    plus every member name of any `RequiredFieldGroup` with zero members
+    present, sorted."""
+    conflicting_inputs: tuple[str, ...] = ()
+    """Set only when status == "conflicting_inputs" (ADR-0010 §15,
+    resolving the review finding that "at least one" alone did not satisfy
+    the decided oneOf/XOR semantics) — the names of every field that was
+    actually supplied together in `available_inputs` for a
+    `RequiredFieldGroup` whose `kind == "exactly_one"` constraint that
+    combination violates, sorted. Never populated alongside
+    `missing_inputs` in the same result — `conflicting_inputs` takes
+    priority (see `plan_execution()`)."""
     selected_skill_id: str | None = None
-    """Set whenever exactly one candidate was selected — status == "planned"
-    OR "missing_required_inputs" (never for "no_executable_candidate"/
-    "ambiguous_candidates", where there is no single selected candidate).
-    ADR-0010 §13: this is what lets a caller (the `plan_execution` graph
-    node's same-session missing-input recovery) record *which* candidate a
-    human is being asked about, and later verify — from checkpointed state,
-    not a fresh registry lookup — that a retry still targets the same one.
-    Redundant with `plan.skill_id` when status == "planned"; the only place
-    that carries this identity for "missing_required_inputs" at all."""
+    """Set whenever exactly one candidate was selected — status == "planned",
+    "missing_required_inputs", OR "conflicting_inputs" (never for
+    "no_executable_candidate"/"ambiguous_candidates", where there is no
+    single selected candidate). ADR-0010 §13: this is what lets a caller
+    (the `plan_execution` graph node's same-session missing-input recovery)
+    record *which* candidate a human is being asked about, and later verify
+    — from checkpointed state, not a fresh registry lookup — that a retry
+    still targets the same one. Redundant with `plan.skill_id` when status
+    == "planned"; the only place that carries this identity for
+    "missing_required_inputs"/"conflicting_inputs" at all."""
     selected_binding_id: str | None = None
     """Companion to `selected_skill_id` — the specific `ExecutionBinding.
     binding_id` selected, not just the skill_id. Set together with
-    `selected_skill_id`, same two statuses. A binding can in principle be
+    `selected_skill_id`, same statuses. A binding can in principle be
     re-registered under the same skill_id with a different binding_id;
     carrying both, not skill_id alone, is what makes that detectable
     (ADR-0010 §13)."""
@@ -185,19 +209,28 @@ def plan_execution(
     `ExecutionBinding.input_schema` (ADR-0009 §11) to check whether every
     `required=True` field's *name* is a key in `available_inputs`, AND
     reads `ExecutionBinding.input_field_groups` (ADR-0009 §12, resolving
-    Q20) to check whether every `"exactly_one"` group has at least one
-    member name present — presence, not value validation either way (no
-    type-checking, no rejection of "more than one group member supplied",
-    no general validation engine: the runtime's own validation, e.g.
-    `TrtPerfAnalysisRuntime._build_argv()`, remains authoritative, exactly
-    as ADR-0009 §11/§12 state). Any required field missing, or any group
-    with zero members present -> `"missing_required_inputs"`, listing every
-    missing individual field name and, for each unsatisfied group, every one
-    of its member names (so a caller sees "supply one of path/data", not a
-    composite string requiring a new shape to parse). No plan is
-    constructed. `InputField.default` is deliberately never applied here —
-    this function only ever passes through what a caller explicitly
-    supplied, never a value it invented on the field's behalf, keeping the
+    Q20) to check whether every `"exactly_one"` group has EXACTLY one
+    member name present — true oneOf/XOR semantics (ADR-0010 §15,
+    correcting an earlier "at least one" version of this check that did
+    not fully satisfy the decision's own name). Zero members present for a
+    group, or a required field missing, -> `"missing_required_inputs"`,
+    listing every missing individual field name and, for each unsatisfied
+    group, every one of its member names (so a caller sees "supply one of
+    path/data", not a composite string requiring a new shape to parse).
+    TWO OR MORE members present for a group -> `"conflicting_inputs"`
+    (checked and returned before `"missing_required_inputs"` even if both
+    would otherwise apply on different fields/groups of the same
+    candidate), listing exactly the member names that were actually
+    supplied together in `PlanningResult.conflicting_inputs` — a caller
+    knows precisely what to remove, not merely that "something is wrong."
+    Neither check is value/type validation (no rejection based on a
+    field's *content*, only its *presence* and *count* — the runtime's own
+    validation, e.g. `TrtPerfAnalysisRuntime._build_argv()`, remains the
+    authoritative final check, exactly as ADR-0009 §11/§12/§13 state). No
+    plan is constructed for either case. `InputField.default` is
+    deliberately never applied here — this function only ever passes
+    through what a caller explicitly supplied, never a value it invented
+    on the field's behalf, keeping the
     "never fabricate" guarantee unconditional rather than schema-dependent.
 
     `ExecutionPlan.inputs` is a verbatim copy of `available_inputs`, not
@@ -240,12 +273,30 @@ def plan_execution(
         for field in binding.input_schema
         if field.required and field.name not in known_inputs
     }
-    missing_group_members = {
-        name
-        for group in binding.input_field_groups
-        if not any(name in known_inputs for name in group.field_names)
-        for name in group.field_names
-    }
+    missing_group_members: set[str] = set()
+    conflicting_group_members: set[str] = set()
+    for group in binding.input_field_groups:
+        present = [name for name in group.field_names if name in known_inputs]
+        if not present:
+            missing_group_members.update(group.field_names)
+        elif len(present) > 1:
+            # True XOR: more than one member of an "exactly_one" group was
+            # supplied together — a contradictory answer, not merely an
+            # incomplete one. Checked and reported ahead of
+            # "missing_required_inputs" below (ADR-0010 §15).
+            conflicting_group_members.update(present)
+        # len(present) == 1: this group is satisfied, nothing to report.
+
+    if conflicting_group_members:
+        return PlanningResult(
+            status="conflicting_inputs",
+            conflicting_inputs=tuple(sorted(conflicting_group_members)),
+            selected_skill_id=selected.skill_id,
+            selected_binding_id=binding.binding_id,
+            selected_input_schema=binding.input_schema,
+            selected_input_field_groups=binding.input_field_groups,
+        )
+
     missing = sorted(missing_individual | missing_group_members)
     if missing:
         return PlanningResult(

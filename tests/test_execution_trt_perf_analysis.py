@@ -655,3 +655,72 @@ class TestRealPlanningAndRecovery:
         assert execution_result is not None
         assert execution_result["status"] == "completed"
         assert execution_result["output"]["schema_version"] == "1.0"
+
+    def test_pre_supplying_both_path_and_data_together_is_rejected_before_execution(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-0010 §15 (review correction on PR #40): against the real
+        binding, supplying both XOR alternatives together must be caught
+        as "conflicting_inputs" and reach status == "done" without the
+        real subprocess ever being invoked — no execution_result at all,
+        not even a failed one. Deliberately passes no fixture layer file:
+        if the runtime were reached despite the conflict, it would either
+        crash trying to build conflicting argv or fail on missing input
+        files, either of which this test's `execution_result is None`
+        assertion would already catch as a false pass without needing to
+        inspect *why* it failed."""
+        from cv_agent.config.settings import AgentConfig
+        from cv_agent.execution.runtimes.trt_perf_analysis import register
+        from cv_agent.runtime.agent import CVAgent
+
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
+        register(agent.execution_bindings)
+
+        result = agent.start_workflow(
+            _TRT_PERF_WORKFLOW_REQUEST,
+            session_id="q20-conflict-presupply",
+            execution_inputs={"path": str(tmp_path), "data": [["layers.json"]]},
+        )
+
+        assert "__interrupt__" not in result
+        planning_result = result["planning_result"]
+        assert planning_result is not None
+        assert planning_result["status"] == "conflicting_inputs"
+        assert sorted(planning_result["conflicting_inputs"]) == ["data", "path"]
+        assert planning_result["plan"] is None
+        assert result["pending_execution"] is None
+        assert result["approval_decision"] == "not_required"
+        assert result["execution_result"] is None
+        assert result["status"] == "done"
+
+    def test_recovery_supplying_both_path_and_data_together_is_rejected_before_execution(
+        self, tmp_path: Path
+    ) -> None:
+        """Same real-binding proof via the recovery path: the interrupt
+        fires because neither alternative was pre-supplied, and the human
+        answers with BOTH at once — must be rejected, never executed."""
+        from cv_agent.config.settings import AgentConfig
+        from cv_agent.execution.runtimes.trt_perf_analysis import register
+        from cv_agent.runtime.agent import CVAgent
+
+        agent = CVAgent(AgentConfig(workspace_root=tmp_path))
+        register(agent.execution_bindings)
+
+        paused = agent.start_workflow(
+            _TRT_PERF_WORKFLOW_REQUEST, session_id="q20-conflict-recovery"
+        )
+        assert "__interrupt__" in paused
+
+        resumed = agent.resume_workflow(
+            "q20-conflict-recovery",
+            {"path": str(tmp_path), "data": [["layers.json"]]},
+        )
+
+        assert "__interrupt__" not in resumed
+        recovery = resumed["execution_input_recovery"]
+        assert recovery is not None
+        assert recovery["outcome"] == "conflicting"
+        assert recovery["terminal"] is True
+        assert resumed["pending_execution"] is None
+        assert resumed["execution_result"] is None
+        assert resumed["status"] == "done"

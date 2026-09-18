@@ -1026,3 +1026,78 @@ status.
                outside the TypedDict's own declared shape). Branch
                `feature/claude/q20-input-field-groups`, not `main`. Issue
                #39, PR pending.
+
+## 2026-09-18 — Q20 review correction: true oneOf/XOR, not "at least one" (PR #40)
+**Did:**       An independent review of PR #40 (explicitly re-verifying
+               every claim rather than trusting the PR description — re-
+               fetched, re-diffed cold, independently re-ran the full
+               suite via a disposable `git worktree` baseline of `main`,
+               manually invoked the real runtime directly) found the Q20
+               implementation satisfied "declarative field-group
+               construct" but not "EXACTLY ONE alternative" — `plan_
+               execution()`/the recovery interrupt only ever checked "at
+               least one member present," deliberately deferring "reject
+               more than one" entirely to the runtime. Corrected: new
+               `PlanningStatus` value `"conflicting_inputs"` — two or more
+               members of an `"exactly_one"` group present in
+               `available_inputs` is now caught and reported, with the
+               exact offending names, *before* any plan, approval
+               interrupt, or execution — checked ahead of
+               `"missing_required_inputs"` when both would otherwise
+               apply. `_classify_execution_input_resume()` gains a
+               matching `"conflicting"` outcome for the recovery-interrupt
+               path. `ExecutionBinding.__post_init__` (ADR-0009 §13) now
+               also rejects a field belonging to more than one
+               `RequiredFieldGroup` — a second review-identified gap, the
+               invariant `_node_provide_execution_inputs`'s group
+               reconstruction silently relied on.
+**Why:**       The owner's Q20 decision was explicit: "a declarative
+               oneOf/XOR field-group construct... EXACTLY ONE alternative,
+               not merely at least one." The first implementation's own
+               documented rationale ("coarser, earlier check, not a
+               substitute for the runtime's own validation") was a
+               reasonable general posture but didn't actually deliver what
+               was decided — a caller could reach a real human approval
+               interrupt for an input combination already guaranteed to
+               fail. Caught by independent review before merge, not after.
+**Learned:**   A genuinely subtler bug than "supply both at once, get
+               rejected": a resume payload for `provide_execution_inputs`
+               may legally name any declared field, not only ones the
+               interrupt actually requested — `_classify_execution_input_
+               resume()`'s own `field_groups` parameter only reconstructs
+               groups that were *entirely* missing at plan time (i.e.,
+               actually in `requested`), so a human answering the real ask
+               plus an extra, unrequested field that happens to conflict
+               with an *already-known* value (pre-supplied in an earlier
+               round) slips past that function's own check and reports
+               "supplied." Only `_node_plan_execution`'s retry — which
+               re-derives everything fresh against the fully merged
+               `execution_inputs`, with no notion of "requested" at all —
+               still catches it. Added an explicit `result.status ==
+               "conflicting_inputs"` branch in the retry (ahead of the
+               pre-existing generic "not planned" invariant guard) so this
+               is labeled "conflicting," not folded into a misleading
+               generic "binding_mismatch." Verified with a dedicated
+               regression test constructing exactly this scenario, not
+               merely asserted from reasoning about the code.
+**Left open:** Q18 — untouched, per explicit instruction not to expand
+               scope. `docs/state/STATUS.md` was found 4 lines over its
+               own documented 60-line hard cap during review — trimmed to
+               fit. ADR-0010 §14.7's per-file test-count breakdown was
+               found not to reconcile against the actual diff (its
+               aggregate total of 25 happened to be correct; the four
+               per-file numbers did not sum to how the tests were actually
+               distributed) — recounted directly from `git diff` and
+               corrected, with the correction itself noted inline rather
+               than silently rewritten. 9 new/1 renamed tests (net 8) across
+               `tests/test_execution_planning_contract.py`,
+               `tests/test_workflow.py`, `tests/test_execution.py`,
+               `tests/test_execution_trt_perf_analysis.py` (2 more genuine,
+               unfaked `@requires_real_skill` tests proving the real
+               binding rejects a "both supplied" conflict before ever
+               invoking the real subprocess). Full suite 429 → 437
+               passing, zero regressions; `ruff`/`mypy` clean except the
+               same pre-existing findings already documented on this
+               branch, confirmed unchanged by direct comparison against
+               `main`. Branch `feature/claude/q20-input-field-groups`
+               (same PR #40, not merged), issue #39.

@@ -374,11 +374,14 @@ class TestPlanExecution:
         assert result.status == "missing_required_inputs"
         assert result.missing_inputs == ("data", "path")
 
-    def test_supplying_both_group_members_still_satisfies_the_group(self) -> None:
-        """plan_execution() only checks presence — rejecting "both given" as
-        a genuine XOR violation stays the runtime's job (e.g.
-        TrtPerfAnalysisRuntime._build_argv()), per this module's own
-        documented "coarser, earlier check" posture."""
+    def test_supplying_both_group_members_together_is_conflicting_inputs(self) -> None:
+        """ADR-0010 §15 (review correction on PR #40): the Q20 decision was
+        a true oneOf/XOR construct — "both given" is a genuine violation
+        plan_execution() itself now catches and reports, before any plan,
+        approval, or execution is ever attempted. plan_execution() still
+        checks presence/count only, never value content — rejecting a
+        structurally-invalid *value* for either field stays the runtime's
+        job (e.g. TrtPerfAnalysisRuntime._build_argv())."""
         schema, groups = self._xor_schema_and_group()
         links = (_skill_link("skill-a"),)
         result = plan_execution(
@@ -386,7 +389,30 @@ class TestPlanExecution:
             _registry(_binding("skill-a", input_schema=schema, input_field_groups=groups)),
             available_inputs={"path": "/tmp/x", "data": [["layers.json"]]},
         )
-        assert result.status == "planned"
+        assert result.status == "conflicting_inputs"
+        assert result.plan is None
+        assert result.conflicting_inputs == ("data", "path")
+        assert result.missing_inputs == ()
+        assert result.selected_skill_id == "skill-a"
+
+    def test_conflict_takes_priority_over_a_separate_missing_required_field(self) -> None:
+        """A conflict on one group and a genuinely missing, unrelated
+        required field on the same candidate: the conflict is reported
+        (status == "conflicting_inputs"), not silently dropped in favor of
+        "missing_required_inputs" — a contradictory answer needs
+        correcting regardless of what else is still missing."""
+        schema, groups = self._xor_schema_and_group()
+        schema = schema + (
+            InputField(name="model_name", required=True, description="model label"),
+        )
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links),
+            _registry(_binding("skill-a", input_schema=schema, input_field_groups=groups)),
+            available_inputs={"path": "/tmp/x", "data": [["layers.json"]]},
+        )
+        assert result.status == "conflicting_inputs"
+        assert result.conflicting_inputs == ("data", "path")
 
     def test_group_and_individually_required_field_both_enforced(self) -> None:
         schema = (
