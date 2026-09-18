@@ -21,12 +21,15 @@ into — not because one is registered today.
 `ExecutionBinding.input_schema` (`InputField`, ADR-0009 §11) declares a
 binding's input contract for a future planning layer (ADR-0010) to read —
 metadata only, never a replacement for a runtime's own validation.
+`ExecutionBinding.input_field_groups` (`RequiredFieldGroup`, ADR-0009 §12)
+extends that with mutually-exclusive ("exactly one of these") groupings a
+flat `required: bool` cannot express.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from cv_agent.execution.models import ApprovalPolicy, RuntimeOutcome, SkillExecutionRequest
 from cv_agent.skills.models import Skill
@@ -72,6 +75,55 @@ class InputField:
 
 
 @dataclass(frozen=True)
+class RequiredFieldGroup:
+    """
+    Declares that at least one of `field_names` must be supplied for the
+    binding's input contract to be satisfiable — ADR-0009 §12, resolving
+    `docs/state/OPEN_QUESTIONS.md` Q20: `InputField.required: bool` alone is
+    flat and cannot express a genuine XOR/oneOf contract, e.g.
+    trt-perf-analysis's real `path`/`data` choice (`_build_argv()`: exactly
+    one, `ValueError` for both or neither).
+
+    Deliberately presence-only, mirroring `InputField.required`'s own
+    presence-only contract (ADR-0009 §11) — `plan_execution()` treats a
+    group as satisfied the moment any one of its fields has a known value.
+    It does NOT reject "more than one supplied" (e.g. both `path` and
+    `data`) at planning time; that stricter, true-XOR "not more than one"
+    half stays the runtime's own job (`TrtPerfAnalysisRuntime._build_argv()`
+    already raises `ValueError` for that case) — the same "coarser, earlier
+    check, not a substitute for the runtime's own validation" posture
+    `ExecutionBinding.input_schema` already documents for individual
+    required fields.
+    """
+
+    kind: Literal["exactly_one"]
+    """Only one group semantics exists today — a typed literal, not a bare
+    str, so a future second kind (e.g. "all_or_none") is an additive Literal
+    member, not a silent string convention."""
+
+    field_names: tuple[str, ...]
+    """Every name here must name an `InputField.name` already declared in
+    the same `ExecutionBinding.input_schema`, with `required=False` on that
+    field — checked by `ExecutionBinding.__post_init__` below. A field
+    cannot simultaneously be unconditionally required AND a member of a
+    group where only one member is required; that is a contradictory
+    contract, rejected at construction, not left to be discovered later."""
+
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        if len(self.field_names) < 2:
+            raise ValueError(
+                "RequiredFieldGroup.field_names needs at least two names to "
+                f"mean anything; got {self.field_names!r}."
+            )
+        if len(set(self.field_names)) != len(self.field_names):
+            raise ValueError(
+                f"RequiredFieldGroup.field_names has duplicate name(s): {self.field_names!r}."
+            )
+
+
+@dataclass(frozen=True)
 class ExecutionBinding:
     """
     Declares that `skill_id` can be executed via `runtime_id`, under what
@@ -92,9 +144,36 @@ class ExecutionBinding:
     input_schema: tuple[InputField, ...] = ()
     """Declared input contract, for a future planning layer (ADR-0010) to
     read — see ADR-0009 §11. Empty by default; `SkillExecutor` never reads
-    this field, so leaving it empty changes no existing behavior. Not yet
-    populated by any real binding (see ADR-0009 §11's own "not implemented
-    by this section" note)."""
+    this field, so leaving it empty changes no existing behavior."""
+
+    input_field_groups: tuple[RequiredFieldGroup, ...] = ()
+    """Mutually-relevant `InputField` groupings a flat `required: bool`
+    cannot express — ADR-0009 §12. Empty by default; changes no existing
+    behavior unless deliberately populated. Validated against
+    `input_schema` in `__post_init__` below — never trusted unchecked."""
+
+    def __post_init__(self) -> None:
+        declared = {f.name for f in self.input_schema}
+        for group in self.input_field_groups:
+            unknown = [name for name in group.field_names if name not in declared]
+            if unknown:
+                raise ValueError(
+                    f"RequiredFieldGroup {group.field_names!r} references "
+                    f"undeclared InputField name(s) {unknown!r} — every group "
+                    "member must be declared in input_schema first."
+                )
+            required_members = [
+                f.name for f in self.input_schema
+                if f.name in group.field_names and f.required
+            ]
+            if required_members:
+                raise ValueError(
+                    f"InputField(s) {required_members!r} are both individually "
+                    "required=True and members of an 'exactly_one' "
+                    f"RequiredFieldGroup {group.field_names!r} — contradictory "
+                    "contract: an unconditionally required field cannot also "
+                    "be one option among several."
+                )
 
 
 @dataclass

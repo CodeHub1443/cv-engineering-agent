@@ -8,13 +8,19 @@ on the developer's real ~/.claude/skills or ~/.agents/skills installation.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from cv_agent.execution.binding import ExecutionBinding, ExecutionBindingRegistry
+from cv_agent.execution.binding import (
+    ExecutionBinding,
+    ExecutionBindingRegistry,
+    InputField,
+    RequiredFieldGroup,
+)
 from cv_agent.execution.executor import SkillExecutor
 from cv_agent.execution.models import RuntimeOutcome, SkillExecutionRequest
 from cv_agent.skills.models import Skill
@@ -337,3 +343,100 @@ class TestResolveNeverExecutes:
         agent.analyze_requirements("I need to detect garment theft in a factory")
 
         assert agent.execution_bindings.list_bindings() == []
+
+
+class TestRequiredFieldGroup:
+    """ADR-0009 §12 (Q20): RequiredFieldGroup's own shape/validation,
+    independent of ExecutionBinding's cross-field checks below."""
+
+    def test_constructs_with_two_field_names(self) -> None:
+        group = RequiredFieldGroup(kind="exactly_one", field_names=("path", "data"))
+        assert group.kind == "exactly_one"
+        assert group.field_names == ("path", "data")
+        assert group.description == ""
+
+    def test_is_frozen(self) -> None:
+        group = RequiredFieldGroup(kind="exactly_one", field_names=("path", "data"))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            group.field_names = ("a", "b")  # type: ignore[misc]
+
+    def test_fewer_than_two_field_names_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="at least two names"):
+            RequiredFieldGroup(kind="exactly_one", field_names=("path",))
+
+    def test_zero_field_names_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="at least two names"):
+            RequiredFieldGroup(kind="exactly_one", field_names=())
+
+    def test_duplicate_field_names_are_rejected(self) -> None:
+        with pytest.raises(ValueError, match="duplicate"):
+            RequiredFieldGroup(kind="exactly_one", field_names=("path", "path"))
+
+
+class TestExecutionBindingFieldGroupValidation:
+    """ADR-0009 §12 (Q20): ExecutionBinding.__post_init__ cross-checks
+    input_field_groups against input_schema at construction time — a bad
+    group is a construction-time error, never a silently-accepted binding
+    that only misbehaves later at planning time."""
+
+    def _schema(self) -> tuple[InputField, ...]:
+        return (
+            InputField(name="path", required=False, description="folder path"),
+            InputField(name="data", required=False, description="data list"),
+        )
+
+    def test_valid_group_over_declared_optional_fields_constructs_cleanly(self) -> None:
+        binding = ExecutionBinding(
+            skill_id="fixture-skill",
+            binding_id="fixture-skill-v1",
+            runtime_id="fixture-runtime",
+            approval_policy="allowed",
+            verified=True,
+            input_schema=self._schema(),
+            input_field_groups=(
+                RequiredFieldGroup(kind="exactly_one", field_names=("path", "data")),
+            ),
+        )
+        assert len(binding.input_field_groups) == 1
+
+    def test_group_referencing_an_undeclared_field_name_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="undeclared"):
+            ExecutionBinding(
+                skill_id="fixture-skill",
+                binding_id="fixture-skill-v1",
+                runtime_id="fixture-runtime",
+                approval_policy="allowed",
+                verified=True,
+                input_schema=self._schema(),
+                input_field_groups=(
+                    RequiredFieldGroup(kind="exactly_one", field_names=("path", "nonexistent")),
+                ),
+            )
+
+    def test_group_member_marked_individually_required_is_rejected(self) -> None:
+        schema = (
+            InputField(name="path", required=True, description="folder path"),
+            InputField(name="data", required=False, description="data list"),
+        )
+        with pytest.raises(ValueError, match="contradictory"):
+            ExecutionBinding(
+                skill_id="fixture-skill",
+                binding_id="fixture-skill-v1",
+                runtime_id="fixture-runtime",
+                approval_policy="allowed",
+                verified=True,
+                input_schema=schema,
+                input_field_groups=(
+                    RequiredFieldGroup(kind="exactly_one", field_names=("path", "data")),
+                ),
+            )
+
+    def test_defaults_to_empty_tuple(self) -> None:
+        binding = ExecutionBinding(
+            skill_id="fixture-skill",
+            binding_id="fixture-skill-v1",
+            runtime_id="fixture-runtime",
+            approval_policy="allowed",
+            verified=True,
+        )
+        assert binding.input_field_groups == ()

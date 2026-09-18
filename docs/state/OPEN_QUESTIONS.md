@@ -59,7 +59,13 @@ silently picking one (`[P§35]`) — surfaced via `AgentState.planning_result.
 candidate_skill_ids` (ADR-0010 §11). What should actually happen instead — an explicit
 CLI `--skill <id>` override (mirroring `_cmd_execute`'s existing explicit-skill_id
 CLI contract), a clarification-style interrupt asking the human to choose, or something
-else? Not decided by ADR-0010 (see its §3 step 4, §8). *Blocks: making the already-built
+else? *Decided by owner 2026-09-18 (asked directly alongside Q20): a clarification-style
+interrupt* — a fourth interrupt kind, architecturally consistent with `clarify`/
+`provide_execution_inputs`, that pauses the graph and asks the human to choose among
+`candidate_skill_ids`. **Not implemented** — this decision only answers *which design*;
+the interrupt itself is separate future work (a new issue), scoped independently of
+Q20's schema-layer change (`feature/claude/q20-input-field-groups`, D-027). Left here,
+not struck through, until the implementation lands. *Blocks: making the already-built
 `plan_execution` node's ambiguous-candidate case do anything beyond "produce no plan."*
 
 **Q19.** `docs/APPROVALS.md`'s real approval workflow — specifically, *producing a
@@ -76,22 +82,6 @@ connector — or anything else — ever selects a candidate whose binding is
 `approval_required`. `[P§24]`, `[P§29.8]`. *Blocks: any `approval_required` binding
 being exercised through a real, non-fake approval flow with an actual estimate
 attached, including via ADR-0010's future planning connector.*
-
-**Q20.** *New 2026-09-17 (ADR-0010 §13, discovered while resolving Q17).*
-`ExecutionBinding.input_schema`/`InputField.required: bool` (ADR-0009 §11) is
-deliberately flat and cannot express `trt-perf-analysis`'s real input contract,
-confirmed by direct inspection of `_build_argv()`: exactly one of `path`/`data` is
-required (a genuine XOR), not `path` unconditionally. Marking either field
-`required=True` would misrepresent the contract (`[P§35]`); marking both
-`required=False` would be truthful but could never trigger
-`missing_required_inputs` for this binding at all. What should the schema model
-gain — a oneOf/XOR field-group construct, a separate validation callback, something
-else — and who owns designing it? Not decided; `trt_perf_analysis.build_binding()`
-is deliberately left with `input_schema=()` until this is resolved. *Blocks: a
-genuine, unfaked end-to-end test of ADR-0010 §13's same-session recovery flow
-against the real installed `trt-perf-analysis` binding (today's tests use a
-synthetic fixture binding instead) — does not block §13's recovery mechanism
-itself, which is binding-agnostic.*
 
 ## Deferrable
 
@@ -187,3 +177,24 @@ alone was sufficient — resolved by having the CLI resume with `""`, never `{}`
 every question is declined, the same convention already established for
 `provide_execution_inputs`. See ADR-0003 §9 for the full design and empirical
 confirmation.
+
+~~**Q20.** *New 2026-09-17 (ADR-0010 §13, discovered while resolving Q17).*
+`ExecutionBinding.input_schema`/`InputField.required: bool` (ADR-0009 §11) is
+deliberately flat and cannot express `trt-perf-analysis`'s real input contract,
+confirmed by direct inspection of `_build_argv()`: exactly one of `path`/`data` is
+required (a genuine XOR), not `path` unconditionally. Marking either field
+`required=True` would misrepresent the contract (`[P§35]`); marking both
+`required=False` would be truthful but could never trigger
+`missing_required_inputs` for this binding at all. What should the schema model
+gain — a oneOf/XOR field-group construct, a separate validation callback, something
+else — and who owns designing it?~~ — **Answered 2026-09-18 (owner decision, asked
+directly alongside Q18): a oneOf/XOR field-group construct.** New
+`RequiredFieldGroup` (ADR-0009 §12) on `ExecutionBinding.input_field_groups` —
+presence-only, satisfied the moment any one member is supplied; "more than one
+supplied" stays the runtime's own job, not this schema layer's. `plan_execution()`
+and the `provide_execution_inputs` recovery interrupt are both made group-aware
+(ADR-0010 §14). `trt_perf_analysis.build_binding()` now populates its real
+`path`/`data`/`model_name` contract. The blocked genuine, unfaked end-to-end
+recovery test against the real binding is now written and passing (skipped, not
+faked, on a machine without the skill installed) — see ADR-0009 §12, ADR-0010 §14,
+D-027.

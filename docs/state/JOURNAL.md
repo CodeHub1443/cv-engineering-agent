@@ -949,3 +949,80 @@ status.
                status: done`, exactly one `[INTERRUPT] clarification`.
                Branch `fix/claude/q21-clarify-attempted-flag`, not `main`.
                Issue #37, PR pending.
+
+## 2026-09-18 — Mutually-exclusive input field groups, resolving Q20 (feature/claude/q20-input-field-groups)
+**Did:**       Asked the owner directly (Q18/Q20 were both explicitly
+               "owner decision, nothing to build until answered" per
+               `STATUS.md`'s own next actions) and got: Q18 -> a
+               clarification-style interrupt (future work, not this PR);
+               Q20 -> a oneOf/XOR field-group construct. Implemented Q20
+               only, to keep this PR focused. New `RequiredFieldGroup`
+               (`cv_agent.execution.binding`, ADR-0009 §12): `kind:
+               Literal["exactly_one"]`, `field_names: tuple[str, ...]`,
+               presence-only (satisfied the moment any one member has a
+               value — never rejects "both supplied," that stays
+               `_build_argv()`'s job). `ExecutionBinding` gains
+               `input_field_groups`, validated in a new `__post_init__`
+               (every member must be a declared, `required=False`
+               `InputField`). `plan_execution()` (ADR-0010 §14) reads
+               groups alongside `input_schema`; `PlanningResult` gains
+               `selected_input_field_groups`, the same checkpointed-
+               snapshot pattern as `selected_input_schema`. The
+               `provide_execution_inputs` recovery interrupt
+               (`_classify_execution_input_resume`) is now group-aware too
+               — fulfillment is "any one group member accepted," not
+               "every requested name answered," which would have made
+               real recovery unusable for a genuine XOR. The retry-time
+               identity/schema guard now also compares field groups.
+               `trt_perf_analysis.build_binding()` finally populates its
+               real contract — `path`/`data` (each `required=False`),
+               `model_name`, and one `exactly_one` group — closing the gap
+               ADR-0009 §11/ADR-0010 §13.8 both explicitly left open.
+**Why:**       `STATUS.md`'s next action after the Q21 merge was exactly
+               "decide Q18/Q20" — everything else (`Do not start yet`) was
+               blocked on it. Q20 specifically blocked a genuine, unfaked
+               end-to-end test of ADR-0010 §13's recovery flow against the
+               real `trt-perf-analysis` binding; every prior recovery test
+               used a synthetic fixture binding instead.
+**Learned:**   `RequiredFieldGroup.field_names` is a tuple field, so it
+               inherits the exact tuple-vs-list checkpoint-round-trip
+               instability ADR-0004 already documents for other
+               `AgentState` tuple fields — `InputField` never had this
+               problem (no container-typed attributes), so §13's original
+               `dataclasses.asdict()`-based schema comparison never had to
+               think about it. Fixed by building both sides of the group
+               comparison manually with `field_names` forced through
+               `list(...)`, never left to whatever `asdict()`/the
+               checkpoint happened to preserve — caught by writing the
+               real end-to-end test, not anticipated in design. Also found
+               (via the mock-registry unit tests, not the real-skill
+               tests): `still_missing`'s original computation (`requested`
+               minus `accepted`) doesn't know about groups — supplying
+               only `data` from a `path`/`data` group left `path` listed
+               as "still missing" even though the group was already
+               satisfied. Fixed by excluding a satisfied group's other
+               members from `still_missing`.
+**Left open:** Q18 (ambiguous-candidate disambiguation interrupt) —
+               answered by the owner but not implemented; separate future
+               issue. CLI prompt UX for `python -m cv_agent workflow` is
+               unchanged — the existing per-field prompt loop already
+               produces a correct answer for a group when a human leaves
+               the unwanted field blank; a friendlier "choose one of
+               path/data" prompt was left out to keep this PR scoped to
+               the planning/recovery contract, not CLI UX. 26 new/updated
+               tests across `tests/test_execution.py`,
+               `tests/test_execution_planning_contract.py`,
+               `tests/test_workflow.py`,
+               `tests/test_execution_trt_perf_analysis.py` (including 2
+               genuine, unfaked `@requires_real_skill` end-to-end tests
+               against the real installed binding — skipped, not faked,
+               where the skill isn't installed). Full suite 405 → 429
+               passing, zero regressions. `ruff`/`mypy` clean on all
+               touched files except the same, already-tolerated
+               `AgentState` has no key `"__interrupt__"` TypedDict gap
+               `tests/test_workflow.py` already carried pre-existing (now
+               also appears once in the new real-skill test, for the same
+               structural reason — LangGraph injects that key at runtime,
+               outside the TypedDict's own declared shape). Branch
+               `feature/claude/q20-input-field-groups`, not `main`. Issue
+               #39, PR pending.

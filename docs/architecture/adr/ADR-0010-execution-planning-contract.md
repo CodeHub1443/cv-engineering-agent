@@ -6,8 +6,9 @@
   implemented too (see §11); an explicit, pre-supplied execution-input
   channel is implemented too (see §12); same-session recovery from
   `missing_required_inputs` via a third interrupt kind is implemented too
-  (see §13)
-- **Date:** 2026-09-16 (§13: 2026-09-17)
+  (see §13); group-aware planning + recovery, resolving Q20, is implemented
+  too (see §14)
+- **Date:** 2026-09-16 (§13: 2026-09-17; §14: 2026-09-18)
 - **Layer:** orchestration
 - **Canon:** `[P§19]`, `[P§21]`, `[P§22]`, `[P§24]`, `[P§34]`, `[P§35]`
 - **Supersedes / Superseded by:** — (extends ADR-0003 §3's graph topology and
@@ -785,3 +786,135 @@ fields) and `test_missing_required_input_no_plan_no_execution` (now also
 asserts the interrupt this exact fixture triggers, since it no longer
 terminates the run directly). Full suite 362 → 381 passing, zero
 regressions.
+
+## 14. Status — group-aware planning + recovery, resolving Q20
+
+**Added (branch `feature/claude/q20-input-field-groups`, issue #39).** §13.8
+named the gap directly: `trt_perf_analysis.build_binding()` could not honestly
+populate `input_schema` for its real `path`/`data` XOR contract, so every §13
+test used a synthetic fixture binding with a plain `required=True` field instead
+— a genuine, unfaked end-to-end test of the recovery flow against the real
+binding stayed blocked. ADR-0009 §12 (same branch) adds the schema-layer type,
+`RequiredFieldGroup`, and populates the real binding; this section is the
+planning/recovery-layer half of the same decision.
+
+### 14.1 `plan_execution()` becomes group-aware
+
+`ExecutionBinding.input_field_groups` (ADR-0009 §12) is read alongside
+`input_schema`: an `"exactly_one"` group is satisfied the moment any one member
+name is a key in `available_inputs` — same presence-only posture as an
+individual `required=True` field, never a value/type check, never a rejection of
+"more than one member supplied" (that stays `_build_argv()`'s job). An
+unsatisfied group reports **every** member name in `PlanningResult.missing_inputs`
+— not a composite `"path|data"` string — so the shape callers already read
+(`tuple[str, ...]`) is unchanged; a caller sees "one of these is missing," which
+is what §14.2 below relies on.
+
+`PlanningResult` gains `selected_input_field_groups: tuple[RequiredFieldGroup,
+...] | None`, the same checkpointed-snapshot pattern as `selected_input_schema`
+(§13.5), set together with it for both `"planned"` and
+`"missing_required_inputs"`.
+
+### 14.2 `provide_execution_inputs` recovery becomes group-aware
+
+§13's `_classify_execution_input_resume()` originally required **every**
+`requested` name to be answered to reach outcome `"supplied"` — correct for
+individually-required fields, but wrong for a group: requiring both `path` AND
+`data` to "recover" from a real XOR contract would misrepresent it, and would
+make the real binding's recovery flow practically unusable (supplying both
+`path` and `data` together is itself invalid per `_build_argv()`). Fixed:
+`_classify_execution_input_resume()` gains a `field_groups` parameter — every
+still-unsatisfied `RequiredFieldGroup.field_names` from the checkpointed
+snapshot (reconstructed in `_node_provide_execution_inputs` as: any group whose
+`field_names` are a full subset of `requested`, since an unsatisfied group's
+members are, by §14.1's own construction, entirely present in `missing_inputs`)
+— fulfillment for a group is "at least one accepted," fulfillment for every
+other requested name is unchanged ("that exact name accepted"). The interrupt
+payload also gains a `"field_groups"` key (`[{"kind": ..., "field_names": [...]
+}]`) alongside the existing `"missing_inputs"`, for a caller/CLI that wants to
+render "supply one of path/data" rather than two independent prompts — `python
+-m cv_agent workflow` itself is **not** changed to use this (see "Not done"
+below); the existing per-field prompt loop already produces a correct resume
+dict when a human simply leaves the unwanted field blank, since a blank value
+was already filtered out before reaching the classifier (D-025's existing
+behavior, unchanged).
+
+### 14.3 Retry-time identity+schema guard extended to groups
+
+`_node_plan_execution`'s recovery-retry comparison (§13.5's "structural, never ID
+alone" guarantee) now also compares `expected_input_field_groups` against a
+fresh `plan_execution()` call's `selected_input_field_groups` — a binding whose
+individual fields are unchanged but whose group constraint was altered or
+removed underneath the pause (e.g. `path`/`data` stop being mutually exclusive)
+is still caught as `"schema_changed"`, not silently missed by comparing
+`input_schema` alone.
+
+One correctness subtlety, found while building this, not anticipated in §13:
+`RequiredFieldGroup.field_names` is a tuple field, so it is subject to the exact
+same tuple-vs-list checkpoint-round-trip instability ADR-0004's own
+`CVAgent._sync_memory_after_run()` docstring already documents for other
+`AgentState` tuple fields — `InputField` has no container-typed attributes, so
+§13's original `dataclasses.asdict()`-based comparison never had to think about
+this. Both sides of the group comparison (the value written into
+`execution_input_recovery["expected_input_field_groups"]`, and the value freshly
+computed on retry) are now built by explicit dict construction with
+`field_names` forced through `list(...)`, never left as whatever
+`dataclasses.asdict()` or the checkpoint happened to preserve — otherwise a
+binding that never actually changed could false-positive as
+`"schema_changed"` purely from a container-type mismatch that carries no real
+meaning.
+
+### 14.4 `trt_perf_analysis.build_binding()`
+
+See ADR-0009 §12 for the schema/binding-layer change itself — this section only
+notes that it is what makes §14.5's real end-to-end test possible at all.
+
+### 14.5 Genuine, unfaked end-to-end test against the real binding
+
+The gap §13.8 named as blocked is now closed:
+`tests/test_execution_trt_perf_analysis.py::TestRealPlanningAndRecovery`
+(`@requires_real_skill`, skipped — not faked — when the real skill isn't
+installed) exercises `CVAgent.start_workflow()`/`.resume_workflow()` against the
+real, registered `trt-perf-analysis` binding: (1) pre-supplying only `path` via
+`execution_inputs` reaches `"planned"` and a real, completed subprocess
+execution; (2) supplying nothing at all triggers the real
+`provide_execution_inputs` interrupt, whose payload names both `path` and `data`
+plus the `field_groups` entry, and resuming with only `data` (the other XOR
+member — not the one used in test 1) reaches outcome `"supplied"`, a produced
+plan, and a real, completed subprocess execution. Neither test uses a fixture
+binding or a fake runtime.
+
+### 14.6 What this does NOT do
+
+- Does not add "reject if more than one group member is supplied" at the
+  planning or recovery-classification layer — stays `_build_argv()`'s job,
+  unchanged, per ADR-0009 §12's own stated scope.
+- Does not change `python -m cv_agent workflow`'s CLI prompt UX to mention
+  groups explicitly — the existing per-field prompt loop already produces a
+  correct answer for a group when a human leaves the unwanted field blank
+  (§14.2); a friendlier "choose one of path/data" prompt is a CLI-layer UX
+  improvement, not required for the recovery mechanism itself to be correct,
+  and was left out to keep this change scoped to the planning/recovery
+  contract.
+- Does not touch Q18 (ambiguous-candidate disambiguation) — a separate,
+  independently-decided open question with its own future issue.
+
+### 14.7 Tests
+
+11 new tests in `tests/test_execution_planning_contract.py` (group satisfied by
+either member, unsatisfied group reports both names, "both supplied" still
+satisfies at the planning layer, group + individually-required field enforced
+together, `selected_input_field_groups` populated for both relevant statuses,
+plus the two existing real-binding-shape tests updated for the now-populated
+schema); 6 new tests in `tests/test_workflow.py::TestProvideExecutionInputsRecovery`
+(interrupt payload names every member and the group itself, supplying only one
+member recovers as `"supplied"`, supplying neither is `"invalid"`, a group
+satisfied but a separate individually-required field still missing is
+`"incomplete"`, a group silently removed underneath the pause is detected as
+`"schema_changed"`) plus one pre-existing test
+(`test_one_executable_candidate_populates_pending_execution`) updated for the
+new `selected_input_field_groups` key; 6 new tests across
+`tests/test_execution.py` (`RequiredFieldGroup`/`ExecutionBinding` construction-
+time validation) and `tests/test_execution_trt_perf_analysis.py` (real schema
+shape); 2 new `@requires_real_skill` tests in
+`tests/test_execution_trt_perf_analysis.py::TestRealPlanningAndRecovery` (§14.5).

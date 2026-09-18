@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from cv_agent.execution.binding import ExecutionBindingRegistry, InputField
+from cv_agent.execution.binding import ExecutionBindingRegistry, InputField, RequiredFieldGroup
 from cv_agent.requirements.models import RequirementsAnalysis, SkillLink
 
 
@@ -141,6 +141,14 @@ class PlanningResult:
     what a same-session recovery round compares against, structurally,
     before ever trusting a human-supplied value or producing a plan from
     it — never a fresh, live registry lookup at comparison time."""
+    selected_input_field_groups: tuple[RequiredFieldGroup, ...] | None = None
+    """Companion snapshot to `selected_input_schema` — the selected
+    candidate's `ExecutionBinding.input_field_groups` (ADR-0009 §12) at the
+    moment of selection, same two statuses, same "structural comparison,
+    never a live lookup" recovery guarantee (ADR-0010 §14). A binding whose
+    individual fields are unchanged but whose group constraints were
+    altered underneath a paused recovery round must still be detected as
+    changed — comparing `selected_input_schema` alone would miss that."""
 
 
 def plan_execution(
@@ -174,15 +182,21 @@ def plan_execution(
          every one; nothing is picked.
 
     Input completeness: reads the selected candidate's
-    `ExecutionBinding.input_schema` (ADR-0009 §11) only to check whether
-    every `required=True` field's *name* is a key in `available_inputs` —
-    presence, not value validation (no type-checking, no `path`-XOR-`data`
-    cross-field rule, no general validation engine: the runtime's own
-    validation, e.g. `TrtPerfAnalysisRuntime._build_argv()`, remains
-    authoritative, exactly as ADR-0009 §11 states). Any required field
-    missing -> `"missing_required_inputs"`, listing every missing name; no
-    plan is constructed. `InputField.default` is deliberately never applied
-    here — this function only ever passes through what a caller explicitly
+    `ExecutionBinding.input_schema` (ADR-0009 §11) to check whether every
+    `required=True` field's *name* is a key in `available_inputs`, AND
+    reads `ExecutionBinding.input_field_groups` (ADR-0009 §12, resolving
+    Q20) to check whether every `"exactly_one"` group has at least one
+    member name present — presence, not value validation either way (no
+    type-checking, no rejection of "more than one group member supplied",
+    no general validation engine: the runtime's own validation, e.g.
+    `TrtPerfAnalysisRuntime._build_argv()`, remains authoritative, exactly
+    as ADR-0009 §11/§12 state). Any required field missing, or any group
+    with zero members present -> `"missing_required_inputs"`, listing every
+    missing individual field name and, for each unsatisfied group, every one
+    of its member names (so a caller sees "supply one of path/data", not a
+    composite string requiring a new shape to parse). No plan is
+    constructed. `InputField.default` is deliberately never applied here —
+    this function only ever passes through what a caller explicitly
     supplied, never a value it invented on the field's behalf, keeping the
     "never fabricate" guarantee unconditional rather than schema-dependent.
 
@@ -221,11 +235,18 @@ def plan_execution(
     binding = bindings.get_binding(selected.skill_id)
     assert binding is not None  # guaranteed by the filter above
 
-    missing = sorted(
+    missing_individual = {
         field.name
         for field in binding.input_schema
         if field.required and field.name not in known_inputs
-    )
+    }
+    missing_group_members = {
+        name
+        for group in binding.input_field_groups
+        if not any(name in known_inputs for name in group.field_names)
+        for name in group.field_names
+    }
+    missing = sorted(missing_individual | missing_group_members)
     if missing:
         return PlanningResult(
             status="missing_required_inputs",
@@ -233,6 +254,7 @@ def plan_execution(
             selected_skill_id=selected.skill_id,
             selected_binding_id=binding.binding_id,
             selected_input_schema=binding.input_schema,
+            selected_input_field_groups=binding.input_field_groups,
         )
 
     plan = ExecutionPlan(
@@ -247,4 +269,5 @@ def plan_execution(
         selected_skill_id=selected.skill_id,
         selected_binding_id=binding.binding_id,
         selected_input_schema=binding.input_schema,
+        selected_input_field_groups=binding.input_field_groups,
     )

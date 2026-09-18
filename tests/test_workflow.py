@@ -28,7 +28,12 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
 from cv_agent.capabilities.registry import CapabilityRegistry
-from cv_agent.execution.binding import ExecutionBinding, ExecutionBindingRegistry, InputField
+from cv_agent.execution.binding import (
+    ExecutionBinding,
+    ExecutionBindingRegistry,
+    InputField,
+    RequiredFieldGroup,
+)
 from cv_agent.execution.executor import SkillExecutor
 from cv_agent.execution.models import RuntimeOutcome
 from cv_agent.graph.workflow import build_requirements_workflow_graph
@@ -731,6 +736,7 @@ class TestPlanExecutionIntegration:
             "selected_skill_id": "trt-perf-analysis",
             "selected_binding_id": "trt-perf-analysis-v1",
             "selected_input_schema": (),
+            "selected_input_field_groups": (),
         }
 
     def test_no_executable_candidate_reaches_end_without_execution(
@@ -1053,6 +1059,7 @@ class TestProvideExecutionInputsRecovery:
         *,
         approval_policy: str = "allowed",
         input_schema: tuple[InputField, ...] = (),
+        input_field_groups: tuple[RequiredFieldGroup, ...] = (),
         binding_id: str | None = None,
     ) -> "FakeRuntime":
         rt = FakeRuntime(
@@ -1068,9 +1075,16 @@ class TestProvideExecutionInputsRecovery:
                 approval_policy=approval_policy,  # type: ignore[arg-type]
                 verified=True,
                 input_schema=input_schema,
+                input_field_groups=input_field_groups,
             )
         )
         return rt
+
+    _XOR_SCHEMA = (
+        InputField(name="path", required=False, description="folder path"),
+        InputField(name="data", required=False, description="data list"),
+    )
+    _XOR_GROUP = (RequiredFieldGroup(kind="exactly_one", field_names=("path", "data")),)
 
     _TWO_REQUIRED_SCHEMA = (
         InputField(name="path", required=True, description="folder path"),
@@ -1209,6 +1223,141 @@ class TestProvideExecutionInputsRecovery:
         assert approved["approval_decision"] == "approved"
         assert approved["execution_result"]["status"] == "completed"
         assert runtime.calls == [("trt-perf-analysis", {"path": "/data/clips"})]
+
+    # ── Mutually-exclusive field groups (ADR-0009 §12 / ADR-0010 §14, Q20) ──
+
+    def test_group_interrupt_names_every_member_and_the_group_itself(
+        self, tmp_path: Path
+    ) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=self._XOR_SCHEMA,
+            input_field_groups=self._XOR_GROUP,
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        started = _start(graph, _PLANNING_TASK, "rec-group-1")
+        payload = started["__interrupt__"][0].value
+
+        assert {m["name"] for m in payload["missing_inputs"]} == {"path", "data"}
+        assert payload["field_groups"] == [
+            {"kind": "exactly_one", "field_names": ["path", "data"]}
+        ]
+
+    def test_supplying_only_one_group_member_recovers_as_supplied(
+        self, tmp_path: Path
+    ) -> None:
+        """Requiring BOTH path and data to answer the interrupt would
+        misrepresent the real "exactly one" contract — this is the core
+        behavior Q20 closes."""
+        execution_registry = ExecutionBindingRegistry()
+        runtime = self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=self._XOR_SCHEMA,
+            input_field_groups=self._XOR_GROUP,
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-group-2")
+        resumed = _resume(graph, "rec-group-2", {"data": [["layers.json"]]})
+
+        assert "__interrupt__" not in resumed
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "supplied"
+        assert recovery["terminal"] is False
+        assert recovery["accepted"] == ["data"]
+        assert recovery["still_missing"] == []
+        assert resumed["pending_execution"] == {
+            "skill_id": "trt-perf-analysis",
+            "inputs": {"data": [["layers.json"]]},
+            "task": _PLANNING_TASK,
+        }
+        assert resumed["execution_result"]["status"] == "completed"
+        assert runtime.calls == [("trt-perf-analysis", {"data": [["layers.json"]]})]
+
+    def test_supplying_neither_group_member_is_invalid(self, tmp_path: Path) -> None:
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=self._XOR_SCHEMA,
+            input_field_groups=self._XOR_GROUP,
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-group-3")
+        resumed = _resume(graph, "rec-group-3", {"model_name": "resnet50"})
+
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "invalid"
+        assert recovery["terminal"] is True
+        assert resumed["pending_execution"] is None
+
+    def test_group_and_individually_required_field_together_incomplete_when_only_group_met(
+        self, tmp_path: Path
+    ) -> None:
+        schema = self._XOR_SCHEMA + (
+            InputField(name="model_name", required=True, description="model label"),
+        )
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=schema,
+            input_field_groups=self._XOR_GROUP,
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-group-4")
+        resumed = _resume(graph, "rec-group-4", {"path": "/data/clips"})  # model_name omitted
+
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "incomplete"
+        assert recovery["terminal"] is True
+        assert recovery["accepted"] == ["path"]
+        assert recovery["still_missing"] == ["model_name"]
+        assert resumed["pending_execution"] is None
+
+    def test_group_changed_underneath_the_pause_is_detected_as_schema_changed(
+        self, tmp_path: Path
+    ) -> None:
+        """Same binding_id, same individual input_schema, but the group
+        constraint itself changed while paused — must still be caught, not
+        just an input_schema-only comparison (ADR-0010 §14)."""
+        execution_registry = ExecutionBindingRegistry()
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=self._XOR_SCHEMA,
+            input_field_groups=self._XOR_GROUP,
+            binding_id="stable-id-v2",
+        )
+        graph = self._graph_for(tmp_path, execution_registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "rec-group-5")
+
+        # Re-register the same binding_id and the same input_schema, but
+        # drop the group entirely (path/data become "presence not required
+        # at all" instead of "exactly one required") — a real, structural
+        # contract change with no visible input_schema difference.
+        self._register(
+            execution_registry,
+            "trt-perf-analysis",
+            input_schema=self._XOR_SCHEMA,
+            input_field_groups=(),
+            binding_id="stable-id-v2",
+        )
+
+        resumed = _resume(graph, "rec-group-5", {"data": [["layers.json"]]})
+
+        recovery = resumed["execution_input_recovery"]
+        assert recovery["outcome"] == "binding_mismatch"
+        assert recovery["mismatch_detail"] == "schema_changed"
+        assert recovery["terminal"] is True
+        assert resumed["pending_execution"] is None
 
     # ── Incomplete / invalid / cancelled — all terminal, no second ask ────
 

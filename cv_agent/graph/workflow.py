@@ -81,10 +81,11 @@ required_inputs"` result after a recovery attempt routes straight through
 to the terminal check below, never a second interrupt. `pending_execution`
 may be set from a recovery round **only** when the retry's freshly-selected
 candidate's identity (`selected_skill_id`/`selected_binding_id`) and its
-full `input_schema` snapshot both still match what was recorded before the
-human was asked (`AgentState["execution_input_recovery"]["expected_*"]`,
-themselves sourced only from the checkpointed `planning_result`, never a
-live registry lookup at comparison time) — any mismatch, along with an
+full `input_schema`/`input_field_groups` snapshot (ADR-0009 §12, ADR-0010
+§14) both still match what was recorded before the human was asked
+(`AgentState["execution_input_recovery"]["expected_*"]`, themselves sourced
+only from the checkpointed `planning_result`, never a live registry lookup
+at comparison time) — any mismatch, along with an
 incomplete/invalid/cancelled answer, is a terminal outcome
 (`execution_input_recovery["terminal"] is True`) that routes straight to
 `END`, **bypassing `approval_gate` entirely** so a failed recovery can
@@ -218,25 +219,41 @@ def _route_after_clarify(state: AgentState) -> Literal["analyze_requirements"]:
 
 
 def _classify_execution_input_resume(
-    resume_value: Any, requested: list[str], declared_names: set[str]
+    resume_value: Any,
+    requested: list[str],
+    declared_names: set[str],
+    field_groups: list[frozenset[str]],
 ) -> tuple[str, dict[str, Any], list[dict[str, str]]]:
     """
     ADR-0010 §13's deterministic classification of a `provide_execution_
     inputs` resume value, relative to `requested` (the exact, complete
-    `missing_inputs` list from the one and only ask this run) and
-    `declared_names` (every field name the selected binding's checkpointed
-    `input_schema` snapshot declares, required or not).
+    `missing_inputs` list from the one and only ask this run), `declared_
+    names` (every field name the selected binding's checkpointed
+    `input_schema` snapshot declares, required or not), and `field_groups`
+    (ADR-0009 §12/ADR-0010 §14, resolving Q20: every still-unsatisfied
+    `RequiredFieldGroup.field_names` from the checkpointed snapshot, each
+    already a strict subset of `requested` since an unsatisfied group means
+    every one of its members was reported missing — see the caller).
 
     Returns (outcome, accepted, rejected). `outcome` is one of "cancelled"/
     "invalid"/"incomplete"/"supplied" — never "binding_mismatch", which
     only `_node_plan_execution` can determine, on the retry, by comparing
     identity/schema; this function has no visibility into that.
 
+    Fulfillment is no longer "every requested name answered": a name that
+    belongs to a `field_groups` entry is satisfied the moment ANY one
+    member of its group is accepted (mirroring `plan_execution()`'s own
+    "exactly_one" presence check) — requiring all of `path`/`data` to be
+    supplied to recover from a real XOR contract would misrepresent it.
+    Every `requested` name outside any group still needs its own value, as
+    before this parameter existed.
+
     A field attempted-but-rejected (blank, or not a declared name) and a
     field never mentioned at all are treated identically for the outcome
     verdict — both simply mean "not fulfilled" — but remain individually
     visible via `rejected` (why a given attempt failed) and the caller's
-    own `still_missing` computation (`requested` minus `accepted`).
+    own `still_missing` computation (`requested` minus `accepted` minus any
+    already-satisfied group's other members — see the caller).
     """
     supplied: dict[str, Any] = resume_value if isinstance(resume_value, dict) else {}
 
@@ -257,10 +274,17 @@ def _classify_execution_input_resume(
         else:
             accepted[name] = value
 
-    fulfilled = set(accepted) & set(requested)
+    accepted_names = set(accepted)
+    grouped_names = set().union(*field_groups) if field_groups else set()
+    ungrouped_requested = set(requested) - grouped_names
+
+    groups_ok = all(group & accepted_names for group in field_groups)
+    individual_ok = ungrouped_requested <= accepted_names
+    fulfilled = accepted_names & set(requested)
+
     if not isinstance(resume_value, dict) or not supplied:
         outcome = "cancelled"
-    elif fulfilled == set(requested):
+    elif individual_ok and groups_ok:
         outcome = "supplied"
     elif not fulfilled:
         outcome = "invalid"
@@ -285,6 +309,23 @@ def _make_provide_execution_inputs_node():
         binding_id = planning.get("selected_binding_id")
         expected_schema_raw = planning.get("selected_input_schema") or ()
         expected_schema: list[dict[str, Any]] = [dict(f) for f in expected_schema_raw]
+        expected_groups_raw = planning.get("selected_input_field_groups") or ()
+        # field_names normalized to a list here (never left as whatever
+        # container type the checkpoint happened to restore) so the later
+        # structural comparison in _node_plan_execution's retry — this
+        # dict is what gets stored verbatim into execution_input_recovery
+        # below — never false-positives on a tuple-vs-list container
+        # mismatch that carries no actual meaning, the same class of
+        # instability ADR-0004's own CVAgent._sync_memory_after_run()
+        # docstring already documents for other AgentState tuple fields.
+        expected_groups: list[dict[str, Any]] = [
+            {
+                "kind": g["kind"],
+                "field_names": list(g["field_names"]),
+                "description": g.get("description", ""),
+            }
+            for g in expected_groups_raw
+        ]
         requested = list(planning.get("missing_inputs") or ())
 
         payload = {
@@ -296,16 +337,41 @@ def _make_provide_execution_inputs_node():
                 for f in expected_schema
                 if f["name"] in requested
             ],
+            "field_groups": [
+                {"kind": g["kind"], "field_names": g["field_names"]} for g in expected_groups
+            ],
         }
         resume_value = interrupt(payload)
 
         declared_names = {f["name"] for f in expected_schema}
+        requested_set = set(requested)
+        # Every field_groups entry here is, by construction, a group whose
+        # members plan_execution() found ALL missing (see plan_execution()'s
+        # own docstring) — hence a strict subset of `requested`. Groups
+        # already (partially) satisfied at plan time never appear in
+        # missing_inputs at all, so there is nothing to reconstruct for them.
+        field_groups = [
+            frozenset(g["field_names"])
+            for g in expected_groups
+            if set(g["field_names"]) <= requested_set
+        ]
         outcome, accepted, rejected = _classify_execution_input_resume(
-            resume_value, requested, declared_names
+            resume_value, requested, declared_names, field_groups
         )
 
         merged_execution_inputs = dict(state.get("execution_inputs") or {})
         merged_execution_inputs.update(accepted)
+
+        # A satisfied group's OTHER, unanswered member(s) are not "still
+        # missing" — the group as a whole is fulfilled the moment any one
+        # member is accepted (§14.1's own rule), so e.g. supplying only
+        # "data" from a path/data group must not still list "path" here.
+        accepted_names = set(accepted)
+        satisfied_group_members: set[str] = set()
+        for group in field_groups:
+            if group & accepted_names:
+                satisfied_group_members |= group
+        still_missing = sorted(set(requested) - accepted_names - satisfied_group_members)
 
         # terminal/mismatch_detail are deliberately left unset here — only
         # _node_plan_execution's retry, with a fresh plan_execution() call
@@ -322,9 +388,10 @@ def _make_provide_execution_inputs_node():
             "expected_skill_id": skill_id,
             "expected_binding_id": binding_id,
             "expected_input_schema": expected_schema,
+            "expected_input_field_groups": expected_groups,
             "requested": requested,
             "accepted": sorted(accepted.keys()),
-            "still_missing": sorted(set(requested) - set(accepted.keys())),
+            "still_missing": still_missing,
             "rejected": rejected,
         }
 
@@ -449,11 +516,27 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
             fresh_schema = [
                 dataclasses.asdict(f) for f in (result.selected_input_schema or ())
             ]
+            expected_groups = list(recovery.get("expected_input_field_groups") or [])
+            # Built manually, field_names forced to list() — NOT
+            # dataclasses.asdict(), which would preserve field_names as a
+            # tuple here (a fresh, non-checkpoint-restored RequiredFieldGroup)
+            # while `expected_groups` above was normalized to a list when
+            # recorded; comparing tuple against list would false-positive a
+            # "schema_changed" mismatch for a binding that never changed.
+            fresh_groups = [
+                {"kind": g.kind, "field_names": list(g.field_names), "description": g.description}
+                for g in (result.selected_input_field_groups or ())
+            ]
             identity_ok = (
                 result.selected_skill_id == recovery.get("expected_skill_id")
                 and result.selected_binding_id == recovery.get("expected_binding_id")
             )
-            schema_ok = fresh_schema == expected_schema
+            # ADR-0010 §14: field groups are part of the same structural
+            # contract snapshot as input_schema — a binding whose individual
+            # fields are unchanged but whose group constraints were altered
+            # underneath the pause must still be caught here, not just by
+            # comparing input_schema alone.
+            schema_ok = fresh_schema == expected_schema and fresh_groups == expected_groups
             raw_outcome: Any = recovery.get("outcome")
 
             final_outcome: str
@@ -467,15 +550,18 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
                 final_outcome, terminal, detail = raw_outcome, True, None
             elif result.status != "planned":
                 # Invariant/safety guard, not a reachable branch under
-                # normal operation (verified on PR #33 review): if
-                # identity_ok and schema_ok both hold, every requested
-                # field name is, by construction, a required field of the
-                # (unchanged) selected binding, and the interrupt node's
-                # own "supplied" classification already means every one of
-                # those names has a valid value in the now-merged
-                # execution_inputs — so plan_execution()'s own missing-field
-                # check (ADR-0010 §3) cannot find anything absent, and
-                # result.status must be "planned". This branch exists only
+                # normal operation (verified on PR #33 review, extended for
+                # field groups in ADR-0010 §14): if identity_ok and
+                # schema_ok both hold, every requested name is, by
+                # construction, either a required field or a member of a
+                # group of the (unchanged) selected binding, and the
+                # interrupt node's own "supplied" classification already
+                # means every individually-required name — and at least one
+                # member of every group — has a valid value in the
+                # now-merged execution_inputs — so plan_execution()'s own
+                # missing-field/group check (ADR-0010 §3/§14) cannot find
+                # anything unsatisfied, and result.status must be "planned".
+                # This branch exists only
                 # to keep the "never fabricate a plan" guarantee
                 # unconditional rather than dependent on that reasoning
                 # continuing to hold as the codebase evolves — belt and

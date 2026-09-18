@@ -139,8 +139,10 @@ class AgentState(TypedDict, total=False):
     `selected_binding_id`/`selected_input_schema`, populated whenever
     exactly one candidate was selected (status "planned" or
     "missing_required_inputs") — see `cv_agent.graph.planning.
-    PlanningResult`. This is what `execution_input_recovery` below compares
-    against on a retry."""
+    PlanningResult`. Since ADR-0010 §14 (Q20): also carries
+    `selected_input_field_groups`, the same snapshot pattern for
+    `ExecutionBinding.input_field_groups` (ADR-0009 §12). This is what
+    `execution_input_recovery` below compares against on a retry."""
 
     # ── Execution-input recovery (ADR-0010 §13) ──────────────────────────
     execution_input_recovery: Optional[dict[str, Any]]
@@ -158,8 +160,13 @@ class AgentState(TypedDict, total=False):
     "mismatch_detail": "identity_changed" | "schema_changed" |
     "still_incomplete_after_supply" | None, "expected_skill_id": str,
     "expected_binding_id": str, "expected_input_schema": list[dict],
-    "requested": list[str], "accepted": list[str], "still_missing":
-    list[str], "rejected": list[dict]}`.
+    "expected_input_field_groups": list[dict], "requested": list[str],
+    "accepted": list[str], "still_missing": list[str], "rejected":
+    list[dict]}`. `expected_input_field_groups` (ADR-0009 §12/ADR-0010 §14,
+    Q20) is the same checkpointed-snapshot pattern as
+    `expected_input_schema` — a group counts as fulfilled once any one of
+    its member names is supplied, never "every member," which would
+    misrepresent a genuine "exactly one of these" contract.
 
     Field ownership/timeline: `provide_execution_inputs` writes the record
     once, on resume, reading `expected_skill_id`/`expected_binding_id`/
