@@ -131,6 +131,10 @@ real installed skill (a separate, not-yet-authorized decision); and this workflo
 graph is separate from `run()`'s own graph, not merged into it (ADR-0003 §4/§8). A
 real, pre-existing gap where declining every clarification question could re-raise
 `clarify` indefinitely (`docs/state/OPEN_QUESTIONS.md` Q21) is now fixed (ADR-0003 §9).
+Ambiguous executable candidates (more than one skill qualifies) no longer just end the
+run with no plan: a fourth interrupt kind, `choose_candidate` (ADR-0010 §16, Q18),
+presents them, validates the human's choice against the offered set, and resumes
+planning — never silently picking one.
 
 **Exit test:** given "I have a prison project — escape-attempt detection", the agent asks
 targeted operational questions before naming any model, and produces a written

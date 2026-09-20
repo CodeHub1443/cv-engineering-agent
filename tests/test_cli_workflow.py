@@ -555,3 +555,167 @@ class TestPrintWorkflowSummary:
         lines: list[str] = []
         _print_workflow_summary({"status": "done", "steps": []}, out=lines.append)
         assert not any("Execution-input recovery" in line for line in lines)
+
+
+def _build_two_candidate_graph(tmp_path: Path) -> tuple[Any, list[_FakeRuntime]]:
+    """Two individually-verified, executable, `allowed` bindings matching the
+    same task — the ADR-0010 §16 (Q18) ambiguous-candidates scenario."""
+    execution_registry = ExecutionBindingRegistry()
+    runtimes: list[_FakeRuntime] = []
+    for skill_id, desc in (
+        ("bench-tool-b", "Generic benchmark tool"),
+        ("trt-perf-analysis", "TensorRT layer analysis"),
+    ):
+        _write_fixture_skill(tmp_path, skill_id, _PLANNING_SKILL_DESCRIPTION)
+        rt = _FakeRuntime(
+            runtime_id=f"fake-runtime-{skill_id}",
+            outcome=RuntimeOutcome(success=True, output={"ok": True}),
+        )
+        runtimes.append(rt)
+        execution_registry.register_runtime(rt)
+        execution_registry.register_binding(
+            ExecutionBinding(
+                skill_id=skill_id,
+                binding_id=f"{skill_id}-v1",
+                runtime_id=rt.runtime_id,
+                approval_policy="allowed",
+                verified=True,
+                description=desc,
+            )
+        )
+    executor = SkillExecutor(execution_registry)
+    skill_inventory = SkillInventory(
+        sources=(LocalSkillSource(roots=(tmp_path,)),), is_executable=executor.can_execute
+    )
+    registry = CapabilityRegistry(_REGISTRY_PATH)
+    registry.load()
+    task_resolver = TaskResolver(capability_registry=registry, skill_inventory=skill_inventory)
+    graph = build_requirements_workflow_graph(
+        requirements_analyzer=RequirementsAnalyzer(task_resolver=task_resolver, llm=None),
+        executor=executor,
+        skill_inventory=skill_inventory,
+        execution_registry=execution_registry,
+        checkpointer=MemorySaver(),
+    )
+    return graph, runtimes
+
+
+class TestChooseCandidateCli:
+    """ADR-0010 §16 (Q18): `choose_candidate` through the CLI layer. The
+    owner chose an interrupt over a `--skill` override, so there is
+    deliberately no flag — the human is always asked."""
+
+    _PAYLOAD = {
+        "type": "choose_candidate",
+        "candidates": [
+            {"skill_id": "bench-tool-b", "description": "Generic benchmark tool"},
+            {"skill_id": "trt-perf-analysis", "description": "TensorRT layer analysis"},
+        ],
+    }
+
+    def _resume(self, prompt: Any) -> Any:
+        return _resume_value_for_interrupt(
+            self._PAYLOAD, answers={}, inputs={}, approve=False, reject=False, prompt=prompt
+        )
+
+    def test_prompt_lists_every_candidate_id_and_description_and_returns_the_answer(
+        self,
+    ) -> None:
+        seen: list[str] = []
+
+        def prompt(msg: str) -> str:
+            seen.append(msg)
+            return "  trt-perf-analysis  "
+
+        assert self._resume(prompt) == "trt-perf-analysis"
+        assert len(seen) == 1
+        for expected in ("bench-tool-b", "Generic benchmark tool", "trt-perf-analysis",
+                         "TensorRT layer analysis"):
+            assert expected in seen[0]
+
+    def test_eof_or_blank_returns_empty_string_never_a_default_candidate(self) -> None:
+        def eof(msg: str) -> str:
+            raise EOFError
+
+        assert self._resume(eof) == ""
+        assert self._resume(lambda msg: "   ") == ""
+
+    def test_approve_flag_does_not_answer_a_candidate_prompt(self) -> None:
+        """--approve is for approval_gate only; it must never be read as a
+        candidate choice (nor as consent to pick one)."""
+        answer = _resume_value_for_interrupt(
+            self._PAYLOAD,
+            answers={},
+            inputs={},
+            approve=True,
+            reject=False,
+            prompt=lambda msg: "",
+        )
+        assert answer == ""
+
+    def test_full_run_asks_then_executes_only_the_chosen_skill(self, tmp_path: Path) -> None:
+        graph, (rt_b, rt_trt) = _build_two_candidate_graph(tmp_path)
+        out_lines: list[str] = []
+
+        state = _run_workflow_interactive(
+            _GraphAgent(graph),
+            _PLANNING_TASK,
+            "cand-cli-1",
+            answers={},
+            inputs={},
+            approve=False,
+            reject=False,
+            prompt=lambda msg: "bench-tool-b",
+            out=out_lines.append,
+        )
+
+        assert state["status"] == "done"
+        assert state["candidate_selection"]["outcome"] == "selected"
+        assert state["execution_result"]["status"] == "completed"
+        assert [c[0] for c in rt_b.calls] == ["bench-tool-b"]
+        assert rt_trt.calls == []
+        assert any("[INTERRUPT] choose_candidate" in line for line in out_lines)
+        assert any("candidate: bench-tool-b (Generic benchmark tool)" in line for line in out_lines)
+        assert any("[RESUME] choose_candidate -> 'bench-tool-b'" in line for line in out_lines)
+
+    def test_declining_terminates_cleanly_without_executing_anything(
+        self, tmp_path: Path
+    ) -> None:
+        graph, runtimes = _build_two_candidate_graph(tmp_path)
+
+        state = _run_workflow_interactive(
+            _GraphAgent(graph),
+            _PLANNING_TASK,
+            "cand-cli-2",
+            answers={},
+            inputs={},
+            approve=False,
+            reject=False,
+            prompt=lambda msg: "",
+            out=lambda msg: None,
+        )
+
+        assert state["status"] == "done"
+        assert state["candidate_selection"]["outcome"] == "cancelled"
+        assert state["candidate_selection"]["terminal"] is True
+        assert state["execution_result"] is None
+        assert all(rt.calls == [] for rt in runtimes)
+
+    def test_summary_reports_the_candidate_selection_outcome(self) -> None:
+        lines: list[str] = []
+        _print_workflow_summary(
+            {
+                "status": "done",
+                "steps": [],
+                "candidate_selection": {
+                    "outcome": "invalid",
+                    "terminal": True,
+                    "chosen_skill_id": None,
+                },
+            },
+            out=lines.append,
+        )
+        assert any(
+            "Candidate selection: outcome=invalid terminal=True chosen=None" in line
+            for line in lines
+        )

@@ -164,6 +164,7 @@ def _binding(
     *,
     input_schema: tuple[InputField, ...] = (),
     input_field_groups: tuple[RequiredFieldGroup, ...] = (),
+    description: str = "",
 ) -> ExecutionBinding:
     return ExecutionBinding(
         skill_id=skill_id,
@@ -171,6 +172,7 @@ def _binding(
         runtime_id="fake-runtime",
         approval_policy="allowed",
         verified=True,
+        description=description,
         input_schema=input_schema,
         input_field_groups=input_field_groups,
     )
@@ -610,3 +612,68 @@ class TestPlanningResultSelectedIdentity:
                 "default": "unnamed",
             },
         )
+
+
+class TestCandidateDisambiguationSelection:
+    """ADR-0010 §16 (Q18): plan_execution()'s optional `selected_skill_id`
+    and `candidate_descriptions` — the pure-function half of the
+    `choose_candidate` interrupt."""
+
+    def _two(self) -> tuple[RequirementsAnalysis, ExecutionBindingRegistry]:
+        links = (_skill_link("skill-b"), _skill_link("skill-a"))
+        registry = _registry(
+            _binding("skill-a", description="does A"),
+            _binding("skill-b", description="does B"),
+        )
+        return _analysis(links), registry
+
+    def test_ambiguous_result_carries_descriptions_parallel_to_sorted_ids(self) -> None:
+        analysis, registry = self._two()
+        result = plan_execution(analysis, registry)
+        assert result.status == "ambiguous_candidates"
+        assert result.candidate_skill_ids == ("skill-a", "skill-b")
+        assert result.candidate_descriptions == ("does A", "does B")
+
+    def test_selected_skill_id_naming_a_candidate_resolves_ambiguity(self) -> None:
+        analysis, registry = self._two()
+        result = plan_execution(analysis, registry, selected_skill_id="skill-b")
+        assert result.status == "planned"
+        assert result.plan is not None and result.plan.skill_id == "skill-b"
+        assert result.selected_skill_id == "skill-b"
+        assert result.candidate_skill_ids == ()
+
+    def test_unknown_selected_skill_id_is_ignored_never_a_default(self) -> None:
+        analysis, registry = self._two()
+        result = plan_execution(analysis, registry, selected_skill_id="not-offered")
+        assert result.status == "ambiguous_candidates"
+        assert result.plan is None
+
+    def test_none_selected_skill_id_never_picks_one(self) -> None:
+        analysis, registry = self._two()
+        assert plan_execution(analysis, registry, selected_skill_id=None).status == (
+            "ambiguous_candidates"
+        )
+
+    def test_selected_candidate_still_gets_input_completeness_checks(self) -> None:
+        schema = (InputField(name="path", required=True, description="folder"),)
+        links = (_skill_link("skill-a"), _skill_link("skill-b"))
+        registry = _registry(_binding("skill-a"), _binding("skill-b", input_schema=schema))
+        result = plan_execution(_analysis(links), registry, selected_skill_id="skill-b")
+        assert result.status == "missing_required_inputs"
+        assert result.missing_inputs == ("path",)
+        assert result.selected_skill_id == "skill-b"
+
+    def test_selected_skill_id_is_irrelevant_when_only_one_candidate(self) -> None:
+        links = (_skill_link("skill-a"),)
+        result = plan_execution(
+            _analysis(links), _registry(_binding("skill-a")), selected_skill_id="other"
+        )
+        assert result.status == "planned"
+        assert result.selected_skill_id == "skill-a"
+
+    def test_non_executable_skill_cannot_be_selected(self) -> None:
+        links = (_skill_link("skill-a"), _skill_link("skill-b"), _skill_link("skill-c", executable=False))
+        registry = _registry(_binding("skill-a"), _binding("skill-b"), _binding("skill-c"))
+        result = plan_execution(_analysis(links), registry, selected_skill_id="skill-c")
+        assert result.status == "ambiguous_candidates"
+        assert result.candidate_skill_ids == ("skill-a", "skill-b")

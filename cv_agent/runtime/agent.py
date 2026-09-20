@@ -326,6 +326,8 @@ class CVAgent:
             "clarification_attempted": False,
             "execution_inputs": execution_inputs or {},
             "planning_result": None,
+            "candidate_choice": None,
+            "candidate_selection": None,
             "execution_input_recovery": None,
             "pending_execution": pending_execution,
             "approval_decision": None,
@@ -347,7 +349,11 @@ class CVAgent:
         string "approved"/"rejected" for an approval interrupt, or (ADR-0010
         §13) a dict keyed by `InputField.name` for a `provide_execution_
         inputs` interrupt (same resume-value shape and namespace as
-        `execution_inputs`, never `clarification_answers`). No dedicated
+        `execution_inputs`, never `clarification_answers`), or (ADR-0010
+        §16, Q18) a bare `skill_id` string for a `choose_candidate`
+        interrupt — must exactly name one of the candidates that interrupt's
+        payload offered; anything else (blank, unknown id) is a terminal
+        outcome, never silently replaced by a default candidate. No dedicated
         method exists per interrupt kind — the interrupt's own `"type"`
         field (in the paused state's `__interrupt__` payload) is how a
         caller knows which shape to supply; this method itself is generic

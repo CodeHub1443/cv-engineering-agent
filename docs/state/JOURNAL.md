@@ -1101,3 +1101,60 @@ status.
                branch, confirmed unchanged by direct comparison against
                `main`. Branch `feature/claude/q20-input-field-groups`
                (same PR #40, not merged), issue #39.
+
+
+## 2026-09-20 — Q18: ambiguous-candidate disambiguation interrupt (feature/claude/q18-candidate-disambiguation)
+**Did:**       Merged PR #40 (squash, `752bc1c`; issue #39 auto-closed; 437
+               tests green on the merged `main`), then implemented Q18 as its
+               own issue (#41) and branch. New fourth interrupt kind
+               `choose_candidate` (ADR-0010 §16): when `plan_execution()`
+               reports `"ambiguous_candidates"` the graph pauses, presents
+               every candidate's skill_id + description, validates the
+               human's bare-skill_id answer against the exact checkpointed
+               offered set, persists it (`candidate_choice`/
+               `candidate_selection`) and routes back to `plan_execution`,
+               which now takes an optional `selected_skill_id`. One shot; an
+               invalid/cancelled/no-longer-valid choice is terminal and
+               bypasses `approval_gate`. CLI handles the new kind (prompt +
+               summary line), no new flag — the owner chose the interrupt
+               over a `--skill` override.
+**Why:**       Q18 was the owner-decided, unbuilt item `STATUS.md` named as
+               next after Q20; until now `"ambiguous_candidates"` just ended
+               the run with no plan and nobody was ever asked.
+**Learned:**   (1) A naive retry has a silent-wrong-skill hole: the chosen
+               skill's binding deregistered during the pause leaves ONE
+               candidate, and `plan_execution()` happily plans it. An
+               "is it still ambiguous?" check misses this entirely; the
+               retry must require `result.selected_skill_id ==
+               chosen_skill_id`. Caught by reasoning while writing the
+               retry block, then pinned by a test and mutation-checked (the
+               test fails when the check is weakened) — a passing test alone
+               would not have proved it was load-bearing. (2) Adding a
+               second recovery kind broke an assumption that had been
+               silently true: `_node_plan_execution` was only ever
+               re-entered once after `execution_input_recovery` was
+               finalized, so gating on `attempted is True` sufficed. With
+               choose → retry → provide inputs → retry a run visits it
+               several times; both finalization blocks now gate on
+               `attempted AND terminal is None` so each round finalizes
+               exactly once (a chained-recovery test asserts the candidate
+               round is not re-finalized). (3) My first test-helper trick
+               (`_graph_for = OtherClass._graph_for`) added 4 mypy errors;
+               replaced with a delegating method — caught by comparing
+               against a `main` worktree baseline, not by eyeballing.
+               (4) Long heredocs containing apostrophes break in this
+               shell; test/doc bodies were written with the file tool.
+**Left open:** Q3 (durable checkpointer) and Q19 (approval cost estimate)
+               untouched. The new interrupt is unreachable through
+               `python -m cv_agent workflow` against any REAL installed
+               skill today (only one real binding exists, and `_cmd_workflow`
+               registers none) — exercised via fixture-graph and real-`CVAgent`
+               tests instead, same documented posture as
+               `provide_execution_inputs`. `ExecutionBinding.description` is
+               the only description source; a richer `Skill.description`
+               would need `plan_execution()` to depend on `SkillInventory`
+               (deliberately not done). 31 new tests; full suite 437 → 468,
+               zero regressions; `ruff`/`mypy` findings on touched files
+               identical to `main`'s. Branch
+               `feature/claude/q18-candidate-disambiguation`, issue #41,
+               PR pending — not merged.

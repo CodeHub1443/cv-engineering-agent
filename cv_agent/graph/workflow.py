@@ -50,8 +50,29 @@ Topology:
                                   END                        v
                                                              END
 
-`clarify`, `approval_gate`, and `provide_execution_inputs` are the three
-interrupt points. `plan_execution` itself never interrupts and never
+Since ADR-0010 §16 (Q18): a fourth interrupt, `choose_candidate`, sits
+*before* `provide_execution_inputs` on the same `plan_execution` fan-out —
+
+    plan_execution ──status == "ambiguous_candidates" AND candidate
+                     selection not yet attempted──> choose_candidate ──┐
+         ^                                                             │
+         └─────────────────────────── (always loops back) ─────────────┘
+
+`plan_execution` cannot evaluate a candidate's input completeness until
+exactly one candidate is selected, so an unresolved ambiguity always takes
+routing priority. The human's resume value is a bare `skill_id` string,
+validated against the exact checkpointed set that was offered
+(`candidate_choice` / `candidate_selection` in `AgentState`); the retry's
+fresh `plan_execution(..., selected_skill_id=...)` call independently
+re-confirms it against the current registry. Like every other interrupt
+here it is one-shot: an invalid, cancelled, or no-longer-valid choice is a
+terminal outcome routing straight to `END`, bypassing `approval_gate`,
+never a silent default.
+
+`clarify`, `approval_gate`, `provide_execution_inputs`, and
+`choose_candidate` are the four interrupt points (`clarify`/
+`provide_execution_inputs`/`choose_candidate` each bounded to one round per
+run). `plan_execution` itself never interrupts and never
 executes/approves anything — it only derives `pending_execution` when the
 caller hasn't already supplied one, reading any caller-supplied
 `AgentState["execution_inputs"]` (ADR-0010 §12, keyed by `InputField.name`
@@ -218,6 +239,96 @@ def _route_after_clarify(state: AgentState) -> Literal["analyze_requirements"]:
     # even if the human declined every question (ADR-0003 §9, Q21 fix;
     # clarification_answers being empty no longer re-triggers this edge).
     return "analyze_requirements"
+
+
+def _classify_candidate_choice(
+    resume_value: Any, candidate_skill_ids: list[str]
+) -> tuple[str, Optional[str]]:
+    """
+    ADR-0010 §16's deterministic classification of a `choose_candidate`
+    resume value, relative to `candidate_skill_ids` (the exact, complete
+    set of candidates actually offered — the checkpointed `planning_result.
+    candidate_skill_ids` snapshot from the one and only ask this run, never
+    a live registry re-derivation; see the caller).
+
+    Returns (outcome, chosen_skill_id). `outcome` is one of "cancelled"/
+    "invalid"/"selected" — never "candidate_mismatch", which only
+    `_node_plan_execution` can determine, on the retry, by re-running
+    `plan_execution()` against the *current* registry state; this function
+    has no visibility into that (mirrors `_classify_execution_input_resume`'s
+    own split between what a per-round check can know and what only a
+    fresh, authoritative retry can confirm).
+
+    A resume value that isn't a non-blank string at all (`None`, `""`, a
+    dict, anything else) is "cancelled" — never coerced, never guessed.
+    A non-blank string that doesn't name one of `candidate_skill_ids`
+    exactly is "invalid" — this function never picks the "closest" match
+    or falls back to any candidate; `[P§35]` forbids silently choosing one
+    for the human.
+    """
+    if not isinstance(resume_value, str) or not resume_value.strip():
+        return "cancelled", None
+    chosen = resume_value.strip()
+    if chosen not in candidate_skill_ids:
+        return "invalid", None
+    return "selected", chosen
+
+
+def _make_choose_candidate_node():
+    def _node_choose_candidate(state: AgentState) -> dict[str, Any]:
+        # Everything read here, before interrupt(), comes only from the
+        # already-checkpointed planning_result — never a live
+        # ExecutionBindingRegistry lookup. Same replay-safety rule
+        # _node_provide_execution_inputs already documents: LangGraph's
+        # dynamic interrupt() re-runs a node's pre-interrupt code on
+        # resume, so nothing read here may depend on a live, mutable
+        # object that could have changed during the pause.
+        planning = state.get("planning_result") or {}
+        candidate_ids = list(planning.get("candidate_skill_ids") or ())
+        candidate_descriptions = list(planning.get("candidate_descriptions") or ())
+        candidates = [
+            {"skill_id": skill_id, "description": description}
+            for skill_id, description in zip(candidate_ids, candidate_descriptions)
+        ]
+
+        payload = {
+            "type": "choose_candidate",
+            "candidates": candidates,
+        }
+        resume_value = interrupt(payload)
+        outcome, chosen = _classify_candidate_choice(resume_value, candidate_ids)
+
+        # terminal is deliberately left unset here — only
+        # _node_plan_execution's retry, with a fresh plan_execution() call
+        # in hand, can determine whether this choice still resolves
+        # ambiguity against the current registry. This partial record is
+        # never externally observable: choose_candidate -> plan_execution
+        # is a plain edge, so both nodes run inside one resume_workflow()
+        # call before control ever returns to a caller.
+        recovery_record: dict[str, Any] = {
+            "attempted": True,
+            "outcome": outcome,
+            "terminal": None,
+            "expected_candidate_skill_ids": candidate_ids,
+            "chosen_skill_id": chosen,
+        }
+
+        update: dict[str, Any] = {
+            "candidate_selection": recovery_record,
+            "pending_human_input": None,
+            "steps": _append_step(
+                state,
+                "choose_candidate",
+                "candidate_interrupt_resumed",
+                outcome=outcome,
+                chosen_skill_id=chosen,
+            ),
+        }
+        if chosen is not None:
+            update["candidate_choice"] = chosen
+        return update
+
+    return _node_choose_candidate
 
 
 def _classify_execution_input_resume(
@@ -516,15 +627,82 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
         # "infer execution inputs from arbitrary text" this node must not
         # do (ADR-0010 §3).
         available_inputs = state.get("execution_inputs") or {}
-        result = plan_execution(analysis, execution_registry, available_inputs=available_inputs)
+        # candidate_choice (ADR-0010 §16, Q18): a validated human choice
+        # among a prior ambiguous_candidates round's own candidates, or
+        # None on a first pass / when there was never any ambiguity — see
+        # plan_execution()'s own docstring for what it does with either.
+        candidate_choice = state.get("candidate_choice")
+        result = plan_execution(
+            analysis,
+            execution_registry,
+            available_inputs=available_inputs,
+            selected_skill_id=candidate_choice,
+        )
 
+        # Gated on terminal is None (not just attempted is True): once a
+        # recovery round is finalized below, a LATER retry of this same
+        # node (e.g. candidate disambiguation resolves ambiguity, then a
+        # separate provide_execution_inputs round follows for the now-
+        # unambiguous candidate) must not re-finalize an already-finalized
+        # round a second time — each of the two recovery kinds below is
+        # finalized at most once, independently.
+        candidate_recovery = state.get("candidate_selection")
+        candidate_unfinalized = (
+            candidate_recovery is not None
+            and candidate_recovery.get("attempted") is True
+            and candidate_recovery.get("terminal") is None
+        )
         recovery = state.get("execution_input_recovery")
-        already_attempted = recovery is not None and recovery.get("attempted") is True
+        execution_unfinalized = (
+            recovery is not None
+            and recovery.get("attempted") is True
+            and recovery.get("terminal") is None
+        )
 
+        updated_candidate_recovery: Optional[dict[str, Any]] = None
         updated_recovery: Optional[dict[str, Any]] = None
         plan_allowed = result.status == "planned"
 
-        if already_attempted:
+        if candidate_unfinalized:
+            # Retry after a choose_candidate interrupt resumed (ADR-0010
+            # §16). This is the ONLY place a candidate_choice's validity
+            # against the *current* registry is confirmed — the interrupt
+            # node's own "selected" classification only proves the choice
+            # matched what was offered at ask time, never that it still
+            # resolves anything now (the registry could have changed
+            # underneath the pause, e.g. a binding deregistered).
+            assert candidate_recovery is not None
+            raw_candidate_outcome: Any = candidate_recovery.get("outcome")
+            candidate_final_outcome: str
+            candidate_terminal: bool
+            if raw_candidate_outcome != "selected":
+                candidate_final_outcome, candidate_terminal = raw_candidate_outcome, True
+            elif result.selected_skill_id != candidate_recovery.get("chosen_skill_id"):
+                # The fresh, authoritative call did not resolve to the skill
+                # the human actually chose. Covers: still "ambiguous_
+                # candidates" (choice no longer a candidate); AND the subtler
+                # case where the chosen skill's binding was deregistered
+                # during the pause, leaving only the OTHER candidate —
+                # plan_execution() then sees a single candidate and would
+                # happily plan *that* one. Silently executing a skill the
+                # human never chose is exactly what `[P§35]` forbids, so
+                # ANY resolution other than the chosen skill_id is a
+                # mismatch (never "ask again"; this interrupt is one shot).
+                # selected_skill_id is None for no_executable_candidate/
+                # ambiguous_candidates, so those are covered too.
+                candidate_final_outcome, candidate_terminal = "candidate_mismatch", True
+            else:
+                candidate_final_outcome, candidate_terminal = "selected", False
+
+            updated_candidate_recovery = {
+                **candidate_recovery,
+                "outcome": candidate_final_outcome,
+                "terminal": candidate_terminal,
+            }
+            if candidate_terminal:
+                plan_allowed = False
+
+        elif execution_unfinalized:
             # Retry after a provide_execution_inputs interrupt resumed
             # (ADR-0010 §13). This is the ONLY place pending_execution may
             # be set from a recovery round, and it is gated on an explicit,
@@ -647,6 +825,9 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
         elif result.status == "conflicting_inputs":
             log_extra["conflicting_inputs"] = list(result.conflicting_inputs)
 
+        if updated_candidate_recovery is not None:
+            log_extra["candidate_outcome"] = updated_candidate_recovery["outcome"]
+            log_extra["candidate_terminal"] = updated_candidate_recovery["terminal"]
         if updated_recovery is not None:
             log_extra["recovery_outcome"] = updated_recovery["outcome"]
             log_extra["recovery_terminal"] = updated_recovery["terminal"]
@@ -656,6 +837,15 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
             "planning_result": dataclasses.asdict(result),
             "steps": _append_step(state, "plan_execution", "planning_attempted", **log_extra),
         }
+        if updated_candidate_recovery is not None:
+            update["candidate_selection"] = updated_candidate_recovery
+            if updated_candidate_recovery["terminal"]:
+                # Same reasoning as execution_input_recovery's own terminal
+                # handling below — this node's own conditional edge
+                # (_route_after_planning) sends a terminal candidate
+                # recovery outcome straight to END, bypassing approval_gate
+                # entirely, so it must set status="done" itself.
+                update["status"] = "done"
         if updated_recovery is not None:
             update["execution_input_recovery"] = updated_recovery
             if updated_recovery["terminal"]:
@@ -678,6 +868,33 @@ def _route_after_planning(state: AgentState) -> str:
         # plan_execution() call was ever made, so there is nothing for
         # recovery to engage with. Unchanged from before ADR-0010 §13.
         return "approval_gate"
+
+    # Candidate disambiguation (ADR-0010 §16, Q18) is checked FIRST —
+    # architecturally, plan_execution() cannot even determine input
+    # completeness (missing/conflicting) until exactly one candidate is
+    # selected, so an unresolved ambiguity always takes priority over the
+    # execution-input recovery checks below.
+    candidate_recovery = state.get("candidate_selection")
+    candidate_already_attempted = (
+        candidate_recovery is not None and candidate_recovery.get("attempted") is True
+    )
+
+    if planning.get("status") == "ambiguous_candidates" and not candidate_already_attempted:
+        return "choose_candidate"
+
+    if candidate_already_attempted and candidate_recovery is not None:
+        if candidate_recovery.get("terminal"):
+            # A failed/invalid/cancelled/mismatched disambiguation is
+            # terminal — bypasses approval_gate entirely, same "never read
+            # as approval not required for a plan never produced" rule
+            # execution_input_recovery's own terminal check already
+            # documents. Never a second choose_candidate interrupt.
+            return END
+        # Otherwise: the choice succeeded (terminal is False) — fall
+        # through to the ordinary missing/conflicting/planned routing
+        # below, evaluated against `planning`, which already reflects the
+        # FRESH plan_execution() call this same node retry made for the
+        # now-unambiguous candidate.
 
     recovery = state.get("execution_input_recovery")
     already_attempted = recovery is not None and recovery.get("attempted") is True
@@ -836,6 +1053,7 @@ def build_requirements_workflow_graph(
     builder.add_node("analyze_requirements", _make_analyze_requirements_node(requirements_analyzer))
     builder.add_node("clarify", _node_clarify)
     builder.add_node("plan_execution", _make_plan_execution_node(execution_registry))
+    builder.add_node("choose_candidate", _make_choose_candidate_node())
     builder.add_node("provide_execution_inputs", _make_provide_execution_inputs_node())
     builder.add_node("approval_gate", _make_approval_gate_node(executor))
     builder.add_node("execute", _make_execute_node(executor, skill_inventory))
@@ -854,11 +1072,13 @@ def build_requirements_workflow_graph(
         "plan_execution",
         _route_after_planning,
         {
+            "choose_candidate": "choose_candidate",
             "provide_execution_inputs": "provide_execution_inputs",
             "approval_gate": "approval_gate",
             END: END,
         },
     )
+    builder.add_edge("choose_candidate", "plan_execution")
     builder.add_edge("provide_execution_inputs", "plan_execution")
     builder.add_conditional_edges(
         "approval_gate", _route_after_approval, {"execute": "execute", END: END}

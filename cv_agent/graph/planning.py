@@ -89,7 +89,9 @@ PlanningStatus = Literal[
   `executable=True` and have a registered binding.
 - ambiguous_candidates: more than one distinct skill_id qualifies as
   executable — ADR-0010 §3 step 4 forbids silently picking one.
-  `PlanningResult.candidate_skill_ids` names them.
+  `PlanningResult.candidate_skill_ids`/`candidate_descriptions` name them.
+  Resolvable within the same run via a caller-supplied `selected_skill_id`
+  (ADR-0010 §16, resolving Q18) naming one of them.
 - missing_required_inputs: exactly one candidate, but its binding's
   `input_schema` declares a `required=True` field with no value in
   `available_inputs`, or an `"exactly_one"` `RequiredFieldGroup` has ZERO
@@ -121,8 +123,18 @@ class PlanningResult:
     """Set only when status == "planned"."""
     candidate_skill_ids: tuple[str, ...] = ()
     """Set only when status == "ambiguous_candidates" — every qualifying
-    candidate's skill_id, sorted, for a future disambiguation UI/log line.
-    Never used by this function to pick one."""
+    candidate's skill_id, sorted. Never used by this function to pick one."""
+    candidate_descriptions: tuple[str, ...] = ()
+    """Companion to `candidate_skill_ids` (ADR-0010 §16, resolving Q18) —
+    same order, same length, each entry the matching candidate's
+    `ExecutionBinding.description` (never a live re-lookup by a caller;
+    this snapshot is what the `choose_candidate` interrupt node presents to
+    a human, sourced once, here, at plan time). `ExecutionBinding.
+    description` — not `Skill.description` from `SKILL.md` frontmatter —
+    is deliberately the source: `plan_execution()`'s only dependencies are
+    `RequirementsAnalysis` and `ExecutionBindingRegistry` (see this
+    module's own docstring); reading `Skill` would mean depending on
+    `SkillInventory` too, a boundary this function has never crossed."""
     missing_inputs: tuple[str, ...] = ()
     """Set only when status == "missing_required_inputs" — the names of
     every InputField.required field with no value in available_inputs,
@@ -180,6 +192,7 @@ def plan_execution(
     bindings: ExecutionBindingRegistry,
     *,
     available_inputs: dict[str, Any] | None = None,
+    selected_skill_id: str | None = None,
 ) -> PlanningResult:
     """
     ADR-0010 §3's deterministic V1 planning rule. Pure and side-effect-free:
@@ -202,8 +215,17 @@ def plan_execution(
          deterministic order supplies the plan's `task_component`.
       3. Zero qualifying candidates -> `"no_executable_candidate"`.
       4. Exactly one -> proceed to the input check below.
-      5. More than one distinct skill_id -> `"ambiguous_candidates"`, listing
-         every one; nothing is picked.
+      5. More than one distinct skill_id: if `selected_skill_id` names one
+         of them, that one is selected and this function proceeds exactly
+         as if it had been the only candidate (ADR-0010 §16, resolving
+         Q18) — this is the *only* way more than one candidate is ever
+         resolved to one; nothing is picked when `selected_skill_id` is
+         `None` or does not name a current candidate (a stale/invalid
+         choice is silently ignored here, not trusted — the caller, e.g.
+         the `choose_candidate` graph node's retry, is responsible for
+         detecting and reporting that as a mismatch, since only it knows
+         whether a choice was actually offered before). Otherwise ->
+         `"ambiguous_candidates"`, listing every one; nothing is picked.
 
     Input completeness: reads the selected candidate's
     `ExecutionBinding.input_schema` (ADR-0009 §11) to check whether every
@@ -258,13 +280,27 @@ def plan_execution(
     if not candidates_by_skill_id:
         return PlanningResult(status="no_executable_candidate")
 
-    if len(candidates_by_skill_id) > 1:
+    if len(candidates_by_skill_id) == 1:
+        (selected,) = candidates_by_skill_id.values()
+    elif selected_skill_id is not None and selected_skill_id in candidates_by_skill_id:
+        # ADR-0010 §16 (Q18): a validated disambiguation choice resolves
+        # ambiguity exactly like there having been only one candidate all
+        # along — everything below (input completeness, plan construction)
+        # is identical either way, never duplicated for this path.
+        selected = candidates_by_skill_id[selected_skill_id]
+    else:
+        candidate_ids = tuple(sorted(candidates_by_skill_id))
+        candidate_descriptions = []
+        for skill_id in candidate_ids:
+            candidate_binding = bindings.get_binding(skill_id)
+            assert candidate_binding is not None  # guaranteed by the filter above
+            candidate_descriptions.append(candidate_binding.description)
         return PlanningResult(
             status="ambiguous_candidates",
-            candidate_skill_ids=tuple(sorted(candidates_by_skill_id)),
+            candidate_skill_ids=candidate_ids,
+            candidate_descriptions=tuple(candidate_descriptions),
         )
 
-    (selected,) = candidates_by_skill_id.values()
     binding = bindings.get_binding(selected.skill_id)
     assert binding is not None  # guaranteed by the filter above
 
