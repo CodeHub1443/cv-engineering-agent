@@ -132,7 +132,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from cv_agent.execution.binding import ExecutionBindingRegistry
+from cv_agent.execution.binding import ExecutionBindingRegistry, pin_is_well_formed
 from cv_agent.execution.executor import SkillExecutor
 from cv_agent.execution.models import (
     ExecutionError,
@@ -490,6 +490,7 @@ def _make_provide_execution_inputs_node():
         planning = state.get("planning_result") or {}
         skill_id = planning.get("selected_skill_id")
         binding_id = planning.get("selected_binding_id")
+        expected_description = planning.get("selected_description")
         expected_schema_raw = planning.get("selected_input_schema") or ()
         expected_schema: list[dict[str, Any]] = [dict(f) for f in expected_schema_raw]
         expected_groups_raw = planning.get("selected_input_field_groups") or ()
@@ -582,6 +583,7 @@ def _make_provide_execution_inputs_node():
             "mismatch_detail": None,
             "expected_skill_id": skill_id,
             "expected_binding_id": binding_id,
+            "expected_description": expected_description,
             "expected_input_schema": expected_schema,
             "expected_input_field_groups": expected_groups,
             "requested": requested,
@@ -653,6 +655,22 @@ def _requirements_analysis_for_planning(analysis_dict: dict[str, Any]) -> Requir
     )
 
 
+def _capture_execution_pin(
+    execution_registry: ExecutionBindingRegistry, skill_id: str
+) -> Optional[dict[str, Any]]:
+    """
+    The execution pin for `skill_id` (ADR-0003 section 10.2), captured from the
+    live registry - the ONLY place the graph reads it for pinning. `None` means
+    no binding was registered. A binding that cannot be pinned (non-JSON-native
+    default, ADR-0003 section 10.4) yields a deliberately MALFORMED marker, so
+    it fails closed as `execution_pin_malformed`: never approved, never run.
+    """
+    try:
+        return execution_registry.pin(skill_id)
+    except ValueError as exc:
+        return {"unpinnable": str(exc)}
+
+
 def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
     def _node_plan_execution(state: AgentState) -> dict[str, Any]:
         existing_pending = state.get("pending_execution")
@@ -672,11 +690,23 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
             # plan_execution() call was made, so there is no PlanningResult
             # to report; a caller-supplied plan was never a planning
             # decision. This "steps" entry remains the record of why.
-            return {
+            caller_update: dict[str, Any] = {
                 "steps": _append_step(
                     state, "plan_execution", "caller_supplied_pending_execution_preserved"
                 ),
             }
+            if "execution_pin" not in existing_pending:
+                # ADR-0003 section 10.6: pinned at FIRST OBSERVATION, before
+                # any approval interrupt, from the live registry; a later
+                # visit of this node finds the key and never re-pins. (An
+                # explicit None is "no binding at capture" and is kept.)
+                caller_update["pending_execution"] = {
+                    **existing_pending,
+                    "execution_pin": _capture_execution_pin(
+                        execution_registry, str(existing_pending.get("skill_id"))
+                    ),
+                }
+            return caller_update
 
         analysis_dict = state.get("requirements_analysis") or {}
         analysis = _requirements_analysis_for_planning(analysis_dict)
@@ -830,6 +860,15 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
             # underneath the pause must still be caught here, not just by
             # comparing input_schema alone.
             schema_ok = fresh_schema == expected_schema and fresh_groups == expected_groups
+            # ADR-0010 section 17 (issue #43): strict description pinning
+            # through input recovery. "Nothing to compare" never counts as
+            # "unchanged" - a record without expected_description, or a fresh
+            # result without selected_description, fails closed.
+            expected_description = recovery.get("expected_description")
+            description_ok = (
+                isinstance(expected_description, str)
+                and result.selected_description == expected_description
+            )
             raw_outcome: Any = recovery.get("outcome")
 
             final_outcome: str
@@ -839,6 +878,8 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
                 final_outcome, terminal, detail = "binding_mismatch", True, "identity_changed"
             elif not schema_ok:
                 final_outcome, terminal, detail = "binding_mismatch", True, "schema_changed"
+            elif not description_ok:
+                final_outcome, terminal, detail = "binding_mismatch", True, "description_changed"
             elif raw_outcome != "supplied":
                 final_outcome, terminal, detail = raw_outcome, True, None
             elif result.status == "conflicting_inputs":
@@ -908,6 +949,9 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
                 "skill_id": result.plan.skill_id,
                 "inputs": result.plan.inputs,
                 "task": result.plan.source_task,
+                "execution_pin": _capture_execution_pin(
+                    execution_registry, result.plan.skill_id
+                ),
             }
             log_extra["skill_id"] = result.plan.skill_id
             log_extra["task_component"] = result.plan.task_component
@@ -1035,7 +1079,25 @@ def _route_after_planning(state: AgentState) -> str:
     return "approval_gate"
 
 
+_MISSING_PIN: Any = object()
+"""Sentinel: the `execution_pin` key is absent (distinct from an explicit None)."""
+
+
+def _pin_evidence(pin: Any) -> ExecutionEvidence:
+    """binding_id/runtime_id read defensively from a pin that may be unusable -
+    `None`s when it cannot be read, never an exception."""
+    binding = pin.get("binding") if isinstance(pin, dict) else None
+    if isinstance(binding, dict):
+        binding_id, runtime_id = binding.get("binding_id"), binding.get("runtime_id")
+        if isinstance(binding_id, str) and isinstance(runtime_id, str):
+            return ExecutionEvidence(binding_id, runtime_id, None, None)
+    return ExecutionEvidence(None, None, None, None)
+
+
 def _make_approval_gate_node(executor: SkillExecutor):
+    # `executor` is kept in the signature for the graph builder, but the gate
+    # no longer reads it: ADR-0003 section 10.2 - the gate decides from the
+    # checkpointed execution pin only, never a live registry read.
     def _node_approval_gate(state: AgentState) -> dict[str, Any]:
         pending = state.get("pending_execution")
         if pending is None:
@@ -1045,19 +1107,44 @@ def _make_approval_gate_node(executor: SkillExecutor):
                 "steps": _append_step(state, "approval_gate", "no_pending_execution"),
             }
 
-        binding = executor.get_binding(pending["skill_id"])
-        if binding is None or binding.approval_policy != "approval_required":
+        skill_id = pending.get("skill_id")
+        pin_state: Any = pending.get("execution_pin", _MISSING_PIN)
+
+        # Missing or malformed pin: no interrupt, approval_decision left None
+        # (never "not_required" - that would read as "nothing to approve").
+        if pin_state is _MISSING_PIN or (
+            pin_state is not None and not pin_is_well_formed(pin_state, skill_id=str(skill_id))
+        ):
+            return {
+                "steps": _append_step(
+                    state, "approval_gate", "execution_pin_unusable", skill_id=skill_id
+                ),
+            }
+
+        # Explicit None: no binding at capture, nothing can execute.
+        if pin_state is None:
             return {
                 "approval_decision": "not_required",
                 "steps": _append_step(
-                    state, "approval_gate", "approval_not_required", skill_id=pending["skill_id"]
+                    state, "approval_gate", "approval_not_required", skill_id=skill_id
+                ),
+            }
+
+        binding_pin = pin_state["binding"]
+        if binding_pin["approval_policy"] != "approval_required":
+            return {
+                "approval_decision": "not_required",
+                "steps": _append_step(
+                    state, "approval_gate", "approval_not_required", skill_id=skill_id
                 ),
             }
 
         payload = {
             "type": "approval",
-            "skill_id": pending["skill_id"],
-            "binding_id": binding.binding_id,
+            "skill_id": skill_id,
+            "binding_id": binding_pin["binding_id"],
+            "runtime_id": binding_pin["runtime_id"],
+            "description": binding_pin["description"],
             "task": pending.get("task"),
             "inputs": pending.get("inputs", {}),
         }
@@ -1075,7 +1162,7 @@ def _make_approval_gate_node(executor: SkillExecutor):
                 state,
                 "approval_gate",
                 "approval_interrupt_resumed",
-                skill_id=pending["skill_id"],
+                skill_id=skill_id,
                 decision=normalized,
             ),
         }
@@ -1092,35 +1179,104 @@ def _route_after_approval(state: AgentState) -> str:
 def _make_execute_node(executor: SkillExecutor, skill_inventory: SkillInventory):
     def _node_execute(state: AgentState) -> dict[str, Any]:
         pending = state["pending_execution"]
+        assert pending is not None  # _route_after_approval only routes here with a plan
         skill_id = pending["skill_id"]
         decision = state.get("approval_decision")
-        approved = decision in ("approved", "not_required")
 
-        skill = skill_inventory.get(skill_id)
-        if skill is None:
-            result = SkillExecutionResult(
+        def _refusal(
+            status: Literal["rejected", "not_executable"],
+            category: Literal["approval_denied", "no_binding", "binding_mismatch"],
+            message: str,
+            pin: Any = None,
+        ) -> SkillExecutionResult:
+            return SkillExecutionResult(
                 skill_id=skill_id,
-                status="not_executable",
-                evidence=ExecutionEvidence(None, None, None, None),
-                error=ExecutionError(
-                    "no_binding", f"'{skill_id}' was not found by skill discovery."
-                ),
+                status=status,
+                evidence=_pin_evidence(pin),
+                error=ExecutionError(category, message),
+            )
+
+        pin = pending.get("execution_pin")
+        result: SkillExecutionResult
+        # ADR-0003 section 10.6 - ordered checks, rejection FIRST. Nothing
+        # before the executor call reads the live registry.
+        if decision == "rejected":
+            # Invariant R: terminal. No pin validation, no registry read, no
+            # executor call - a binding/policy/runtime change has no path here.
+            result = _refusal(
+                "rejected",
+                "approval_denied",
+                "Execution was rejected by the human at the approval gate.",
+                pin,
+            )
+        elif "execution_pin" not in pending:
+            result = _refusal(
+                "not_executable",
+                "binding_mismatch",
+                "integrity check failed: execution_pin_missing",
+            )
+        elif pin is None:
+            result = _refusal(
+                "not_executable",
+                "no_binding",
+                "No execution binding was registered when this execution was "
+                "planned; a binding registered afterwards was never approved.",
+            )
+        elif not pin_is_well_formed(pin, skill_id=str(skill_id)):
+            result = _refusal(
+                "not_executable",
+                "binding_mismatch",
+                "integrity check failed: execution_pin_malformed",
+                pin,
+            )
+        elif decision != (
+            "approved" if pin["binding"]["approval_policy"] == "approval_required" else "not_required"
+        ):
+            # Defensive guard (A1): unreachable through the gate. A bare
+            # "not_required" (or None) must never run a pinned
+            # approval_required binding.
+            result = _refusal(
+                "not_executable",
+                "binding_mismatch",
+                "integrity check failed: approval_decision_inconsistent",
+                pin,
             )
         else:
-            request = SkillExecutionRequest(
-                inputs=pending.get("inputs", {}),
-                task=pending.get("task"),
-                approved=approved,
-            )
-            result = executor.execute(skill, request)
+            skill = skill_inventory.get(skill_id)
+            if skill is None:
+                result = _refusal(
+                    "not_executable",
+                    "no_binding",
+                    f"'{skill_id}' was not found by skill discovery.",
+                )
+            else:
+                request = SkillExecutionRequest(
+                    inputs=pending.get("inputs", {}),
+                    task=pending.get("task"),
+                    # True only for a recorded human approval. The guards above
+                    # guarantee that is the only way an approval_required pin
+                    # reaches here; a not_required (no-approval) pin needs no flag.
+                    approved=decision == "approved",
+                    expected_binding_pin=pin,
+                )
+                result = executor.execute(skill, request)
 
-        return {
+        update: dict[str, Any] = {
             "execution_result": dataclasses.asdict(result),
             "status": "done",
             "steps": _append_step(
                 state, "execute", "execution_attempted", skill_id=skill_id, result_status=result.status
             ),
         }
+        if result.status in ("rejected", "not_executable"):
+            # Terminal-failure invariant (D3, #42; ADR-0003 section 10.10): a
+            # run whose plan did not start must not leave an executable plan
+            # in planning_result. pending_execution is kept as the record of
+            # what was approved; approval_decision is never rewritten here.
+            planning = state.get("planning_result")
+            if planning is not None:
+                update["planning_result"] = {**planning, "plan": None}
+        return update
 
     return _node_execute
 

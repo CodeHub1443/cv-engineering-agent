@@ -1220,3 +1220,82 @@ status.
                against a fresh worktree). Branch
                `feature/claude/q18-candidate-disambiguation`, PR #42 — not
                merged.
+
+
+## 2026-09-21 — Close out Q18; record the approval-pause integrity gap (docs-only PR)
+**Did:**       Merged PR #42 (squash, `3230361`; #41 closed; 493 tests green on
+               merged `main`), then filed two follow-ups and refreshed rolling
+               state in this docs-only PR. #43: the approval pause pins only
+               `skill_id`; two defects reproduced on current `main` AND on
+               pre-Q18 `752bc1c` — (1) a replacement binding/runtime registered
+               during the approval pause runs under approval granted for the
+               original; (2) a replacement with an `allowed` policy overrides a
+               human REJECTION (`approval_decision="not_required"`, execution
+               `completed`). #44: `workflow` cannot reach its interrupts against a
+               real skill. Recorded as Q22/Q23 and D-031; `STATUS.md` corrected
+               (it still said PR #42 was unmerged); ADR-0010 §16.3 gained a scope
+               note. No source or test file changed; nothing implemented.
+**Why:**       The #42 audit surfaced the approval gap while checking that a
+               changed binding can never run after a pause. It is outside #42's
+               diff and pre-existing, so it was split out rather than folded into
+               a PR that had already been audited and approved.
+**Learned:**   (1) I first reported the gap as "a replacement runs after
+               approval". Re-verifying before writing the issue showed the worse
+               half: a *rejection* is overridable. The cause is different, not a
+               variant — the gate does a live `get_binding()` BEFORE
+               `interrupt()`, LangGraph re-runs that on resume, and a replacement
+               whose policy is `allowed` makes the node return
+               `not_required` without ever reaching the recorded decision. An
+               execution-time `binding_id` check alone would block the run but
+               would still record `not_required`, and would miss a replacement
+               that keeps the same `binding_id` and flips only the policy — the
+               latter confirmed by a probe (`not_required`, `completed`, original
+               runtime ran), not just by reading code. (2) "Pre-existing" was
+               established by running the probe on a `git worktree` of `752bc1c`
+               and printing `cv_agent.__file__` to prove which tree was loaded,
+               not inferred from the diff not touching the gate. (3) A claim in
+               my own draft of the issue ("fixing only the execution-time check
+               would not fix Defect 2") was wrong as worded — that check WOULD
+               block scenario C's execution — and was corrected before anyone
+               relied on it. (4) The approval gate violates the replay-safety
+               rule (no live registry read before `interrupt()` on resume) that
+               ADR-0010 §13/§16 already impose on the two newer interrupts;
+               that asymmetry is the root of Defect 2.
+**Left open:** #43 (needs an ADR amendment first, then implementation and the
+               regression tests listed in the issue, asserting the replacement
+               runtime is never invoked), #44 (owner decisions; `choose_candidate`
+               also needs a second real binding, currently prohibited), Q3, Q19
+               (already tracked, untouched). Health marked yellow in `STATUS.md`
+               until #43 is resolved.
+
+## 2026-09-21 — #43 approval-integrity ADR amendment drafted (docs-only, proposed)
+**Did:**        Drafted ADR-0003 §10 (proposed): whole-binding `binding_pin` in `pending_execution`, captured once in `plan_execution`; gate decides from the pin (no live read before `interrupt()`); a recorded rejection short-circuits in `_node_execute` without calling the executor; `SkillExecutor.execute()` compares the pin against its own single lookup (ADR-0009 §14, `expected_binding_pin`, new `binding_mismatch` category); mismatch is terminal, no re-approval. Reworded ADR-0010 §16.3's scope sentence. Updated Q22 and STATUS. No source/test change; DECISIONS not appended (nothing decided yet).
+**Why:**        Issue #43 requires the ADR before code (`CLAUDE.md` §5); `[P§24]`.
+**Broke/learned:** Rejection is enforced today only inside the executor via the *live* policy — a third fact beyond the two defects in #43, and the reason the graph itself must refuse to invoke after a rejection. Same-`runtime_id` runtime-object substitution is not detectable from serializable state (residual, decision D2).
+**Left open:**  Owner decisions D1-D5 (ADR-0003 §10.11); then implementation of #43. #44, Q3, Q19 untouched.
+
+## 2026-09-21 — #43 approval-integrity contract, revision 2 (docs-only, still proposed)
+**Did:**        Revised ADR-0003 §10 after owner review (accepted D1/D3/D4/D5): one lifecycle (plan → immutable pin → approval request → recorded decision → integrity validation → outcome); pin = whole-binding snapshot + runtime registration generation; rejection branch runs first in `_node_execute` so no integrity result or replacement can override it; executor rule E1 (approval-required + no pin is refused even with `approved=True`) closes the "absent pin bypasses" hole; per-situation result table. Added ADR-0009 §14 (executor order, `pin_mismatch`, registry generation) and ADR-0010 §17 (`PlanningResult.selected_description`, `description_changed` through `provide_execution_inputs`). Updated Q22/STATUS. No source or test change; DECISIONS not appended.
+**Why:**        Owner asked for a precise integrity contract before any code (`CLAUDE.md` §5); `[P§24]`.
+**Broke/learned:** The direct CLI path is not pause-free — `_confirm_approval()` blocks on `input()` between `get_binding` and `execute`, contradicting ADR-0009 §10 / issue #43's "no pause" (unreachable today, but not a sound exemption). No registry generation/token exists; `register_runtime` overwrites unconditionally. `id(obj)` rejected as a token (reusable after GC). In-place mutation, restart and threading remain undetectable limits.
+**Left open:**  D2, D5', D6, D7 (ADR-0003 §10.11). #44, Q3, Q19 untouched.
+
+## 2026-09-21 — #43 approval-integrity contract, revision 3 (docs-only, finalized proposal)
+**Did:**        Finalized ADR-0003 §10 with owner decisions D1/D2/D4/D5'/D6/D7. Defined the three pin states (missing key / explicit `None` / present-malformed) and one authoritative outcome table (§10.5) that graph, executor (ADR-0009 §14) and tests all defer to; canonical snapshot + canonical-JSON equality (no `asdict`/`repr`/object `==`); runtime-generation capture and check table; rejection-first ordering in `_node_execute`; terminal/plan-cleared/no-rewrite/no-re-plan/no-re-ask guarantees; 23 explicit acceptance tests (T1-T23). ADR-0010 §17: description pinning fails closed, including on absent snapshot. Q22/STATUS updated. No source/test change; DECISIONS not appended until approval.
+**Why:**        Owner review of revision 2 flagged conflicting missing-pin descriptions, unspecified equality, and unspecified runtime-generation edge cases.
+**Broke/learned:** Revision 2 said "missing pin" was handled at two layers with different codes and left a bare `not_required` able to run a pinned `approval_required` binding if state were hand-built (now row 5, `approval_decision_inconsistent`). The registry has no removal API, so "deregistered" is private-dict-only. No binding currently sets a non-`None` `InputField.default`.
+**Left open:**  Owner approval of the contract; minor ambiguities A1-A3 (ADR-0003 §10.14). #44, Q3, Q19 untouched.
+
+## 2026-09-21 — #43 approval integrity implemented (branch fix/claude/43-approval-integrity)
+**Did:**        Implemented the owner-approved ADR-0003 §10 contract. `ExecutionBinding.pin()` (explicit field access, canonical-JSON equality), `ExecutionBindingRegistry.pin()`/`get_runtime_registration()` and a per-runtime registration generation (`(runtime, generation)` in one dict value); `pin_is_well_formed()`/`pin_mismatch()`; `SkillExecutionRequest.expected_binding_pin` and `ExecutionErrorCategory += "binding_mismatch"`; `SkillExecutor.execute()` reads binding + runtime registration once, enforces rule E1 (approval-required needs a pin even with `approved=True`), compares the pin, and invokes the same runtime instance. Graph: `_node_plan_execution` captures `execution_pin` once (also for caller-supplied plans, at first observation); the gate decides from the pin only and never interrupts on an unusable pin; `_node_execute` checks a recorded rejection first, then missing / explicit-None / malformed / decision-inconsistent, then calls the executor; every `rejected`/`not_executable` result clears `planning_result["plan"]`. Description pinning through `provide_execution_inputs` (`PlanningResult.selected_description`, `expected_description`, `description_changed`, fail closed on absence). `python -m cv_agent execute` now captures the pin before its prompt (`_authorize_and_execute`). Tests: `tests/test_approval_integrity.py` (85); the two `approved=True` approval-required executor tests now pass a pin; exact-equality assertions on `pending_execution`/`planning_result` gained the additive keys (`_without_pin`, `selected_description`).
+**Why:**        Issue #43 / Q22, `[P§24]`; owner approval of ADR-0003 §10 rev.3 with A1-A3.
+**Verified:**   Focused: 85 passed. Full suite 578 passed (493 baseline + 85), 0 failed. `ruff` on the touched files: identical to base (one pre-existing F841); `mypy cv_agent`: 6 errors vs 9 at base (3 pre-existing `None`-indexing errors in `_node_execute` disappeared with the new guard), `mypy tests/test_approval_integrity.py` clean. **T22 mutation checks:** 23 mutations applied one at a time and reverted — rejection-first branch, executor pin comparison, rule E1, executor well-formedness, explicit-None branch, decision-consistency guard, generation comparison, description comparison, generation increment, caller-plan pinning, plan clearing, separate-runtime-lookup, gate unusable-pin check, execute missing-key and malformed checks, always-re-pin, CLI dropping the pin, skill_id well-formedness, gate ignoring the pinned policy, gate explicit-None branch, recovery description snapshot, generation omitted from the pin, planned-path pin — every one made at least one test fail.
+**Broke/learned:** A `float("nan")` default is the reachable "cannot be pinned" case: an `object()` default already crashes `planning_result` checkpointing (pre-existing, independent of #43). `allowed`→`approval_required` cannot be exercised inside a graph pause (an `allowed` pin has no pause after capture), so it is proven at the executor. A first mutation-script pattern matched two sites (the choose_candidate record also has `expected_description`) and was made unique — a reminder that a mutation check must confirm it hit exactly one place. No plan-clearing assertion in the existing suite needed changing (A2). The direct CLI has a real pause (`input()`), contrary to ADR-0009 §10 — corrected in §14.
+**Left open:**  PR review/merge of #43. Limits documented in ADR-0003 §10.8 (in-place mutation, restart/Q3, threads). #44, Q3, Q19 untouched.
+
+## 2026-09-21 — #43 review follow-ups (PR #46)
+**Did:**        Applied the independent review's fixes. Tests (+23, 85 → 108 in `tests/test_approval_integrity.py`): falsy non-`None` pins at the executor for `allowed` and `approval_required` (`{}`, `[]`, `""`, `0`, `False`, `()`); pin capture at runtime generation 2 and a later replacement (generation 3); the exact approval payload (`runtime_id`, `description`); caller-forged `execution_pin` through the production entry point `CVAgent.start_workflow` (forged `allowed` over an approval-required binding, forged `approval_required` over an `allowed` one, an identical caller pin, explicit `None`, malformed, another skill's pin); `--approve` with a registry change between pin capture and the executor call (description and runtime object); an unpinnable approval-required binding raising before any prompt; refusal/mismatch evidence and the gate's `execution_pin_unusable` log entry. Code/docs: `_node_execute` passes `approved = (decision == "approved")` as ADR-0003 §10.6 specifies; stale docstrings corrected (`state.py` `execution_result`, `runtime/agent.py` `start_workflow`, ADR-0010 §10, `planning.py`, `SkillExecutor.get_binding`, which is kept as public API); ADR-0003 §10.8 limitation on on-disk skill files; ADR-0003 T18 now states what the `--approve` test covers; `_without_pin` consolidated into `tests/test_workflow.py`; the trailing blank line at the end of this file removed.
+**Why:**        Review findings: coverage gaps found by 11 extra mutations (9 survived, none a production defect) and documentation discrepancies.
+**Correction:** My 2026-09-21 revision-2 and implementation entries above say "ADR-0009 §10 / issue #43's 'no pause'". ADR-0009 §10 makes no such claim — it comes from issue #43's out-of-scope note; ADR-0003 §10.1 and ADR-0009 §14 are corrected. (Past entries are not edited.)
+**Verified:**   `tests/test_approval_integrity.py` 108 passed; full suite 601 passed (493 baseline + 108). `ruff check cv_agent tests`: findings identical to base (line numbers normalized). `mypy cv_agent`: 6 errors vs 9 at base (all 6 pre-existing, in untouched files); `mypy tests/test_approval_integrity.py` clean. `git diff --check` clean. The 11 extra mutations from the review re-run: 10 killed; the one survivor removes the `except ValueError` branch in the `_cmd_execute` wrapper, which needs the real skill installed to reach.
+**Left open:**  PR #45 / #46 sequencing (both contain `4979e50`) — owner decision. The `_cmd_execute` wrapper is still not covered by tests (needs the real skill installed).

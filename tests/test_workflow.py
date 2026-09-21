@@ -55,6 +55,15 @@ _WELL_DEFINED_TASK = (
 )
 
 
+def _without_pin(pending: dict) -> dict:
+    """pending_execution minus the execution_pin (ADR-0003 section 10) - the tests
+    using this assert the plan's own fields; the pin has dedicated tests in
+    tests/test_approval_integrity.py. Single shared definition (imported by
+    test_memory_integration and test_execution_trt_perf_analysis)."""
+    return {k: v for k, v in pending.items() if k != "execution_pin"}
+
+
+
 @dataclass
 class FakeRuntime:
     runtime_id: str = "fake-runtime"
@@ -709,7 +718,7 @@ class TestPlanExecutionIntegration:
         result = _start(graph, _PLANNING_TASK, "plan-1")
 
         assert "__interrupt__" not in result
-        assert result["pending_execution"] == {
+        assert _without_pin(result["pending_execution"]) == {
             "skill_id": "trt-perf-analysis",
             "inputs": {},
             "task": _PLANNING_TASK,
@@ -743,6 +752,7 @@ class TestPlanExecutionIntegration:
             "conflicting_inputs": (),
             "selected_skill_id": "trt-perf-analysis",
             "selected_binding_id": "trt-perf-analysis-v1",
+            "selected_description": "",
             "selected_input_schema": (),
             "selected_input_field_groups": (),
         }
@@ -898,7 +908,7 @@ class TestPlanExecutionIntegration:
             execution_inputs={"path": "/data/clips"},
         )
 
-        assert result["pending_execution"] == {
+        assert _without_pin(result["pending_execution"]) == {
             "skill_id": "trt-perf-analysis",
             "inputs": {"path": "/data/clips"},
             "task": _PLANNING_TASK,
@@ -939,7 +949,7 @@ class TestPlanExecutionIntegration:
         # reaches the plan, unchanged.
         assert resumed["clarification_answers"] == answers
         assert resumed["planning_result"]["status"] == "planned"
-        assert resumed["pending_execution"] == {
+        assert _without_pin(resumed["pending_execution"]) == {
             "skill_id": "trt-perf-analysis",
             "inputs": {"path": "/data/clips"},
             "task": _VAGUE_PLANNING_TASK,
@@ -1166,7 +1176,7 @@ class TestProvideExecutionInputsRecovery:
 
         assert "__interrupt__" not in resumed
         assert resumed["status"] == "done"
-        assert resumed["pending_execution"] == {
+        assert _without_pin(resumed["pending_execution"]) == {
             "skill_id": "trt-perf-analysis",
             "inputs": {"path": "/data/clips"},
             "task": _PLANNING_TASK,
@@ -1247,7 +1257,7 @@ class TestProvideExecutionInputsRecovery:
                 "default": "unnamed-model",
             },
         ]
-        assert resumed["pending_execution"] == {
+        assert _without_pin(resumed["pending_execution"]) == {
             "skill_id": "trt-perf-analysis",
             "inputs": {"path": "/data/clips", "model_name": "resnet50"},
             "task": _PLANNING_TASK,
@@ -1325,7 +1335,7 @@ class TestProvideExecutionInputsRecovery:
         assert recovery["terminal"] is False
         assert recovery["accepted"] == ["data"]
         assert recovery["still_missing"] == []
-        assert resumed["pending_execution"] == {
+        assert _without_pin(resumed["pending_execution"]) == {
             "skill_id": "trt-perf-analysis",
             "inputs": {"data": [["layers.json"]]},
             "task": _PLANNING_TASK,
@@ -1938,7 +1948,7 @@ class TestChooseCandidateInterrupt:
         assert done["candidate_selection"]["outcome"] == "selected"
         assert done["candidate_selection"]["terminal"] is False  # not re-finalized
         assert done["execution_input_recovery"]["outcome"] == "supplied"
-        assert done["pending_execution"] == {
+        assert _without_pin(done["pending_execution"]) == {
             "skill_id": "bench-tool-b",
             "inputs": {"path": "/data/clips"},
             "task": _PLANNING_TASK,

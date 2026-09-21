@@ -41,8 +41,16 @@ should never be invoked as a side-effecting action).
 """
 
 ExecutionErrorCategory = Literal[
-    "no_binding", "binding_not_verified", "approval_denied", "runtime_error"
+    "no_binding",
+    "binding_not_verified",
+    "approval_denied",
+    "runtime_error",
+    "binding_mismatch",
 ]
+"""
+`binding_mismatch` (ADR-0003 §10, ADR-0009 §14): what would run is not what was
+approved — the execution pin is unusable, or the live binding/runtime differs
+from it. Terminal and fail-closed; the message lists the differing codes."""
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,12 @@ class SkillExecutionRequest:
     docs/APPROVALS.md requires for this action. The executor trusts this
     flag — it does not itself implement the approval workflow — so callers
     must not set it to True without having actually gone through that gate."""
+    expected_binding_pin: dict[str, Any] | None = None
+    """The execution pin (ADR-0003 §10.4, ADR-0009 §14) the approval was
+    granted for. `None` means NOT SUPPLIED — it cannot express "no binding at
+    capture". A supplied pin is compared against the executor's own single
+    registry read; an `approval_required` execution without one is refused
+    even when `approved` is True (rule E1, `SkillExecutor.execute()`)."""
 
 
 @dataclass(frozen=True)

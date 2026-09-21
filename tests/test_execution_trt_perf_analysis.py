@@ -42,6 +42,7 @@ from cv_agent.execution.runtimes.trt_perf_analysis import (
 )
 from cv_agent.skills.local import LocalSkillSource
 from cv_agent.skills.models import Skill
+from tests.test_workflow import _without_pin
 
 
 def _fixture_skill(location: str) -> Skill:
@@ -414,7 +415,11 @@ class TestRegistryAndApprovalWiring:
 
         result = executor.execute(
             _fixture_skill("/fixtures/trt-perf-analysis/SKILL.md"),
-            SkillExecutionRequest(inputs={"path": "/does/not/matter"}, approved=True),
+            SkillExecutionRequest(
+                inputs={"path": "/does/not/matter"},
+                approved=True,
+                expected_binding_pin=registry.pin(DEFAULT_SKILL_ID),
+            ),
         )
 
         assert result.status == "completed"
@@ -594,7 +599,7 @@ class TestRealPlanningAndRecovery:
         planning_result = result["planning_result"]
         assert planning_result is not None
         assert planning_result["status"] == "planned"
-        assert result["pending_execution"] == {
+        assert _without_pin(result["pending_execution"]) == {
             "skill_id": DEFAULT_SKILL_ID,
             "inputs": {"path": str(tmp_path)},
             "task": _TRT_PERF_WORKFLOW_REQUEST,
@@ -645,7 +650,7 @@ class TestRealPlanningAndRecovery:
         assert recovery is not None
         assert recovery["outcome"] == "supplied"
         assert recovery["terminal"] is False
-        assert resumed["pending_execution"] == {
+        assert _without_pin(resumed["pending_execution"]) == {
             "skill_id": DEFAULT_SKILL_ID,
             "inputs": {"data": [[str(layers_path)]]},
             "task": _TRT_PERF_WORKFLOW_REQUEST,

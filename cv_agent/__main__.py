@@ -269,6 +269,49 @@ def _parse_input_kv(pairs: list[str]) -> dict[str, str]:
     return inputs
 
 
+def _authorize_and_execute(
+    agent: Any,
+    skill: Any,
+    binding: Any,
+    *,
+    inputs: dict[str, Any],
+    task: str | None,
+    approve_flag: bool,
+    prompt: Callable[[str], str] = input,
+) -> Any:
+    """
+    The direct-CLI approval-then-execute sequence (ADR-0003 section 10.7, D6).
+
+    For an `approval_required` binding the execution pin is captured from the
+    registry BEFORE `_confirm_approval()` - that prompt blocks on a human
+    answer, so it is a real pause - and passed on the request, so both
+    `--approve` and the interactive "y" are bound to the binding/runtime that
+    was current when the human decided; a registry change during the prompt
+    fails closed in `SkillExecutor.execute()` as `binding_mismatch`. Returns
+    the `SkillExecutionResult`, or `None` if approval was not granted (nothing
+    ran). Other policies pass no pin, unchanged. May raise `ValueError` if the
+    binding cannot be pinned.
+    """
+    from cv_agent.execution.models import SkillExecutionRequest
+
+    pin = None
+    if binding.approval_policy == "approval_required":
+        pin = agent.execution_bindings.pin(skill.skill_id)
+
+    approved = _confirm_approval(binding, approve_flag=approve_flag, prompt=prompt)
+    if binding.approval_policy == "approval_required" and not approved:
+        return None
+
+    request = SkillExecutionRequest(
+        inputs=inputs,
+        task=task,
+        requested_by="cli",
+        approved=approved,
+        expected_binding_pin=pin,
+    )
+    return agent.execute(skill, request)
+
+
 def _confirm_approval(
     binding: Any, *, approve_flag: bool, prompt: Callable[[str], str] = input
 ) -> bool:
@@ -326,7 +369,6 @@ def _cmd_execute(
     """
     import json
 
-    from cv_agent.execution.models import SkillExecutionRequest
     from cv_agent.runtime.agent import CVAgent
 
     if skill_id != _SUPPORTED_EXECUTE_SKILL_ID:
@@ -380,18 +422,21 @@ def _cmd_execute(
     binding = agent.execution_bindings.get_binding(skill_id)
     assert binding is not None  # can_execute() above already confirmed this
 
-    approved = _confirm_approval(binding, approve_flag=approve)
-    if binding.approval_policy == "approval_required" and not approved:
+    try:
+        result = _authorize_and_execute(
+            agent, skill, binding, inputs=inputs, task=task, approve_flag=approve
+        )
+    except ValueError as exc:
+        # The binding cannot be pinned (non-JSON-native default, ADR-0003
+        # section 10.4): fail closed rather than run it unbound.
+        print(f"Binding '{binding.binding_id}' cannot be pinned: {exc}", file=sys.stderr)
+        return 2
+    if result is None:
         print(
             "Execution not approved — aborting. Nothing was run.",
             file=sys.stderr,
         )
         return 3
-
-    request = SkillExecutionRequest(
-        inputs=inputs, task=task, requested_by="cli", approved=approved
-    )
-    result = agent.execute(skill, request)
 
     print(f"Skill: {result.skill_id}")
     print(f"Status: {result.status}")

@@ -17,11 +17,9 @@ reasoning one — see ADR-0010 §2 for why `RequirementsAnalyzer`, `TaskResolver
 `SkillExecutor`, and `ExecutionRuntime` each explicitly do not own this.
 `plan_execution()` itself calls none of them: it only reads
 `RequirementsAnalysis.skill_links` (already computed) and
-`ExecutionBindingRegistry.get_binding()` (inspect-only, the same read-only
-call `cv_agent.graph.workflow`'s existing `approval_gate` node already makes
-against `SkillExecutor.get_binding()` — this function depends on the
-registry directly, not on `SkillExecutor`, so it cannot execute anything even
-by accident).
+`ExecutionBindingRegistry.get_binding()` (inspect-only — this function
+depends on the registry directly, not on `SkillExecutor`, so it cannot
+execute anything even by accident).
 """
 
 from __future__ import annotations
@@ -176,6 +174,13 @@ class PlanningResult:
     re-registered under the same skill_id with a different binding_id;
     carrying both, not skill_id alone, is what makes that detectable
     (ADR-0010 §13)."""
+    selected_description: str | None = None
+    """Companion to `selected_binding_id` (ADR-0010 section 17, issue #43): the
+    selected candidate's `ExecutionBinding.description` at plan time - the
+    snapshot `provide_execution_inputs` records as `expected_description` so a
+    description-only change during that pause fails closed, exactly as
+    `choose_candidate` already pins it (section 16.3). Set together with
+    `selected_binding_id`, same statuses."""
     selected_input_schema: tuple[InputField, ...] | None = None
     """A verbatim snapshot of the selected candidate's `ExecutionBinding.
     input_schema` at the moment of selection — set together with
@@ -341,6 +346,7 @@ def plan_execution(
             conflicting_inputs=tuple(sorted(conflicting_group_members)),
             selected_skill_id=selected.skill_id,
             selected_binding_id=binding.binding_id,
+            selected_description=binding.description,
             selected_input_schema=binding.input_schema,
             selected_input_field_groups=binding.input_field_groups,
         )
@@ -352,6 +358,7 @@ def plan_execution(
             missing_inputs=tuple(missing),
             selected_skill_id=selected.skill_id,
             selected_binding_id=binding.binding_id,
+            selected_description=binding.description,
             selected_input_schema=binding.input_schema,
             selected_input_field_groups=binding.input_field_groups,
         )
@@ -367,6 +374,7 @@ def plan_execution(
         plan=plan,
         selected_skill_id=selected.skill_id,
         selected_binding_id=binding.binding_id,
+        selected_description=binding.description,
         selected_input_schema=binding.input_schema,
         selected_input_field_groups=binding.input_field_groups,
     )

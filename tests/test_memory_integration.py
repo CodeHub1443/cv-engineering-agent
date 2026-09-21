@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_workflow import _without_pin
+
 _VAGUE_TASK = "I have a prison project. Escape-attempt detection."
 
 _WELL_DEFINED_TASK = (
@@ -319,7 +321,7 @@ class TestExecutionInputsChannel:
 
         assert "__interrupt__" not in result
         assert result["planning_result"]["status"] == "planned"
-        assert result["pending_execution"] == {
+        assert _without_pin(result["pending_execution"]) == {
             "skill_id": "trt-perf-analysis",
             "inputs": {"path": "/data/clips"},
             "task": _PLANNING_TASK,
