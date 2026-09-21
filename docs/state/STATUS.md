@@ -12,7 +12,7 @@
 `fix/claude/43-approval-integrity` implements **#43 approval integrity** (ADR-0003 §10,
 ADR-0009 §14, ADR-0010 §17, D-032): the approval pause pins the whole binding + a runtime
 generation, the gate decides from the pin only, a recorded rejection is terminal before any
-registry read, and the executor compares the pin at its single lookup. 85 new tests, 578
+registry read, and the executor compares the pin at its single lookup. 108 new tests, 601
 total green; **not merged — PR review pending.** Documented limits (§10.8): in-place
 mutation of a registered runtime, process restart, thread safety.
 

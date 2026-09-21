@@ -17,11 +17,9 @@ reasoning one — see ADR-0010 §2 for why `RequirementsAnalyzer`, `TaskResolver
 `SkillExecutor`, and `ExecutionRuntime` each explicitly do not own this.
 `plan_execution()` itself calls none of them: it only reads
 `RequirementsAnalysis.skill_links` (already computed) and
-`ExecutionBindingRegistry.get_binding()` (inspect-only, the same read-only
-call `cv_agent.graph.workflow`'s existing `approval_gate` node already makes
-against `SkillExecutor.get_binding()` — this function depends on the
-registry directly, not on `SkillExecutor`, so it cannot execute anything even
-by accident).
+`ExecutionBindingRegistry.get_binding()` (inspect-only — this function
+depends on the registry directly, not on `SkillExecutor`, so it cannot
+execute anything even by accident).
 """
 
 from __future__ import annotations

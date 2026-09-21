@@ -341,7 +341,8 @@ function from §9 — no change to selection/input-completeness logic.
 - **Precedence over a caller-supplied plan:** if `AgentState["pending_execution"]`
   is already set when this node runs — the pre-existing
   `start_workflow(pending_execution=...)` contract (ADR-0003 §3) — the node
-  makes **no** `plan_execution()` call at all and leaves it untouched. This
+  makes **no** `plan_execution()` call at all and leaves the plan itself untouched (since
+  issue #43 it only *adds* the `execution_pin` snapshot key when absent, ADR-0003 §10.6). This
   is not a bypass of the planner: an already-expressed, caller-supplied
   intent is not a decision `plan_execution()` was ever asked to make, so
   there is nothing for it to override. Verified by

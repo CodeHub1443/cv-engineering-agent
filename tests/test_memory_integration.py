@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_workflow import _without_pin
+
 _VAGUE_TASK = "I have a prison project. Escape-attempt detection."
 
 _WELL_DEFINED_TASK = (
@@ -32,14 +34,6 @@ _PLANNING_TASK = _WELL_DEFINED_TASK + (
 questions) plus benchmarking vocabulary, so it matches a fixture skill
 described as a benchmarking tool — same convention as
 tests/test_workflow.py's own _PLANNING_TASK."""
-
-
-def _without_pin(pending: dict) -> dict:
-    """pending_execution minus the execution_pin (ADR-0003 section 10) - these
-    tests assert the plan's own fields; the pin has dedicated tests in
-    tests/test_approval_integrity.py."""
-    return {k: v for k, v in pending.items() if k != "execution_pin"}
-
 
 
 def _agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, skill_root: Path | None = None):

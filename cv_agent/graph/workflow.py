@@ -1253,7 +1253,10 @@ def _make_execute_node(executor: SkillExecutor, skill_inventory: SkillInventory)
                 request = SkillExecutionRequest(
                     inputs=pending.get("inputs", {}),
                     task=pending.get("task"),
-                    approved=decision in ("approved", "not_required"),
+                    # True only for a recorded human approval. The guards above
+                    # guarantee that is the only way an approval_required pin
+                    # reaches here; a not_required (no-approval) pin needs no flag.
+                    approved=decision == "approved",
                     expected_binding_pin=pin,
                 )
                 result = executor.execute(skill, request)

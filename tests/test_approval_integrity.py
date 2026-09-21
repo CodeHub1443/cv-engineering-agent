@@ -211,28 +211,36 @@ class _ExplodingRegistry(ExecutionBindingRegistry):
 
 
 @pytest.mark.parametrize(
-    "policy,decision,status,category,recorded",
+    "policy,decision,status,category,recorded,evidence_binding",
     [
+        # A mismatch reports the LIVE binding it refused; a rejection reports
+        # the PINNED binding the human actually rejected.
         pytest.param(
             "approval_required", "approved", "not_executable", "binding_mismatch", "approved",
-            id="T1-A-replacement-approved",
+            f"{_SKILL}-REPLACEMENT", id="T1-A-replacement-approved",
         ),
         pytest.param(
             "approval_required", "rejected", "rejected", "approval_denied", "rejected",
-            id="T2-B-replacement-rejected",
+            f"{_SKILL}-v1", id="T2-B-replacement-rejected",
         ),
         pytest.param(
             "allowed", "rejected", "rejected", "approval_denied", "rejected",
-            id="T3-C-allowed-replacement-rejected",
+            f"{_SKILL}-v1", id="T3-C-allowed-replacement-rejected",
         ),
         pytest.param(
             "allowed", "approved", "not_executable", "binding_mismatch", "approved",
-            id="T4-D-allowed-replacement-approved",
+            f"{_SKILL}-REPLACEMENT", id="T4-D-allowed-replacement-approved",
         ),
     ],
 )
 def test_original_reproductions(
-    tmp_path: Path, policy: str, decision: str, status: str, category: str, recorded: str
+    tmp_path: Path,
+    policy: str,
+    decision: str,
+    status: str,
+    category: str,
+    recorded: str,
+    evidence_binding: str,
 ) -> None:
     graph, reg, original_rt, sid, _ = _paused(tmp_path)
     replacement = _replacement(reg, policy=policy)
@@ -240,6 +248,7 @@ def test_original_reproductions(
     result = _resume(graph, sid, decision)
 
     _assert_failure(result, status=status, category=category, decision=recorded)
+    assert result["execution_result"]["evidence"]["binding_id"] == evidence_binding
     assert replacement.calls == []
     assert original_rt.calls == []
 
@@ -443,6 +452,7 @@ def _assert_unusable_pin(tmp_path: Path, pending: dict[str, Any], code: str) -> 
 
     gate_update = gate(_state(pending))  # must not interrupt (would raise outside a graph)
     assert "approval_decision" not in gate_update  # stays None (D7), never not_required
+    assert gate_update["steps"][-1]["action"] == "execution_pin_unusable"
 
     update = execute(_state(pending))
     er = update["execution_result"]
@@ -798,7 +808,8 @@ def _cli_agent(tmp_path: Path, policy: str):
     (skill_dir / "SKILL.md").write_text(
         "---\nname: fixture-skill\ndescription: fixture skill.\n---\nbody\n", encoding="utf-8"
     )
-    agent = CVAgent(AgentConfig(skill_paths=(tmp_path,)))
+    # workspace_root keeps Project Memory (start_workflow) inside tmp_path.
+    agent = CVAgent(AgentConfig(skill_paths=(tmp_path,), workspace_root=tmp_path))
     rt = ExecFakeRuntime(runtime_id="fake-runtime", outcome=_OK)
     agent.execution_bindings.register_runtime(rt)
     agent.execution_bindings.register_binding(
@@ -1091,3 +1102,237 @@ def test_allowed_binding_workflow_still_completes_and_carries_a_pin(tmp_path: Pa
         result["pending_execution"]["execution_pin"]
     ) == canonical_json(reg.pin(_SKILL))
     assert len(rt.calls) == 1
+
+
+# ── review follow-ups (independent review of PR #46) ─────────────────────
+
+
+@pytest.mark.parametrize("policy", ["allowed", "approval_required"])
+@pytest.mark.parametrize(
+    "falsy", [{}, [], "", 0, False, ()], ids=["empty-dict", "empty-list", "empty-str", "zero", "false", "empty-tuple"]
+)
+def test_falsy_non_none_pin_at_the_executor_is_malformed_never_ignored(
+    policy: str, falsy: Any
+) -> None:
+    """`None` means NOT SUPPLIED; any other value - including a falsy one - is a
+    supplied pin and must be validated. A truthiness check here would treat `{}`
+    as absent for the comparison while E1 (`is None`) treats it as present, so an
+    approval-required call with approved=True would execute unbound."""
+    reg, rt = _exec_registry(policy)
+
+    result = _run(reg, approved=True, expected_binding_pin=falsy)
+
+    assert result.status == "not_executable"
+    assert result.error is not None and result.error.category == "binding_mismatch"
+    assert result.error.message == "integrity check failed: execution_pin_malformed"
+    assert rt.calls == []
+
+
+def _register_with_earlier_runtime(reg: ExecutionBindingRegistry) -> tuple[FakeRuntime, FakeRuntime]:
+    """Register a runtime, then replace it under the same runtime_id BEFORE any
+    binding is captured, so the registry's generation for it is already 2."""
+    first = FakeRuntime(runtime_id=f"fake-runtime-{_SKILL}", outcome=_OK)
+    reg.register_runtime(first)
+    current = _T._register(reg, _SKILL, approval_policy="approval_required")
+    assert reg.get_runtime_registration(current.runtime_id) == (current, 2)
+    return first, current
+
+
+def test_pin_captures_the_actual_generation_when_it_is_already_2(tmp_path: Path) -> None:
+    reg = ExecutionBindingRegistry()
+    first, current = _register_with_earlier_runtime(reg)
+    graph = _T()._graph_for(tmp_path, reg, skill_ids=(_SKILL,))
+
+    started = _start(graph, _PLANNING_TASK, "gen2-a")
+    assert started["pending_execution"]["execution_pin"]["runtime_generation"] == 2
+
+    result = _resume(graph, "gen2-a", "approved")  # unchanged since capture: no false mismatch
+    assert result["execution_result"]["status"] == "completed"
+    assert len(current.calls) == 1 and first.calls == []
+
+
+def test_replacement_after_a_generation_2_capture_still_mismatches(tmp_path: Path) -> None:
+    reg = ExecutionBindingRegistry()
+    first, current = _register_with_earlier_runtime(reg)
+    graph = _T()._graph_for(tmp_path, reg, skill_ids=(_SKILL,))
+    _start(graph, _PLANNING_TASK, "gen2-b")
+    replacement = FakeRuntime(runtime_id=current.runtime_id, outcome=_OK)
+    reg.register_runtime(replacement)  # generation 3
+
+    result = _resume(graph, "gen2-b", "approved")
+
+    _assert_failure(result, status="not_executable", category="binding_mismatch", decision="approved")
+    assert "runtime_registration" in _message(result)
+    assert current.calls == [] and replacement.calls == [] and first.calls == []
+
+
+def test_approval_payload_is_built_from_the_pin_and_carries_runtime_and_description(
+    tmp_path: Path,
+) -> None:
+    graph, reg, rt, sid, started = _paused(tmp_path, description="the description the human saw")
+
+    payload = started["__interrupt__"][0].value
+
+    assert payload == {
+        "type": "approval",
+        "skill_id": _SKILL,
+        "binding_id": f"{_SKILL}-v1",
+        "runtime_id": rt.runtime_id,
+        "description": "the description the human saw",
+        "task": _PLANNING_TASK,
+        "inputs": {},
+    }
+    assert payload["runtime_id"] == started["pending_execution"]["execution_pin"]["binding"]["runtime_id"]
+
+
+# Caller-forged execution_pin through the PRODUCTION entry point
+# (CVAgent.start_workflow), not the fixture graph: a caller can put an
+# `execution_pin` key in pending_execution, so the forged value must fail closed.
+
+
+def _pending_plan(**extra: Any) -> dict[str, Any]:
+    return {"skill_id": "fixture-skill", "inputs": {}, "task": "run it", **extra}
+
+
+def test_forged_allowed_pin_over_an_approval_required_binding_never_runs(tmp_path: Path) -> None:
+    agent, _skill, rt = _cli_agent(tmp_path, "approval_required")
+    forged = agent.execution_bindings.pin("fixture-skill")
+    assert forged is not None
+    forged["binding"]["approval_policy"] = "allowed"  # claims no approval is needed
+
+    result = agent.start_workflow(
+        _PLANNING_TASK, session_id="forge-1", pending_execution=_pending_plan(execution_pin=forged)
+    )
+
+    assert "__interrupt__" not in result  # the human was skipped ...
+    assert result["approval_decision"] == "not_required"
+    assert result["execution_result"]["status"] == "not_executable"  # ... but nothing ran
+    assert result["execution_result"]["error"]["message"] == (
+        "integrity check failed: binding.approval_policy"
+    )
+    assert rt.calls == []
+
+
+def test_forged_approval_required_pin_over_an_allowed_binding_never_runs(tmp_path: Path) -> None:
+    agent, _skill, rt = _cli_agent(tmp_path, "allowed")
+    forged = agent.execution_bindings.pin("fixture-skill")
+    assert forged is not None
+    forged["binding"]["approval_policy"] = "approval_required"
+
+    paused = agent.start_workflow(
+        _PLANNING_TASK, session_id="forge-2", pending_execution=_pending_plan(execution_pin=forged)
+    )
+    assert paused["__interrupt__"][0].value["type"] == "approval"  # the pin drives the gate
+    result = agent.resume_workflow("forge-2", "approved")
+
+    assert result["execution_result"]["error"]["category"] == "binding_mismatch"
+    assert "binding.approval_policy" in result["execution_result"]["error"]["message"]
+    assert rt.calls == []
+
+
+def test_a_caller_pin_identical_to_the_live_one_is_honored(tmp_path: Path) -> None:
+    agent, _skill, rt = _cli_agent(tmp_path, "approval_required")
+    exact = agent.execution_bindings.pin("fixture-skill")
+
+    paused = agent.start_workflow(
+        _PLANNING_TASK, session_id="forge-3", pending_execution=_pending_plan(execution_pin=exact)
+    )
+    assert paused["__interrupt__"][0].value["type"] == "approval"  # a human is still asked
+    assert rt.calls == []
+
+    result = agent.resume_workflow("forge-3", "approved")
+    assert result["execution_result"]["status"] == "completed"
+    assert len(rt.calls) == 1
+
+
+def test_forged_explicit_none_and_malformed_pins_never_run(tmp_path: Path) -> None:
+    agent, _skill, rt = _cli_agent(tmp_path, "allowed")
+
+    none_run = agent.start_workflow(
+        _PLANNING_TASK, session_id="forge-4", pending_execution=_pending_plan(execution_pin=None)
+    )
+    assert none_run["approval_decision"] == "not_required"
+    assert none_run["execution_result"]["error"]["category"] == "no_binding"
+
+    bad_run = agent.start_workflow(
+        _PLANNING_TASK,
+        session_id="forge-5",
+        pending_execution=_pending_plan(execution_pin={"binding": {}, "runtime_generation": None}),
+    )
+    assert "__interrupt__" not in bad_run
+    assert bad_run["approval_decision"] is None  # D7: never not_required for an unusable pin
+    assert bad_run["execution_result"]["error"]["message"] == (
+        "integrity check failed: execution_pin_malformed"
+    )
+    assert rt.calls == []
+
+
+def test_forged_pin_naming_a_different_skill_is_malformed(tmp_path: Path) -> None:
+    agent, _skill, rt = _cli_agent(tmp_path, "allowed")
+    other = agent.execution_bindings.pin("fixture-skill")
+    assert other is not None
+    other["binding"]["skill_id"] = "someone-elses-skill"
+
+    result = agent.start_workflow(
+        _PLANNING_TASK, session_id="forge-6", pending_execution=_pending_plan(execution_pin=other)
+    )
+
+    assert result["execution_result"]["error"]["message"] == (
+        "integrity check failed: execution_pin_malformed"
+    )
+    assert rt.calls == []
+
+
+# --approve: there is no prompt, so the only reachable mutation window is
+# between the pin capture and the executor call. Prove the pin still binds it.
+
+
+@pytest.mark.parametrize("what", ["description", "runtime_object"])
+def test_approve_flag_execution_is_bound_to_the_pin_captured_before_approval(
+    tmp_path: Path, what: str
+) -> None:
+    agent, skill, rt = _cli_agent(tmp_path, "approval_required")
+    binding = agent.execution_bindings.get_binding("fixture-skill")
+    real_execute = agent.execute
+    replacement = ExecFakeRuntime(runtime_id="fake-runtime", outcome=_OK)
+
+    def mutate_then_execute(s: Any, r: SkillExecutionRequest) -> Any:
+        if what == "description":
+            agent.execution_bindings.register_binding(
+                dataclasses.replace(_current(agent.execution_bindings, "fixture-skill"), description="changed")
+            )
+        else:
+            agent.execution_bindings.register_runtime(replacement)
+        return real_execute(s, r)
+
+    agent.execute = mutate_then_execute  # type: ignore[method-assign]
+
+    def fail_if_prompted(_m: str) -> str:
+        raise AssertionError("--approve must not prompt")
+
+    result = _authorize_and_execute(
+        agent, skill, binding, inputs={}, task=None, approve_flag=True, prompt=fail_if_prompted
+    )
+
+    assert result.status == "not_executable" and result.error.category == "binding_mismatch"
+    assert rt.calls == [] and replacement.calls == []
+
+
+def test_an_unpinnable_approval_required_binding_raises_before_any_prompt(tmp_path: Path) -> None:
+    agent, skill, rt = _cli_agent(tmp_path, "approval_required")
+    agent.execution_bindings.register_binding(
+        ExecutionBinding(
+            "fixture-skill", "fx-nan", "fake-runtime", "approval_required", True,
+            input_schema=(InputField("x", False, "", default=float("nan")),),
+        )
+    )
+    binding = agent.execution_bindings.get_binding("fixture-skill")
+
+    def fail_if_prompted(_m: str) -> str:
+        raise AssertionError("must not prompt for a binding that cannot be pinned")
+
+    with pytest.raises(ValueError):
+        _authorize_and_execute(
+            agent, skill, binding, inputs={}, task=None, approve_flag=False, prompt=fail_if_prompted
+        )
+    assert rt.calls == []

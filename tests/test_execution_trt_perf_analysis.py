@@ -42,14 +42,7 @@ from cv_agent.execution.runtimes.trt_perf_analysis import (
 )
 from cv_agent.skills.local import LocalSkillSource
 from cv_agent.skills.models import Skill
-
-
-def _without_pin(pending: dict) -> dict:
-    """pending_execution minus the execution_pin (ADR-0003 section 10) - these
-    tests assert the plan's own fields; the pin has dedicated tests in
-    tests/test_approval_integrity.py."""
-    return {k: v for k, v in pending.items() if k != "execution_pin"}
-
+from tests.test_workflow import _without_pin
 
 
 def _fixture_skill(location: str) -> Skill:

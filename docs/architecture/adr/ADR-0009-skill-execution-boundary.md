@@ -587,11 +587,12 @@ graph (ADR-0003 §10.3) and is resolved there without calling the executor.
    compared.
 
 `expected_binding_pin=None` keeps today's behavior exactly for `allowed` and
-`rejected`-policy bindings. `SkillExecutor.get_binding()` stays inspect-only and is no
-longer read by the approval gate.
+`rejected`-policy bindings. `SkillExecutor.get_binding()` stays as inspect-only public API
+(retained for compatibility) and is no longer read by the approval gate.
 
-**Direct CLI (§10).** §10's "no pause between approval and execution" is inaccurate:
-`_confirm_approval()` blocks on `input()`. For an `approval_required` binding,
+**Direct CLI (§10).** Issue #43 described this path as having "no pause between approval
+and execution"; that is inaccurate (§10 itself makes no such claim): `_confirm_approval()`
+blocks on `input()`. For an `approval_required` binding,
 `python -m cv_agent execute` must pass `registry.pin(skill_id)` captured from the same
 binding it displays and *before* `_confirm_approval()`. `CVAgent.execute()` is a
 pass-through and needs no change.

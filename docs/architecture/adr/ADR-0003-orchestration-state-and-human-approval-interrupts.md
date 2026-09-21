@@ -336,8 +336,10 @@ Facts established by reading the code, each relied on below:
    `tests/test_execution_trt_perf_analysis.py:417`).
 5. **The direct CLI path does have a pause.** `_cmd_execute` reads the binding, then
    `_confirm_approval()` blocks on `input()`, then `agent.execute()` re-reads the
-   registry. ADR-0009 §10 / issue #43 call this path pause-free; that is inaccurate. It is
-   not exploitable today (single-threaded, fresh registry) but is not a sound exemption.
+   registry. Issue #43's out-of-scope note describes this path as having "no pause between
+   approval and execution" (ADR-0009 §10 itself only describes the command and its approval
+   handling and makes no such claim); that description is inaccurate. It is not exploitable
+   today (single-threaded, fresh registry) but is not a sound exemption.
 6. **The registry has no removal API** (`register_binding`, `register_runtime`, getters,
    listers only). A binding or runtime can be added or *replaced*; it cannot be
    deregistered except by mutating the private dicts.
@@ -552,7 +554,12 @@ compared, by construction rather than by two lookups agreeing.
    mutation *between* graph steps and pauses, not concurrent mutation inside one node.
 4. **Private access.** Only the public `register_runtime()` maintains the generation;
    writing to `_runtimes` directly bypasses it.
-5. **Rejected alternative.** `id(obj)` as the token — ids are reusable after garbage
+5. **On-disk skill files are not pinned.** The pin covers registry objects (the binding and
+   the registered runtime instance), not the files a runtime executes: e.g.
+   `trt_perf_analysis` runs a script found next to `skill.location`, and the skill inventory
+   is scanned once at `CVAgent` construction. Replacing those files during a pause is outside
+   this contract (a filesystem-integrity concern, not a registry one).
+6. **Rejected alternative.** `id(obj)` as the token — ids are reusable after garbage
    collection, giving a false match; a monotonic counter cannot.
 
 ### 10.9 Rejection invariant R, mapped to transitions
@@ -632,7 +639,7 @@ test. Test names are proposals; IDs are for review cross-reference.
 | **T15** | Gate replay safety: registry stubbed to raise on any read after planning | gate still interrupts and resumes; decision recorded correctly |
 | **T16** | Identical re-registration during the pause; unrelated skill's binding replaced | completes normally, no false mismatch |
 | **T17** | Direct callers (executor unit tests): approval-required + `approved=True` + not supplied → `approval_denied`, runtime not invoked; `allowed` + not supplied unchanged; supplied-malformed → `binding_mismatch` for every policy; supplied-mismatching → `binding_mismatch`, `runtime.invoke` never called; supplied-matching completes; the instance invoked is the instance whose generation was compared |
-| **T18** | Direct CLI: `_cmd_execute` on an `approval_required` binding passes a pin captured before `_confirm_approval()` (prompt injected, registry mutated inside the prompt ⇒ `binding_mismatch`, nothing run); `--approve` path likewise; `allowed` binding path unchanged |
+| **T18** | Direct CLI (`_authorize_and_execute`, the sequence `_cmd_execute` calls): (a) `approval_required` — the pin is captured before `_confirm_approval()`, and a registry change made *inside the interactive prompt* ⇒ `binding_mismatch`, nothing run; (b) `--approve` — there is no prompt, so the tests assert the pin is captured and passed, and that a description change or runtime replacement injected *between pin capture and the executor call* ⇒ `binding_mismatch`, nothing run; (c) a declined prompt runs nothing; an `allowed` binding passes no pin and never prompts; (d) an unpinnable `approval_required` binding raises `ValueError` before any prompt. The `_cmd_execute` wrapper itself (real skill discovery, exit codes) is not covered by these tests |
 | **T19** | Canonical snapshot: `pin()` shape exactly 10.4; order-significance; tuple/list and dict-key-order independence; `1` vs `1.0` vs `True` differ; non-JSON-native default fails at the pin boundary while construction is unaffected; checkpoint round-trip produces no false mismatch |
 | **T20** | Failure-path invariants (10.10) for every failing row: terminal `status="done"`, `planning_result["plan"] is None`, `pending_execution` retained, `approval_decision` untouched, no second `plan_execution`/`approval_gate` visit in `steps` |
 | **T21** | Description drift through input recovery (ADR-0010 §17): (a) during a `provide_execution_inputs` pause; (b) during the second pause of a choose → provide-inputs chain; (c) recovery record lacking `expected_description` | terminal `binding_mismatch`/`description_changed`; `pending_execution is None`; plan cleared; replacement never invoked; unchanged description and identical re-registration pass |
@@ -677,6 +684,16 @@ Implemented as specified, with these deliberate differences (none changes a row 
    (`_assert_failure` in `tests/test_approval_integrity.py`) rather than a separate test.
 
 Files: `cv_agent/execution/{models,binding,executor}.py`, `cv_agent/graph/{planning,state,workflow}.py`,
-`cv_agent/__main__.py`; tests `tests/test_approval_integrity.py` (85 tests) plus the edits noted
+`cv_agent/__main__.py`; tests `tests/test_approval_integrity.py` (108 tests) plus the edits noted
 under A2. Known limits are exactly those of 10.8 (in-place mutation, process restart, threading,
 private-dict access); nothing beyond them was found.
+7. **Review follow-ups (independent review of PR #46, 2026-09-21).** Added regression tests for
+   falsy non-`None` pins at the executor, capture at runtime generation 2 and replacement after
+   it, the approval payload (`runtime_id`, `description`), caller-forged `execution_pin` through
+   `CVAgent.start_workflow`, and `--approve` mutation between pin capture and execution.
+   `_node_execute` now passes `approved = (decision == "approved")`, exactly as 10.6 specifies
+   (the first cut passed `decision in ("approved", "not_required")`; nothing but the executor
+   reads `request.approved`, and it only matters for `approval_required`). `SkillExecutor.get_binding()`
+   is **kept** as public API (removal would break external callers) with a corrected docstring: the
+   gate no longer uses it. A caller may put an `execution_pin` key in `pending_execution`; it is
+   used as given and fails closed unless it matches the live binding (covered by tests).

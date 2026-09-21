@@ -51,9 +51,11 @@ class SkillExecutor:
         self._registry = registry
 
     def get_binding(self, skill_id: str) -> ExecutionBinding | None:
-        """Inspect-only passthrough to the registry — lets a caller (e.g. a
-        LangGraph approval-gate node) read a binding's approval_policy
-        without reaching into a private attribute."""
+        """Inspect-only passthrough to the registry — lets a caller read a
+        binding's approval_policy without reaching into a private attribute.
+        The approval gate no longer uses it (ADR-0003 section 10.2: the gate
+        decides from the checkpointed execution pin, never a live read); it is
+        kept as public API for other inspect-only callers."""
         return self._registry.get_binding(skill_id)
 
     def can_execute(self, skill_id: str) -> bool:

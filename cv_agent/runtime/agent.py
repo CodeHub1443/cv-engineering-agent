@@ -265,8 +265,12 @@ class CVAgent:
         execute, gated by its binding's approval policy. None means this
         run only does requirements analysis/clarification. If given, the
         `plan_execution` node makes no planning call at all and this value
-        is used untouched (ADR-0010 §10) — `execution_inputs` below is then
-        unused for this run, not merged with it.
+        is not re-planned or altered (ADR-0010 §10) — `execution_inputs` below is
+        then unused for this run, not merged with it. The node does augment it
+        with an `execution_pin` snapshot of the live binding when the key is
+        absent (ADR-0003 §10.6); a caller-supplied `execution_pin` is used as
+        given and fails closed at the gate/executor unless it matches the live
+        binding.
 
         execution_inputs (ADR-0010 §12), if given, is a flat dict keyed by
         `InputField.name` (ADR-0009 §11, e.g. "path") — values a caller

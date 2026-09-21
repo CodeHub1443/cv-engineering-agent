@@ -313,6 +313,9 @@ class AgentState(TypedDict, total=False):
     only."""
 
     execution_result: Optional[dict[str, Any]]
-    """`dataclasses.asdict()` of the `SkillExecutionResult` produced by
-    `cv_agent.execution.SkillExecutor.execute()`, if the execute node ran.
-    Same serialization rationale as `requirements_analysis`."""
+    """`dataclasses.asdict()` of a `SkillExecutionResult`, if the execute node ran.
+    Usually produced by `cv_agent.execution.SkillExecutor.execute()`; since
+    ADR-0003 section 10 the execute node itself constructs the result (without
+    calling the executor) for a recorded human rejection, a missing/malformed/
+    explicit-`None` pin, an inconsistent decision, or a skill not found by
+    discovery. Same serialization rationale as `requirements_analysis`."""
