@@ -205,6 +205,10 @@ validates the human's bare-skill_id answer against the exact checkpointed offere
 persists it (`AgentState.candidate_choice`/`candidate_selection`) and resumes planning
 via `plan_execution(..., selected_skill_id=...)`, whose retry independently re-confirms
 the choice against the current registry. One shot: an invalid/cancelled/no-longer-valid
-choice is terminal and never silently defaults. No CLI `--skill` override was built
+choice is terminal and never silently defaults. **Audit-corrected 2026-09-20 (D-030):**
+the choice is pinned to the exact binding *shown* (`binding_id` + description snapshotted
+at ask time), not merely a `skill_id`; a terminal recovery failure clears
+`planning_result.plan`; a malformed offer fails closed; and empty `{}`/`None` resumes are
+documented as LangGraph behavior, not classified answers. No CLI `--skill` override was built
 (not chosen). Caller-supplied `pending_execution` and `python -m cv_agent execute` are
 untouched.

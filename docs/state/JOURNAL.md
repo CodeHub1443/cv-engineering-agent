@@ -1158,3 +1158,65 @@ status.
                identical to `main`'s. Branch
                `feature/claude/q18-candidate-disambiguation`, issue #41,
                PR pending — not merged.
+
+
+## 2026-09-20 — Q18 audit fixes: pin the shown binding, clear stale plans, fail closed (PR #42)
+**Did:**       An independent audit of PR #42 (probing empirically, not
+               re-reading my tests) returned CHANGES REQUESTED with four
+               findings; all fixed on the same branch before merge. D1: the
+               choice was pinned by `skill_id` only, so a same-`skill_id`
+               re-registration (new `binding_id`, runtime, description)
+               during the pause ran the *replacement* under the human's
+               earlier choice — now `candidate_binding_ids` is snapshotted
+               at plan time, the choose node records
+               `expected_binding_id`/`expected_description` from the
+               checkpointed offer, and the retry requires skill, binding_id
+               and current description to all match (terminal
+               `candidate_mismatch` + `mismatch_detail` otherwise). D2:
+               docs claimed `None`/`{}` are "cancelled"; they are not
+               delivered by LangGraph at all — corrected everywhere and
+               pinned by tests, not worked around. D3: `planning_result.plan`
+               is cleared on any terminal recovery failure (both kinds).
+               D4: the choose node fails closed on a malformed offer instead
+               of `zip()`-truncating it.
+**Why:**       The audit was right about D1, and it was a real integrity gap:
+               my own retry check (`selected_skill_id == chosen`) answered
+               "is it still the same *name*?" when the property that matters
+               is "is it still the thing the human was *shown*?".
+               `provide_execution_inputs` already pinned binding identity for
+               exactly this reason; I had reproduced that discipline in the
+               interrupt payload but not in the retry.
+**Learned:**   (1) Identity checks need to be phrased against what the human
+               saw, not against a lookup key — a name is only an identity if
+               nothing behind it can change. (2) Every code fix was
+               checked by mutation, not just by a passing test: dropping the binding comparison, dropping only the
+               description comparison, dropping the plan-clearing line and
+               dropping the malformed-offer guard each fail their tests. The
+               description-only mutant matters: without a separate test the
+               `binding_id` check alone would have masked a broken
+               description check. (3) D3 forced a scope question I would not
+               have asked myself: clearing the plan only for the new
+               interrupt would leave `binding_mismatch` (ADR-0010 §13)
+               carrying the same stale plan for a binding the human was never
+               asked about — an invariant that depends on *which* recovery
+               kind failed is one only half the readers can rely on, so it
+               applies to both, and no existing test depended on the old
+               behavior. (4) The `resume={}`/`resume=None` finding is a
+               LangGraph characteristic, and my own docstring had it wrong
+               ("`None`... is 'cancelled'") — a claim about behavior I had
+               probed for `""` and extrapolated to `None`. (5) The suite
+               passed all 23 new tests on the first run, which is exactly when
+               to distrust them; the mutation pass is what showed they bite.
+               (6) The repo has no CI, so "green" here means only what I ran
+               locally; the PR says so.
+**Left open:** Q3, Q19 untouched. `ExecutionBinding` description drift is now
+               a mismatch, which is deliberately strict (a reworded
+               description after the human read it terminates the run) — a
+               looser policy would be a product decision, not a bug fix.
+               `expected_candidate_skill_ids` is still recorded but only
+               used at classify time; the retry pins by chosen identity. 25
+               new tests; full suite 468 → 493, zero regressions;
+               `ruff`/`mypy` on touched files identical to `main` (checked
+               against a fresh worktree). Branch
+               `feature/claude/q18-candidate-disambiguation`, PR #42 — not
+               merged.

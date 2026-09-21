@@ -259,12 +259,24 @@ def _classify_candidate_choice(
     own split between what a per-round check can know and what only a
     fresh, authoritative retry can confirm).
 
-    A resume value that isn't a non-blank string at all (`None`, `""`, a
-    dict, anything else) is "cancelled" — never coerced, never guessed.
-    A non-blank string that doesn't name one of `candidate_skill_ids`
-    exactly is "invalid" — this function never picks the "closest" match
-    or falls back to any candidate; `[P§35]` forbids silently choosing one
-    for the human.
+    A resume value that isn't a non-blank string at all (`""`, `"   "`, `[]`,
+    `False`, `0`, a non-empty dict, anything else that reaches this
+    function) is "cancelled" — never coerced, never guessed. A non-blank
+    string that doesn't name one of `candidate_skill_ids` exactly is
+    "invalid" — this function never picks the "closest" match or falls back
+    to any candidate; `[P§35]` forbids silently choosing one for the human.
+
+    What does NOT reach this function as an ordinary "cancelled" answer:
+    `None` and a literal empty dict `{}`. That is the installed LangGraph's
+    own `Command(resume=...)` behavior, not something this node does — the
+    same characteristic `CVAgent.resume_workflow()`'s docstring already
+    documents for `clarify`/`provide_execution_inputs`, confirmed here for
+    this interrupt by test: `resume={}` is not delivered and the graph
+    silently re-pauses at this same interrupt (nothing finalized, nothing
+    executed, a later valid answer still works), and `resume=None` raises
+    inside LangGraph itself (`UnboundLocalError`). This PR deliberately does
+    not work around either; a caller declining must pass a non-`None`,
+    non-`{}` falsy value such as `""` (which is what the CLI does).
     """
     if not isinstance(resume_value, str) or not resume_value.strip():
         return "cancelled", None
@@ -286,6 +298,42 @@ def _make_choose_candidate_node():
         planning = state.get("planning_result") or {}
         candidate_ids = list(planning.get("candidate_skill_ids") or ())
         candidate_descriptions = list(planning.get("candidate_descriptions") or ())
+        candidate_binding_ids = list(planning.get("candidate_binding_ids") or ())
+
+        # Fail closed on a malformed offer (audit finding D4): the three
+        # parallel lists must be non-empty and the same length, or the
+        # human would be shown a truncated list (zip() silently drops the
+        # tail) while validation still accepted the hidden IDs. Checked
+        # BEFORE interrupt() and from checkpointed state only, so it is
+        # replay-safe and never prompts with a partial offer. plan_execution()
+        # always builds equal-length lists, so this is unreachable today —
+        # it exists so a future producer/checkpoint that breaks the
+        # invariant is a loud terminal diagnostic, never a silent one.
+        if not candidate_ids or not (
+            len(candidate_ids) == len(candidate_descriptions) == len(candidate_binding_ids)
+        ):
+            return {
+                "candidate_selection": {
+                    "attempted": True,
+                    "outcome": "malformed_offer",
+                    "terminal": True,
+                    "expected_candidate_skill_ids": candidate_ids,
+                    "expected_binding_id": None,
+                    "expected_description": None,
+                    "chosen_skill_id": None,
+                    "mismatch_detail": (
+                        f"offer lists disagree: {len(candidate_ids)} skill_ids, "
+                        f"{len(candidate_descriptions)} descriptions, "
+                        f"{len(candidate_binding_ids)} binding_ids"
+                    ),
+                },
+                "pending_human_input": None,
+                "status": "done",
+                "steps": _append_step(
+                    state, "choose_candidate", "candidate_offer_malformed_terminal"
+                ),
+            }
+
         candidates = [
             {"skill_id": skill_id, "description": description}
             for skill_id, description in zip(candidate_ids, candidate_descriptions)
@@ -297,6 +345,18 @@ def _make_choose_candidate_node():
         }
         resume_value = interrupt(payload)
         outcome, chosen = _classify_candidate_choice(resume_value, candidate_ids)
+
+        # The chosen candidate's identity AS SHOWN — binding_id and
+        # description — read from the same checkpointed snapshot the human
+        # was offered, never a live registry lookup (replay-safe, same rule
+        # as above). The retry in _node_plan_execution pins the choice to
+        # exactly this (audit finding D1).
+        expected_binding_id: Optional[str] = None
+        expected_description: Optional[str] = None
+        if chosen is not None:
+            chosen_index = candidate_ids.index(chosen)
+            expected_binding_id = candidate_binding_ids[chosen_index]
+            expected_description = candidate_descriptions[chosen_index]
 
         # terminal is deliberately left unset here — only
         # _node_plan_execution's retry, with a fresh plan_execution() call
@@ -310,7 +370,10 @@ def _make_choose_candidate_node():
             "outcome": outcome,
             "terminal": None,
             "expected_candidate_skill_ids": candidate_ids,
+            "expected_binding_id": expected_binding_id,
+            "expected_description": expected_description,
             "chosen_skill_id": chosen,
+            "mismatch_detail": None,
         }
 
         update: dict[str, Any] = {
@@ -675,8 +738,36 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
             raw_candidate_outcome: Any = candidate_recovery.get("outcome")
             candidate_final_outcome: str
             candidate_terminal: bool
+            candidate_detail: Optional[str] = None
+            # The description is compared against the CURRENT registry
+            # binding here (this is the authoritative retry, not pre-
+            # interrupt code, so a live lookup is correct and required —
+            # the replay-safety rule only forbids live reads before
+            # interrupt()). binding_id comes from the fresh PlanningResult.
+            live_binding = execution_registry.get_binding(
+                str(candidate_recovery.get("chosen_skill_id"))
+            )
             if raw_candidate_outcome != "selected":
                 candidate_final_outcome, candidate_terminal = raw_candidate_outcome, True
+            elif result.selected_skill_id == candidate_recovery.get(
+                "chosen_skill_id"
+            ) and (
+                result.selected_binding_id != candidate_recovery.get("expected_binding_id")
+                or live_binding is None
+                or live_binding.description != candidate_recovery.get("expected_description")
+            ):
+                # Same skill_id, but NOT the binding the human was shown
+                # (audit finding D1): re-registered under a new binding_id
+                # (different runtime/behavior), or the same binding_id with
+                # a different description, during the pause. Planning or
+                # executing whatever is registered now under the human's
+                # earlier choice would run something they never saw.
+                candidate_final_outcome, candidate_terminal = "candidate_mismatch", True
+                candidate_detail = (
+                    "binding_changed"
+                    if result.selected_binding_id != candidate_recovery.get("expected_binding_id")
+                    else "description_changed"
+                )
             elif result.selected_skill_id != candidate_recovery.get("chosen_skill_id"):
                 # The fresh, authoritative call did not resolve to the skill
                 # the human actually chose. Covers: still "ambiguous_
@@ -691,6 +782,7 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
                 # selected_skill_id is None for no_executable_candidate/
                 # ambiguous_candidates, so those are covered too.
                 candidate_final_outcome, candidate_terminal = "candidate_mismatch", True
+                candidate_detail = "skill_not_resolved"
             else:
                 candidate_final_outcome, candidate_terminal = "selected", False
 
@@ -698,6 +790,7 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
                 **candidate_recovery,
                 "outcome": candidate_final_outcome,
                 "terminal": candidate_terminal,
+                "mismatch_detail": candidate_detail,
             }
             if candidate_terminal:
                 plan_allowed = False
@@ -832,9 +925,30 @@ def _make_plan_execution_node(execution_registry: ExecutionBindingRegistry):
             log_extra["recovery_outcome"] = updated_recovery["outcome"]
             log_extra["recovery_terminal"] = updated_recovery["terminal"]
 
+        planning_dict = dataclasses.asdict(result)
+        recovery_terminal_now = bool(
+            (updated_candidate_recovery and updated_candidate_recovery["terminal"])
+            or (updated_recovery and updated_recovery["terminal"])
+        )
+        if recovery_terminal_now:
+            # Audit finding D3: a recovery round that finalized as a terminal
+            # failure means this run has NO executable intent, yet the fresh
+            # plan_execution() call above may still have produced a "planned"
+            # PlanningResult — e.g. for the OTHER candidate after the chosen
+            # skill vanished (candidate_mismatch), or for a swapped binding
+            # (binding_mismatch, ADR-0010 §13). Leaving that plan in
+            # `planning_result` would let a downstream reader mistake a plan
+            # for a skill/binding the human never chose or was never asked
+            # about for executable intent. So `plan` is cleared; `status`,
+            # the candidate/selected_* fields, and everything else stay as
+            # diagnostics of what the fresh call actually resolved (they
+            # describe planning's result, not intent — the recovery record
+            # and `pending_execution is None` are the authority on that).
+            planning_dict["plan"] = None
+
         update: dict[str, Any] = {
             "pending_execution": pending,
-            "planning_result": dataclasses.asdict(result),
+            "planning_result": planning_dict,
             "steps": _append_step(state, "plan_execution", "planning_attempted", **log_extra),
         }
         if updated_candidate_recovery is not None:

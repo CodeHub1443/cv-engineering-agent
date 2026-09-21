@@ -363,19 +363,24 @@ class CVAgent:
 
         Caveat, confirmed empirically while building the `provide_
         execution_inputs` interrupt and re-confirmed for `clarify` while
-        fixing Q21 (ADR-0003 §9): `resume_value=None` and a literal empty
-        dict `resume_value={}` are **not reliably delivered** by the
-        installed LangGraph's `Command(resume=...)` for either interrupt
-        kind — the graph silently re-pauses at the same interrupt instead
-        of resuming (confirmed reliably non-delivered across repeated
-        trials for `clarify`, not merely occasional). To decline/cancel a
-        `clarify` or `provide_execution_inputs` prompt, pass a non-`dict`
-        falsy value (e.g. `""`), which *is* delivered correctly — for
-        `clarify` this produces an empty `clarification_answers`, for
-        `provide_execution_inputs` it is classified "cancelled". This is a
+        fixing Q21 (ADR-0003 §9), and again for `choose_candidate` (ADR-0010
+        §16.6): a literal empty dict `resume_value={}` is **not reliably
+        delivered** by the installed LangGraph's `Command(resume=...)` for
+        any of these interrupt kinds — the graph silently re-pauses at the
+        same interrupt instead of resuming (confirmed reliably non-
+        delivered across repeated trials, not merely occasional) — and
+        `resume_value=None` is likewise not delivered (for `choose_candidate`
+        it raises an `UnboundLocalError` from inside LangGraph itself,
+        leaving the thread cleanly paused and still resumable). To decline/
+        cancel a `clarify`, `provide_execution_inputs` or `choose_candidate`
+        prompt, pass a non-`None`, non-`{}` falsy value (e.g. `""`), which
+        *is* delivered correctly — for `clarify` this produces an empty
+        `clarification_answers`, for `provide_execution_inputs` and
+        `choose_candidate` it is classified "cancelled". This is a
         LangGraph API characteristic, not specific to any one interrupt
-        kind — `cv_agent`'s own CLI (`python -m cv_agent workflow`) already
-        applies this for both.
+        kind, and is deliberately not worked around here — `cv_agent`'s own
+        CLI (`python -m cv_agent workflow`) already applies the `""`
+        convention for all three.
 
         Updates the same durable `SessionRecord` `start_workflow()` created
         (ADR-0004) — this call does not create a new one. See

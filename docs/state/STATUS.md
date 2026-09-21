@@ -8,17 +8,15 @@
 
 ## Where we are
 
-`main` is at `752bc1c` (PR #40 squash-merged 2026-09-18 — Q20 true-XOR field
-groups, #39 closed; 437 tests green on merged `main`). This branch (issue
-#41, PR pending) implements Q18 by owner decision (a clarification-style
-interrupt, not a `--skill` override): a fourth interrupt kind,
-`choose_candidate` (ADR-0010 §16). Ambiguous executable candidates now pause
-the graph, present every candidate's skill_id + description, validate the
-human's bare-skill_id answer against the exact offered set, persist it, and
-resume planning via `plan_execution(..., selected_skill_id=...)`, whose retry
-re-confirms the choice against the current registry (identity check, so a
-mid-pause deregistration can never silently plan the *other* skill). One
-shot; invalid/cancelled/mismatched is terminal, never a default.
+`main` is at `752bc1c` (PR #40 squash-merged 2026-09-18; #39 closed). This
+branch (issue #41, PR #42, unmerged) implements Q18 by owner decision (a
+clarification-style interrupt, not a `--skill` override): a fourth interrupt,
+`choose_candidate` (ADR-0010 §16). Ambiguous executable candidates pause the
+graph, present each candidate's skill_id + description, validate the answer
+against the exact offered set, persist it, and resume planning; one shot,
+never a default. An independent audit (D-030) tightened it before merge: the
+choice is pinned to the exact binding *shown* (not just a skill_id), no plan
+survives a terminal recovery failure, a malformed offer fails closed.
 
 **Implemented:** skill discovery/resolution (ADR-0007), requirements
 analysis + skill_links (ADR-0008), skill execution boundary (ADR-0009, one
@@ -37,12 +35,12 @@ via the CLI against a *real* skill today (one real binding exists).
 
 | Item | Issue | State |
 |---|---|---|
-| Q18 `choose_candidate` interrupt | #41 | 468 tests pass, PR pending review |
+| Q18 `choose_candidate` (audit-fixed) | #41 | 493 tests pass, PR #42 awaiting re-review |
 | ADR-0001/0003/0004/0007/0008/0009/0010 | #— | accepted (retroactive) |
 
 ## Next 3 actions
 
-1. Review the Q18 PR (owner decision to merge; not this agent's to make).
+1. Re-review Q18 PR #42 after audit fixes (owner decides merge). No CI exists.
 2. Decide Q19 (cost estimate) if an approval-gated binding appears.
 3. Decide Q3 (durable checkpointer) or the next roadmap phase item.
 

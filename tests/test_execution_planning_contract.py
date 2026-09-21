@@ -634,6 +634,21 @@ class TestCandidateDisambiguationSelection:
         assert result.candidate_skill_ids == ("skill-a", "skill-b")
         assert result.candidate_descriptions == ("does A", "does B")
 
+    def test_ambiguous_result_carries_binding_ids_parallel_to_sorted_ids(self) -> None:
+        """Audit finding D1: the offered identity includes each candidate's
+        binding_id, so a later same-skill_id re-registration is detectable."""
+        analysis, registry = self._two()
+        result = plan_execution(analysis, registry)
+        assert result.candidate_skill_ids == ("skill-a", "skill-b")
+        assert result.candidate_binding_ids == ("skill-a-fake-v1", "skill-b-fake-v1")
+        assert len(result.candidate_binding_ids) == len(result.candidate_skill_ids)
+
+    def test_resolved_or_single_results_carry_no_candidate_lists(self) -> None:
+        analysis, registry = self._two()
+        resolved = plan_execution(analysis, registry, selected_skill_id="skill-a")
+        assert resolved.candidate_binding_ids == ()
+        assert resolved.candidate_descriptions == ()
+
     def test_selected_skill_id_naming_a_candidate_resolves_ambiguity(self) -> None:
         analysis, registry = self._two()
         result = plan_execution(analysis, registry, selected_skill_id="skill-b")

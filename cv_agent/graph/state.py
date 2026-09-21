@@ -119,19 +119,31 @@ class AgentState(TypedDict, total=False):
     this run — same serialization rationale as `requirements_analysis`/
     `execution_result` below. Shape: `{"status": PlanningStatus, "plan":
     dict | None, "candidate_skill_ids": tuple/list[str],
-    "candidate_descriptions": tuple/list[str], "missing_inputs":
-    tuple/list[str], "conflicting_inputs": tuple/list[str]}` (tuple on a
+    "candidate_descriptions": tuple/list[str], "candidate_binding_ids":
+    tuple/list[str], "missing_inputs": tuple/list[str],
+    "conflicting_inputs": tuple/list[str]}` (tuple on a
     fresh, non-checkpoint-restored run; may come back as a list after a
     checkpoint save/restore, same instability `requirements_analysis`'s own
     tuple fields already have — see `CVAgent._sync_memory_after_run()`);
     `plan`/`candidate_skill_ids`/`candidate_descriptions`/`missing_inputs`/
     `conflicting_inputs` are only meaningfully populated for the
     `PlanningStatus` value they document (see `cv_agent.graph.planning.
-    PlanningResult`) — `candidate_descriptions` (ADR-0010 §16, resolving
-    Q18) is the same order/length as `candidate_skill_ids`, set only for
-    status == "ambiguous_candidates"; `conflicting_inputs` (ADR-0010 §15,
-    Q20 true-XOR correction) is set only for status == "conflicting_inputs",
-    never alongside `missing_inputs` in the same result.
+    PlanningResult`) — `candidate_descriptions`/`candidate_binding_ids`
+    (ADR-0010 §16, resolving Q18) are the same order/length as
+    `candidate_skill_ids`, set only for status == "ambiguous_candidates";
+    `conflicting_inputs` (ADR-0010 §15, Q20 true-XOR correction) is set only
+    for status == "conflicting_inputs", never alongside `missing_inputs` in
+    the same result.
+
+    `plan` is additionally forced to `None` whenever a recovery round
+    (`candidate_selection` or `execution_input_recovery`) finalizes as a
+    TERMINAL failure this run (ADR-0010 §16.7): the fresh planning call may
+    still have produced a "planned" result — e.g. for the *other* candidate
+    after the chosen skill vanished — but a run with no executable intent
+    must not carry a plan a reader could mistake for one. `status` and the
+    `candidate_*`/`selected_*` fields are kept as diagnostics of what that
+    fresh call resolved; they describe planning's result, not intent — the
+    recovery record and `pending_execution is None` are the authority.
 
     `None` has two causes, exactly the same ambiguity `execution_result`
     already carries for `execute`: this run's `plan_execution` node has
@@ -231,9 +243,22 @@ class AgentState(TypedDict, total=False):
     a terminal outcome, never a second prompt.
 
     Shape: `{"attempted": bool, "outcome": "selected" | "invalid" |
-    "cancelled" | "candidate_mismatch", "terminal": bool | None,
-    "expected_candidate_skill_ids": list[str], "chosen_skill_id": str |
-    None}`. `expected_candidate_skill_ids` is the exact, checkpointed set
+    "cancelled" | "candidate_mismatch" | "malformed_offer", "terminal":
+    bool | None, "expected_candidate_skill_ids": list[str],
+    "expected_binding_id": str | None, "expected_description": str | None,
+    "chosen_skill_id": str | None, "mismatch_detail": str | None}`.
+    `expected_binding_id`/`expected_description` (ADR-0010 §16.3, audit
+    finding D1) pin the choice to the exact binding *shown* to the human —
+    the chosen candidate's `binding_id` and description from the same
+    checkpointed snapshot — so a same-`skill_id` re-registration during the
+    pause cannot run something the human never saw; both are `None` unless
+    the choice was `"selected"`. `mismatch_detail` names why a
+    `"candidate_mismatch"` happened: `"skill_not_resolved"`,
+    `"binding_changed"` (different `binding_id`) or `"description_changed"`
+    (same `binding_id`, different description); for `"malformed_offer"`
+    (the offer lists disagreed or were empty — the node fails closed
+    *before* prompting, so no human ever sees a truncated list) it is a
+    human-readable diagnostic. `expected_candidate_skill_ids` is the exact, checkpointed set
     that was actually offered — read only from the already-checkpointed
     `planning_result` before `interrupt()`, never a live
     `ExecutionBindingRegistry` lookup, the same replay-safety rule

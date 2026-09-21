@@ -149,6 +149,15 @@ class PlanningResult:
     combination violates, sorted. Never populated alongside
     `missing_inputs` in the same result — `conflicting_inputs` takes
     priority (see `plan_execution()`)."""
+    candidate_binding_ids: tuple[str, ...] = ()
+    """Companion to `candidate_skill_ids`/`candidate_descriptions` (ADR-0010
+    §16.3, audit finding D1) — same order, same length, each entry the
+    matching candidate's `ExecutionBinding.binding_id` at plan time. This is
+    what pins a human's choice to the *exact binding they were shown*, not
+    merely a `skill_id`: the same skill_id can be re-registered under a new
+    binding_id (different runtime, different behavior) during the pause,
+    and only a binding_id recorded at ask time can detect that. Populated
+    only for "ambiguous_candidates"."""
     selected_skill_id: str | None = None
     """Set whenever exactly one candidate was selected — status == "planned",
     "missing_required_inputs", OR "conflicting_inputs" (never for
@@ -291,14 +300,17 @@ def plan_execution(
     else:
         candidate_ids = tuple(sorted(candidates_by_skill_id))
         candidate_descriptions = []
+        candidate_binding_ids = []
         for skill_id in candidate_ids:
             candidate_binding = bindings.get_binding(skill_id)
             assert candidate_binding is not None  # guaranteed by the filter above
             candidate_descriptions.append(candidate_binding.description)
+            candidate_binding_ids.append(candidate_binding.binding_id)
         return PlanningResult(
             status="ambiguous_candidates",
             candidate_skill_ids=candidate_ids,
             candidate_descriptions=tuple(candidate_descriptions),
+            candidate_binding_ids=tuple(candidate_binding_ids),
         )
 
     binding = bindings.get_binding(selected.skill_id)
