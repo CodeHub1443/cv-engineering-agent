@@ -31,8 +31,8 @@ from pathlib import Path
 
 import pytest
 
-from cv_agent.__main__ import _confirm_approval, _parse_input_kv
-from cv_agent.execution.binding import ExecutionBinding
+from cv_agent.__main__ import _authorize_and_execute, _confirm_approval, _parse_input_kv
+from cv_agent.execution.binding import ExecutionBinding, ExecutionBindingRegistry
 from cv_agent.skills.local import LocalSkillSource
 
 _SKILL_ID = "trt-perf-analysis"
@@ -157,6 +157,123 @@ class TestConfirmApproval:
 
         _confirm_approval(binding, approve_flag=False, prompt=_prompt)
         assert called is False
+
+
+class TestApprovalPromptContext:
+    """Issue #47: the `execute` command's approval prompt shows the binding's
+    runtime and description (the things the pinned approval is compared on),
+    taken from the binding captured for that approval - never re-read."""
+
+    @staticmethod
+    def _described(description: str, runtime_id: str = "fixture-runtime") -> ExecutionBinding:
+        return ExecutionBinding(
+            skill_id=_SKILL_ID,
+            binding_id="fixture-binding",
+            runtime_id=runtime_id,
+            approval_policy="approval_required",
+            verified=True,
+            description=description,
+        )
+
+    @staticmethod
+    def _ask(binding: ExecutionBinding) -> str:
+        seen: list[str] = []
+
+        def prompt(msg: str) -> str:
+            seen.append(msg)
+            return "n"
+
+        _confirm_approval(binding, approve_flag=False, prompt=prompt)
+        assert len(seen) == 1  # asked exactly once
+        return seen[0]
+
+    def test_prompt_shows_skill_binding_runtime_policy_and_description(self) -> None:
+        msg = self._ask(self._described("Layer-by-layer TensorRT timing analysis"))
+        assert msg == (
+            "Approval required for skill 'trt-perf-analysis' via binding 'fixture-binding' "
+            "(runtime='fixture-runtime', policy=approval_required, "
+            "description='Layer-by-layer TensorRT timing analysis'). "
+            "Approve execution? [y/N]: "
+        )
+
+    @pytest.mark.parametrize("empty", ["", "   ", "\n\t "])
+    def test_empty_or_blank_description_renders_as_no_description(self, empty: str) -> None:
+        msg = self._ask(self._described(empty))
+        assert msg == (
+            "Approval required for skill 'trt-perf-analysis' via binding 'fixture-binding' "
+            "(runtime='fixture-runtime', policy=approval_required, "
+            "description=(no description)). Approve execution? [y/N]: "
+        )
+        assert "None" not in msg and "''" not in msg
+
+    def test_multiline_description_stays_on_one_line(self) -> None:
+        msg = self._ask(self._described("First line.\n  Second   line.\n"))
+        assert "\n" not in msg
+        assert "description='First line. Second line.'" in msg
+
+    def test_approve_flag_still_never_prompts(self) -> None:
+        def _fail_if_prompted(msg: str) -> str:
+            raise AssertionError("--approve must not prompt")
+
+        binding = self._described("anything")
+        assert _confirm_approval(binding, approve_flag=True, prompt=_fail_if_prompted) is True
+
+    def test_context_comes_from_the_captured_binding_not_a_second_registry_read(self) -> None:
+        """`_authorize_and_execute` is handed the binding it shows; the registry
+        holds a DIFFERENT description/runtime. The prompt must show the captured
+        binding's values, and the display path must not call the registry's
+        lookup accessors at all."""
+        shown = self._described("the description that was captured", runtime_id="captured-rt")
+
+        class _NoLookupRegistry(ExecutionBindingRegistry):
+            def get_binding(self, skill_id: str):  # type: ignore[override]
+                raise AssertionError("second registry read: get_binding")
+
+            def get_runtime(self, runtime_id: str):  # type: ignore[override]
+                raise AssertionError("second registry read: get_runtime")
+
+            def get_runtime_registration(self, runtime_id: str):  # type: ignore[override]
+                raise AssertionError("second registry read: get_runtime_registration")
+
+        registry = _NoLookupRegistry()
+        registry.register_binding(
+            ExecutionBinding(
+                skill_id=_SKILL_ID,
+                binding_id="fixture-binding",
+                runtime_id="registry-rt",
+                approval_policy="approval_required",
+                verified=True,
+                description="a different description held by the registry",
+            )
+        )
+
+        class _Agent:
+            execution_bindings = registry
+
+            def execute(self, skill: object, request: object) -> str:
+                return "executed"
+
+        prompts: list[str] = []
+
+        def prompt(msg: str) -> str:
+            prompts.append(msg)
+            return "y"
+
+        from cv_agent.skills.models import Skill
+
+        skill = Skill(
+            skill_id=_SKILL_ID, name=_SKILL_ID, description="d", source="fixture",
+            location="/fixtures/trt-perf-analysis/SKILL.md",
+        )
+        result = _authorize_and_execute(
+            _Agent(), skill, shown, inputs={}, task=None, approve_flag=False, prompt=prompt
+        )
+
+        assert result == "executed"
+        assert len(prompts) == 1
+        assert "runtime='captured-rt'" in prompts[0]
+        assert "description='the description that was captured'" in prompts[0]
+        assert "registry-rt" not in prompts[0] and "different description" not in prompts[0]
 
 
 class TestExecuteCLIFixture:
