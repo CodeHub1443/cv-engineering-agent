@@ -68,7 +68,7 @@ connector — or anything else — ever selects a candidate whose binding is
 being exercised through a real, non-fake approval flow with an actual estimate
 attached, including via ADR-0010's future planning connector.*
 
-**Q22.** *New 2026-09-21 (independent audit of PR #42; tracked as GitHub issue #43).*
+~~**Q22.** *New 2026-09-21 (independent audit of PR #42; tracked as GitHub issue #43).*
 `pending_execution` pins only `skill_id` (`{"skill_id", "inputs", "task"}`), and both
 `_node_approval_gate` and `SkillExecutor.execute()` re-resolve the binding **live, by
 `skill_id` alone**; nothing compares it with the binding the human was shown.
@@ -91,7 +91,7 @@ binding field on `SkillExecutionRequest`); what a caller-supplied `pending_execu
 during the *second* pause of a chained recovery runs); and ADR-0010 §16.3's scope wording.
 Architectural (changes `pending_execution`'s shape) — **an ADR amendment must precede
 code.** Not implemented. *Blocks: treating `approval_gate` as a hard guarantee under
-registry mutation.*
+registry mutation.*~~ — **Implemented 2026-09-21 (issue #43, branch `fix/claude/43-approval-integrity`, ADR-0003 §10 / ADR-0009 §14 / ADR-0010 §17, D-032), pending PR review and merge.** Both defects and the same-`binding_id` policy-flip variant are covered by regression tests: the approval pause now pins the whole binding plus a runtime registration generation (`pending_execution["execution_pin"]`); the gate decides from the pin only; a recorded rejection is terminal before any pin validation, registry read or executor call; the executor compares the pin against its own single read; description pinning extends through `provide_execution_inputs`. Answers to the open design questions: the check lives in the executor (`expected_binding_pin`); a caller-supplied plan is pinned at first observation; strict description pinning was extended through input recovery and approval; §16.3's scope wording was corrected. Remaining, documented limits (ADR-0003 §10.8): in-place mutation of a registered runtime object, process restart (a persistent pin is Q3's concern), thread safety.
 
 **Q23.** *New 2026-09-21 (split out of PR #42 by owner decision; GitHub issue #44).*
 `python -m cv_agent workflow` builds a plain, unregistered `CVAgent` (ADR-0009 §5), so

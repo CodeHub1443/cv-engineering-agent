@@ -177,9 +177,10 @@ class AgentState(TypedDict, total=False):
     Shape: `{"attempted": bool, "outcome": "supplied" | "incomplete" |
     "invalid" | "cancelled" | "conflicting" | "binding_mismatch",
     "terminal": bool | None, "mismatch_detail": "identity_changed" |
-    "schema_changed" | "still_incomplete_after_supply" |
+    "schema_changed" | "description_changed" | "still_incomplete_after_supply" |
     "conflicting_inputs_supplied" | None, "expected_skill_id": str,
-    "expected_binding_id": str, "expected_input_schema": list[dict],
+    "expected_binding_id": str, "expected_description": str | None,
+    "expected_input_schema": list[dict],
     "expected_input_field_groups": list[dict], "requested": list[str],
     "accepted": list[str], "still_missing": list[str], "conflicting":
     list[str], "rejected": list[dict]}`. `expected_input_field_groups`
@@ -289,13 +290,27 @@ class AgentState(TypedDict, total=False):
     pending_execution: Optional[dict[str, Any]]
     """What the caller is asking the graph to (attempt to) execute, if
     anything this run: `{"skill_id": str, "inputs": dict, "task": str |
-    None}`. None means this run does not touch execution at all."""
+    None, "execution_pin": dict | None}`. None means this run does not touch
+    execution at all.
+
+    `execution_pin` (ADR-0003 section 10, issue #43) is the immutable
+    execution snapshot, written once by `_node_plan_execution` in the same
+    update as the plan and never re-captured. Exactly one of three states:
+    key MISSING (never pinned - only by bypassing `plan_execution`), explicit
+    `None` (no binding registered at capture - nothing can execute), or a
+    dict `{"binding": <canonical ExecutionBinding snapshot>,
+    "runtime_generation": int | None}`, well-formed or malformed. Missing and
+    malformed are unusable: no approval interrupt, no execution."""
 
     approval_decision: Optional[str]
     """"approved" | "rejected" | "not_required" | None (not yet decided).
     Set only by the approval-gate node from the value an `interrupt()` call
     actually receives on resume — never inferred, never defaulted to
-    "approved". See ADR-0003 §5."""
+    "approved". See ADR-0003 §5. Since ADR-0003 section 10 it is derived from
+    the pinned policy only (never a live registry read), stays `None` for a
+    missing/malformed pin, and is never rewritten after the gate: a recorded
+    "rejected" is terminal and integrity failures write `execution_result`
+    only."""
 
     execution_result: Optional[dict[str, Any]]
     """`dataclasses.asdict()` of the `SkillExecutionResult` produced by

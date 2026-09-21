@@ -247,7 +247,12 @@ class TestApprovalPolicy:
         registry, _ = _registry_with(binding, runtime)
         executor = SkillExecutor(registry)
 
-        result = executor.execute(_skill(), SkillExecutionRequest(approved=True))
+        # ADR-0003 section 10 (D6): approval-required execution needs the pin
+        # the approval was granted for; approved=True alone no longer suffices.
+        result = executor.execute(
+            _skill(),
+            SkillExecutionRequest(approved=True, expected_binding_pin=registry.pin("fixture-skill")),
+        )
 
         assert result.status == "completed"
         assert len(runtime.calls) == 1

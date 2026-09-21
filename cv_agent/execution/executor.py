@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from cv_agent.execution.binding import ExecutionBinding, ExecutionBindingRegistry
+from cv_agent.execution.binding import (
+    ExecutionBinding,
+    ExecutionBindingRegistry,
+    pin_is_well_formed,
+    pin_mismatch,
+)
 from cv_agent.execution.models import (
     ExecutionError,
     ExecutionEvidence,
@@ -59,6 +64,24 @@ class SkillExecutor:
             return False
         return self._registry.get_runtime(binding.runtime_id) is not None
 
+    @staticmethod
+    def _pin_codes(
+        skill_id: str,
+        pin: object,
+        binding: ExecutionBinding,
+        generation: int | None,
+    ) -> tuple[str, ...]:
+        """Mismatch codes for a SUPPLIED pin against the executor's own read;
+        `()` means the pin matches. A malformed pin (including one for a
+        different skill) is `execution_pin_malformed` for every policy."""
+        if not pin_is_well_formed(pin, skill_id=skill_id):
+            return ("execution_pin_malformed",)
+        try:
+            live_binding = binding.pin()
+        except ValueError:
+            return ("binding.unpinnable",)
+        return pin_mismatch(pin, {"binding": live_binding, "runtime_generation": generation})
+
     def execute(self, skill: Skill, request: SkillExecutionRequest) -> SkillExecutionResult:
         binding = self._registry.get_binding(skill.skill_id)
 
@@ -72,6 +95,47 @@ class SkillExecutor:
                     f"No execution binding registered for skill '{skill.skill_id}'.",
                 ),
             )
+
+        # ADR-0003 section 10 / ADR-0009 section 14: the runtime and its
+        # registration generation come from ONE registry read, and these same
+        # locals are what the pin is compared against AND what is invoked
+        # below - the instance invoked is the instance whose generation was
+        # compared, by construction rather than by two lookups agreeing.
+        registration = self._registry.get_runtime_registration(binding.runtime_id)
+        runtime = registration[0] if registration is not None else None
+        generation = registration[1] if registration is not None else None
+
+        pin = request.expected_binding_pin
+
+        # Rule E1 (D6): an absent pin can never authorize an approval-required
+        # execution, whatever `request.approved` says.
+        if pin is None and binding.approval_policy == "approval_required":
+            return SkillExecutionResult(
+                skill_id=skill.skill_id,
+                status="rejected",
+                evidence=ExecutionEvidence(binding.binding_id, binding.runtime_id, None, None),
+                error=ExecutionError(
+                    "approval_denied",
+                    "Execution requires approval per docs/APPROVALS.md ([P§24]) and "
+                    "approval is not bound to an execution snapshot "
+                    "(request.expected_binding_pin was not supplied).",
+                ),
+            )
+
+        if pin is not None:
+            codes = self._pin_codes(skill.skill_id, pin, binding, generation)
+            if codes:
+                return SkillExecutionResult(
+                    skill_id=skill.skill_id,
+                    status="not_executable",
+                    evidence=ExecutionEvidence(
+                        binding.binding_id, binding.runtime_id, None, None
+                    ),
+                    error=ExecutionError(
+                        "binding_mismatch",
+                        "integrity check failed: " + ", ".join(codes),
+                    ),
+                )
 
         if not binding.verified:
             return SkillExecutionResult(
@@ -108,7 +172,6 @@ class SkillExecutor:
                 ),
             )
 
-        runtime = self._registry.get_runtime(binding.runtime_id)
         if runtime is None:
             return SkillExecutionResult(
                 skill_id=skill.skill_id,

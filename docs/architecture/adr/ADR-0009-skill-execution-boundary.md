@@ -514,3 +514,89 @@ fields are unchanged; `trt_perf_analysis.build_binding()`'s real
 `input_field_groups=(RequiredFieldGroup(kind="exactly_one", field_names=
 ("path", "data")),)` entry is a single, non-overlapping group and remains
 valid under the new construction-time check without modification.
+
+## 14. Proposed amendment — execution pin + runtime registration generation (issue #43; owner ADR: ADR-0003 §10)
+
+> **IMPLEMENTED (issue #43), pending PR review and merge.** The contract, the
+> outcome table and the acceptance tests live in ADR-0003 §10 (revision 3, §10.5 is the
+> single authoritative outcome table); this section records only the execution-boundary
+> interface and the executor's order of operations `[P§24]`. Owner decisions D2, D5′, D6
+> applied.
+
+```python
+# module: cv_agent.execution.models
+ExecutionErrorCategory = Literal[
+    "no_binding", "binding_not_verified", "approval_denied", "runtime_error",
+    "binding_mismatch",                                   # new (D5′)
+]
+
+@dataclass(frozen=True)
+class SkillExecutionRequest:
+    ...                                                   # existing fields unchanged
+    expected_binding_pin: dict[str, Any] | None = None    # new; None = NOT SUPPLIED
+
+# module: cv_agent.execution.binding
+@dataclass(frozen=True)
+class ExecutionBinding:
+    ...
+    # __post_init__ is UNCHANGED: JSON-native defaults are validated in pin(), not at
+    # construction (ADR-0003 section 10.14, A3).
+    def pin(self) -> dict[str, Any]: ...   # canonical snapshot, ADR-0003 §10.4 (explicit field
+                                           # access; declared order; JSON-native; no asdict/repr)
+
+class ExecutionBindingRegistry:
+    def pin(self, skill_id: str) -> dict[str, Any] | None: ...
+        # {"binding": binding.pin(), "runtime_generation": int | None}; None = no binding
+    def get_runtime_registration(self, runtime_id: str) -> tuple[ExecutionRuntime, int] | None: ...
+        # instance + generation from ONE dict read; inspect-only
+    # register_runtime(r): stores (r, generation) in the existing dict by one assignment.
+    #   no prior entry -> 1;  prior object `is r` -> unchanged;  else prior + 1.
+    # get_runtime()/list_runtimes(): signatures unchanged.
+    # No removal API exists and none is added.
+
+def pin_is_well_formed(pin: Any, *, skill_id: str) -> bool: ...
+    # strict schema of ADR-0003 §10.4: exact keys, types, runtime_generation int>=1|None,
+    # binding.skill_id == skill_id
+def pin_mismatch(expected: Any, live: dict[str, Any]) -> tuple[str, ...]: ...
+    # () equal; ("execution_pin_malformed",); else sorted "binding.<key>" /
+    # "runtime_registration". Equality = canonical JSON text of each value:
+    # json.dumps(v, sort_keys=True, separators=(",", ":"), allow_nan=False).
+```
+
+`expected_binding_pin` has two inputs only: `None` = **not supplied**, a dict =
+**supplied**. It cannot express "no binding at capture"; that state exists only in the
+graph (ADR-0003 §10.3) and is resolved there without calling the executor.
+
+**`SkillExecutor.execute()` order** (new steps marked; everything else as today):
+1. `binding = registry.get_binding(skill_id)`; `None` → `no_binding` (existing).
+2. *(new)* `registration = registry.get_runtime_registration(binding.runtime_id)` — read
+   **once**; `runtime` and `generation` come from this one read.
+3. *(new, E1 / D6)* live `approval_policy == "approval_required"` **and**
+   `expected_binding_pin is None` → `rejected` / `approval_denied` ("approval is not bound
+   to an execution snapshot"), **regardless of `request.approved`**.
+4. *(new)* pin supplied → `pin_is_well_formed(pin, skill_id=skill.skill_id)`; not
+   well-formed → `not_executable` / `binding_mismatch`, `execution_pin_malformed` — for
+   every policy. Otherwise `pin_mismatch(pin, {"binding": binding.pin(),
+   "runtime_generation": generation})`; non-empty → `not_executable` / `binding_mismatch`,
+   `"integrity check failed: <codes>"`; evidence = live `binding_id`/`runtime_id`, no
+   timestamps; the runtime is never invoked. If the live binding cannot itself be pinned,
+   the code is `binding.unpinnable` (implementation detail, ADR-0003 section 10.15).
+5. Existing `verified`, `rejected`-policy, `approval_required and not approved`,
+   unregistered-runtime and `invoke()` steps, **using the same `binding` and `runtime`
+   locals from steps 1–2** — the instance invoked is the instance whose generation was
+   compared.
+
+`expected_binding_pin=None` keeps today's behavior exactly for `allowed` and
+`rejected`-policy bindings. `SkillExecutor.get_binding()` stays inspect-only and is no
+longer read by the approval gate.
+
+**Direct CLI (§10).** §10's "no pause between approval and execution" is inaccurate:
+`_confirm_approval()` blocks on `input()`. For an `approval_required` binding,
+`python -m cv_agent execute` must pass `registry.pin(skill_id)` captured from the same
+binding it displays and *before* `_confirm_approval()`. `CVAgent.execute()` is a
+pass-through and needs no change.
+
+**Limits of the generation token** (in-place mutation, process restart, thread safety,
+private-dict access) are stated in ADR-0003 §10.8 and are not restated here. This is not
+a new responsibility: the executor already owns "is execution possible and permitted";
+this adds "is it the execution that was authorized".

@@ -28,6 +28,8 @@ flat `required: bool` cannot express.
 
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
@@ -126,6 +128,130 @@ class RequiredFieldGroup:
             )
 
 
+_APPROVAL_POLICIES = ("allowed", "approval_required", "rejected")
+_BINDING_PIN_KEYS = (
+    "skill_id",
+    "binding_id",
+    "runtime_id",
+    "approval_policy",
+    "verified",
+    "description",
+    "input_schema",
+    "input_field_groups",
+)
+_INPUT_FIELD_PIN_KEYS = ("name", "required", "description", "default")
+_GROUP_PIN_KEYS = ("kind", "field_names", "description")
+
+
+def _json_native(value: Any) -> Any:
+    """
+    Canonical JSON-native copy of `value` (tuples become lists), or `ValueError`.
+
+    Only `None`, `bool`, `int`, finite `float`, `str`, and lists/tuples/dicts
+    (`str` keys) of these are accepted. This is the pin/serialization boundary
+    check of ADR-0003 section 10.4 - deliberately NOT a constructor restriction
+    on `ExecutionBinding`/`InputField`, so declaring a binding is unaffected;
+    only pinning one that holds a non-JSON-native default fails.
+    """
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"non-finite float {value!r} is not JSON-native")
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_json_native(v) for v in value]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise ValueError(f"dict key {k!r} is not a str")
+            out[k] = _json_native(v)
+        return out
+    raise ValueError(f"{type(value).__name__} value is not JSON-native")
+
+
+def canonical_json(value: Any) -> str:
+    """The equality form of ADR-0003 section 10.4: type-sensitive (`1`, `1.0`,
+    `true` differ), independent of dict key order and list-vs-tuple container
+    type, never a call to `==` on arbitrary objects."""
+    return json.dumps(_json_native(value), sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _is_str_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _pin_shape_ok(pin: Any) -> bool:
+    """Strict schema of an execution pin (ADR-0003 section 10.4): exact keys,
+    exact types, no extras. Never raises."""
+    try:
+        if not isinstance(pin, dict) or set(pin) != {"binding", "runtime_generation"}:
+            return False
+        generation = pin["runtime_generation"]
+        if generation is not None and (type(generation) is not int or generation < 1):
+            return False
+        binding = pin["binding"]
+        if not isinstance(binding, dict) or set(binding) != set(_BINDING_PIN_KEYS):
+            return False
+        for key in ("skill_id", "binding_id", "runtime_id", "description"):
+            if not isinstance(binding[key], str):
+                return False
+        if binding["approval_policy"] not in _APPROVAL_POLICIES:
+            return False
+        if not isinstance(binding["verified"], bool):
+            return False
+        schema = binding["input_schema"]
+        if not isinstance(schema, list):
+            return False
+        for entry in schema:
+            if not isinstance(entry, dict) or set(entry) != set(_INPUT_FIELD_PIN_KEYS):
+                return False
+            if not isinstance(entry["name"], str) or not isinstance(entry["description"], str):
+                return False
+            if not isinstance(entry["required"], bool):
+                return False
+            _json_native(entry["default"])
+        groups = binding["input_field_groups"]
+        if not isinstance(groups, list):
+            return False
+        for group in groups:
+            if not isinstance(group, dict) or set(group) != set(_GROUP_PIN_KEYS):
+                return False
+            if not isinstance(group["kind"], str) or not isinstance(group["description"], str):
+                return False
+            if not _is_str_list(group["field_names"]):
+                return False
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def pin_is_well_formed(pin: Any, *, skill_id: str) -> bool:
+    """`_pin_shape_ok` plus `binding.skill_id == skill_id` (ADR-0003 10.3)."""
+    return _pin_shape_ok(pin) and pin["binding"]["skill_id"] == skill_id
+
+
+def pin_mismatch(expected: Any, live: dict[str, Any]) -> tuple[str, ...]:
+    """
+    Compare a supplied pin with the live one. `()` means equal; a malformed
+    `expected` is `("execution_pin_malformed",)`; otherwise sorted codes -
+    `binding.<key>` per differing binding key, `runtime_registration` when the
+    runtime generation differs. Equality is `canonical_json` of each value.
+    """
+    if not _pin_shape_ok(expected):
+        return ("execution_pin_malformed",)
+    codes: list[str] = []
+    for key in _BINDING_PIN_KEYS:
+        if canonical_json(expected["binding"][key]) != canonical_json(live["binding"][key]):
+            codes.append(f"binding.{key}")
+    if canonical_json(expected["runtime_generation"]) != canonical_json(
+        live["runtime_generation"]
+    ):
+        codes.append("runtime_registration")
+    return tuple(sorted(codes))
+
+
 @dataclass(frozen=True)
 class ExecutionBinding:
     """
@@ -196,6 +322,41 @@ class ExecutionBinding:
                     )
                 seen_in_group[name] = group.field_names
 
+    def pin(self) -> dict[str, Any]:
+        """
+        Canonical snapshot of this whole binding (ADR-0003 section 10.4). Every
+        key is read by explicit field access - never `dataclasses.asdict`,
+        `repr` or object equality - tuples become lists, declared order is
+        preserved and significant. Raises `ValueError` if an
+        `InputField.default` is not JSON-native (checked here, at the pin
+        boundary, not in the constructor).
+        """
+        return {
+            "skill_id": self.skill_id,
+            "binding_id": self.binding_id,
+            "runtime_id": self.runtime_id,
+            "approval_policy": self.approval_policy,
+            "verified": self.verified,
+            "description": self.description,
+            "input_schema": [
+                {
+                    "name": f.name,
+                    "required": f.required,
+                    "description": f.description,
+                    "default": _json_native(f.default),
+                }
+                for f in self.input_schema
+            ],
+            "input_field_groups": [
+                {
+                    "kind": g.kind,
+                    "field_names": list(g.field_names),
+                    "description": g.description,
+                }
+                for g in self.input_field_groups
+            ],
+        }
+
 
 @dataclass
 class ExecutionBindingRegistry:
@@ -209,22 +370,64 @@ class ExecutionBindingRegistry:
     """
 
     _bindings: dict[str, ExecutionBinding] = field(default_factory=dict, init=False, repr=False)
-    _runtimes: dict[str, ExecutionRuntime] = field(default_factory=dict, init=False, repr=False)
+    _runtimes: dict[str, tuple[ExecutionRuntime, int]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    """runtime_id -> (runtime, registration generation), replaced by a single
+    assignment so instance and generation are always read together
+    (ADR-0003 section 10.8)."""
 
     def register_binding(self, binding: ExecutionBinding) -> None:
         self._bindings[binding.skill_id] = binding
 
     def register_runtime(self, runtime: ExecutionRuntime) -> None:
-        self._runtimes[runtime.runtime_id] = runtime
+        """Generation: first registration 1; the same object again keeps it
+        (identical re-registration is not a change); a different object under
+        the same `runtime_id` increments it. Only this method maintains the
+        generation - writing `_runtimes` directly bypasses it."""
+        prior = self._runtimes.get(runtime.runtime_id)
+        if prior is None:
+            generation = 1
+        elif prior[0] is runtime:
+            generation = prior[1]
+        else:
+            generation = prior[1] + 1
+        self._runtimes[runtime.runtime_id] = (runtime, generation)
 
     def get_binding(self, skill_id: str) -> ExecutionBinding | None:
         return self._bindings.get(skill_id)
 
     def get_runtime(self, runtime_id: str) -> ExecutionRuntime | None:
+        entry = self._runtimes.get(runtime_id)
+        return entry[0] if entry is not None else None
+
+    def get_runtime_registration(
+        self, runtime_id: str
+    ) -> tuple[ExecutionRuntime, int] | None:
+        """Inspect-only: the registered runtime and its generation from ONE
+        dict read, so a caller that invokes this instance is invoking the
+        instance whose generation it compared."""
         return self._runtimes.get(runtime_id)
+
+    def pin(self, skill_id: str) -> dict[str, Any] | None:
+        """
+        The execution pin for `skill_id` (ADR-0003 section 10.2):
+        `{"binding": binding.pin(), "runtime_generation": int | None}`, or
+        `None` if no binding is registered. `runtime_generation` is `None`
+        when the binding's runtime is not registered. Raises `ValueError` if
+        the binding cannot be pinned (non-JSON-native default).
+        """
+        binding = self._bindings.get(skill_id)
+        if binding is None:
+            return None
+        registration = self._runtimes.get(binding.runtime_id)
+        return {
+            "binding": binding.pin(),
+            "runtime_generation": registration[1] if registration is not None else None,
+        }
 
     def list_bindings(self) -> list[ExecutionBinding]:
         return sorted(self._bindings.values(), key=lambda b: b.skill_id)
 
     def list_runtimes(self) -> list[ExecutionRuntime]:
-        return sorted(self._runtimes.values(), key=lambda r: r.runtime_id)
+        return sorted((e[0] for e in self._runtimes.values()), key=lambda r: r.runtime_id)

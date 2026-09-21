@@ -4,22 +4,17 @@
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
 **Updated:** 2026-09-21 · **Phase:** 0 → 1 (partial) → 3 (partial) → 4 (partial) →
-6 (partial, execution planning) · **Health:** yellow (known approval-gate gap, #43)
+6 (partial, execution planning) · **Health:** green pending review (#43 fix on a branch)
 
 ## Where we are
 
-`main` is at `3230361` (PR #42 squash-merged 2026-09-21 — Q18 `choose_candidate`,
-#41 closed; 493 tests green). Q18 is done (ADR-0010 §16); an independent audit
-(D-030) tightened it before merge.
-
-**Known defect, pre-existing, NOT fixed (#43):** the approval pause pins only
-`skill_id`. Reproduced on `main` and pre-Q18 `752bc1c`: (1) a replacement
-binding/runtime registered during the pause executes under approval granted for
-the original; (2) a replacement with an `allowed` policy **overrides a human
-rejection** (`approval_decision="not_required"`, also with an unchanged
-`binding_id`). Needs an in-process registry mutation, so low likelihood today
-(one real binding), but it is an approval-integrity defect `[P§24]`. ADR
-amendment first (`pending_execution`'s shape changes).
+`main` is at `3230361` (PR #42, Q18 `choose_candidate`; 493 tests). Branch
+`fix/claude/43-approval-integrity` implements **#43 approval integrity** (ADR-0003 §10,
+ADR-0009 §14, ADR-0010 §17, D-032): the approval pause pins the whole binding + a runtime
+generation, the gate decides from the pin only, a recorded rejection is terminal before any
+registry read, and the executor compares the pin at its single lookup. 85 new tests, 578
+total green; **not merged — PR review pending.** Documented limits (§10.8): in-place
+mutation of a registered runtime, process restart, thread safety.
 
 **Implemented:** skill discovery/resolution (ADR-0007), requirements analysis +
 skill_links (ADR-0008), execution boundary (ADR-0009, one real
@@ -37,19 +32,19 @@ checkpointer (Q3), an approval cost estimate (Q19), `pending_execution` in
 
 | Item | Issue | State |
 |---|---|---|
-| Approval-pause binding integrity (2 defects) | #43 | tracked, not started; ADR first |
+| Approval-pause binding integrity (2 defects) | #43 | implemented + tested on branch; awaiting PR review/merge |
 | `workflow` CLI real-skill reachability | #44 | tracked; needs owner decisions |
 
 ## Next 3 actions
 
-1. Decide #43 priority; write its ADR amendment (ADR-0003/0009) before code.
+1. Review and merge the #43 PR (`fix/claude/43-approval-integrity`).
 2. Owner decisions on #44 (opt-in registration; second real binding is blocked).
 3. Q19 (cost estimate) / Q3 (durable checkpointer) — tracked in `OPEN_QUESTIONS.md`.
 
 ## Blockers
 
-- #43 blocks trusting `approval_gate` as a hard guarantee under registry
-  mutation. Q3 blocks a restart-survivable approval; Q19 a real cost estimate.
+- Q3 blocks a restart-survivable approval (pins are process-local); Q19 a real
+  cost estimate. #43's merge is pending review.
 
 ## Do not start yet
 

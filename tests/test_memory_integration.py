@@ -34,6 +34,14 @@ described as a benchmarking tool — same convention as
 tests/test_workflow.py's own _PLANNING_TASK."""
 
 
+def _without_pin(pending: dict) -> dict:
+    """pending_execution minus the execution_pin (ADR-0003 section 10) - these
+    tests assert the plan's own fields; the pin has dedicated tests in
+    tests/test_approval_integrity.py."""
+    return {k: v for k, v in pending.items() if k != "execution_pin"}
+
+
+
 def _agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, skill_root: Path | None = None):
     monkeypatch.setenv("CV_AGENT_SKILL_PATHS", str(skill_root or tmp_path))
     from cv_agent.config.settings import AgentConfig
@@ -319,7 +327,7 @@ class TestExecutionInputsChannel:
 
         assert "__interrupt__" not in result
         assert result["planning_result"]["status"] == "planned"
-        assert result["pending_execution"] == {
+        assert _without_pin(result["pending_execution"]) == {
             "skill_id": "trt-perf-analysis",
             "inputs": {"path": "/data/clips"},
             "task": _PLANNING_TASK,

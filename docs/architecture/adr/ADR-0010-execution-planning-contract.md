@@ -1206,15 +1206,16 @@ and its retry, the replacement runtime is never planned, approved or executed.
 Rebinding only the *unchosen* candidate, or re-registering an identical
 binding, is correctly not a mismatch.
 
-**Scope of this guarantee (added 2026-09-21).** It covers the
-`choose_candidate` pause only — it is *not* a whole-graph guarantee. The
-approval pause (`approval_gate` → `execute`) pins only `skill_id`, and a
-binding replaced *during that pause* can execute — including one whose
+**Scope of this guarantee (added 2026-09-21, reworded).** "The replacement
+runtime is never planned, approved or executed" is true **only within the
+`choose_candidate` pause and its retry**; it is *not* a whole-graph guarantee.
+The approval pause (`approval_gate` -> `execute`) pins only `skill_id`, and a
+binding replaced *during that pause* can execute, including one whose
 `allowed` policy overrides a human rejection. This is pre-existing (reproduced
 on `752bc1c`, before Q18) and outside this section; it is tracked as issue #43
-/ `OPEN_QUESTIONS.md` Q22 and needs its own ADR amendment. A chained
-`provide_execution_inputs` retry likewise compares `binding_id` + schema but
-not description (also #43).
+/ `OPEN_QUESTIONS.md` Q22, and is fixed by ADR-0003 §10 (implemented on
+`fix/claude/43-approval-integrity`). A chained `provide_execution_inputs` retry now also
+compares the description (§17).
 
 ### 16.4 Composition with the other recovery kinds
 
@@ -1366,3 +1367,67 @@ recovery keeps its plan. **D4** (5) four malformed offer shapes fail closed at
 the node level without prompting, plus one end-to-end through the compiled
 graph. Each of D1 (both the binding and the description comparison), D3 and D4
 was **mutation-checked**: removing the fix makes its tests fail.
+
+## 17. Proposed amendment — strict description pinning through `provide_execution_inputs` (issue #43, item 1; owner ADR: ADR-0003 §10)
+
+> **IMPLEMENTED (issue #43), pending PR review and merge.** Owner decision D4
+> (2026-09-21): strict description pinning (D-031) is extended through the input-recovery
+> pause and **fails closed**. Approval-pause coverage is ADR-0003 §10 (the whole-binding
+> pin includes `description`); acceptance test T21 in ADR-0003 §10.13.
+
+**Inspection.** `PlanningResult` snapshots the selected candidate's `selected_skill_id`,
+`selected_binding_id`, `selected_input_schema` and `selected_input_field_groups` — but
+**not its description**; a description exists in `planning_result` only as
+`candidate_descriptions` for `ambiguous_candidates`. `_node_provide_execution_inputs`
+copies `selected_*` from the checkpointed `planning_result` (never a live read) into
+`execution_input_recovery["expected_*"]`, and `_node_plan_execution`'s retry compares
+identity (`skill_id` + `binding_id`) and schema/groups against a fresh `plan_execution()`
+result. A description-only change therefore passes (observed in the #42 audit).
+
+**Where the original is captured.** One new field, `PlanningResult.selected_description:
+str | None = None` — the third companion of `selected_binding_id` /
+`selected_input_schema`, set with them in the same three statuses (`planned`,
+`missing_required_inputs`, `conflicting_inputs`) from `binding.description` at plan
+time. A new field is necessary, not stylistic: the recovery node may read only
+already-checkpointed state before `interrupt()`, and no existing checkpointed field
+carries the selected binding's description. It follows the pattern `candidate_descriptions`
+(Q18) and `selected_input_schema` (§13) already established; `Skill.description` from
+`SKILL.md` is deliberately not the source, as in §16.1.
+
+**How it survives recovery.** `_node_provide_execution_inputs` copies
+`planning["selected_description"]` into `execution_input_recovery["expected_description"]`
+alongside the existing `expected_*` keys, before `interrupt()`, from checkpointed state
+only. It is in the checkpoint for the whole pause.
+
+**How a change is detected.** In `_node_plan_execution`'s recovery retry, after the
+existing `identity_ok` and `schema_ok` checks: `description_ok = result.selected_description
+== recovery["expected_description"]`. Order: identity → schema → **description** →
+`raw_outcome`. A change is `final_outcome="binding_mismatch"`, `terminal=True`,
+`mismatch_detail="description_changed"` (a new value beside `identity_changed` /
+`schema_changed`; no new outcome kind and no new state field). **Fail closed on
+absence too:** a recovery record with no `expected_description` key, or a fresh result whose
+`selected_description` is `None`, is `description_changed` — "nothing to compare" never
+counts as "unchanged". The description is compared as the exact string (no trimming or
+case folding).
+
+**Effect on the plan.** A changed description invalidates the recovery: the outcome is
+terminal, `pending_execution` stays `None`, and `planning_result["plan"]` is cleared by
+the existing D3 rule (§16.7) — no executable plan survives. The run does **not** silently
+re-plan against the changed binding and does not re-ask; a new planning cycle is a new
+run. This is the same one-shot posture as the identity and schema checks.
+
+**Chained flow.** In choose → provide-inputs, `choose_candidate` already pins `binding_id`
++ description (§16.3). The retry after the choice produces a fresh `planning_result`
+whose `selected_description` is what the *second* pause snapshots; the second retry
+compares against it; the approval pin then covers the final gap (ADR-0003 §10). Each pause
+is verified against a snapshot taken in the plan-node run immediately before it.
+
+**Tests.** (1) description-only change during a `provide_execution_inputs` pause →
+terminal `binding_mismatch` / `description_changed`, `pending_execution is None`, plan
+cleared, replacement runtime never invoked; (2) the same in the second pause of a
+choose → provide-inputs chain; (3) an unchanged description, and an identical
+re-registration, is not a mismatch; (4) mutation-check: removing the `description_ok`
+comparison fails (1)–(2); (5) `selected_description` set for all three statuses and
+`None` for `no_executable_candidate` / `ambiguous_candidates`; (6) a pre-existing recovery
+record lacking `expected_description` (hand-built) is treated as a mismatch, never as
+"nothing to compare".
