@@ -68,6 +68,45 @@ connector — or anything else — ever selects a candidate whose binding is
 being exercised through a real, non-fake approval flow with an actual estimate
 attached, including via ADR-0010's future planning connector.*
 
+**Q22.** *New 2026-09-21 (independent audit of PR #42; tracked as GitHub issue #43).*
+`pending_execution` pins only `skill_id` (`{"skill_id", "inputs", "task"}`), and both
+`_node_approval_gate` and `SkillExecutor.execute()` re-resolve the binding **live, by
+`skill_id` alone**; nothing compares it with the binding the human was shown.
+`provide_execution_inputs` (ADR-0010 §13) and `choose_candidate` (§16.3) already pin the
+exact binding across their pauses — the approval pause, which is the one that authorizes
+execution, does not. Two defects, **both reproduced on current `main` (`3230361`) and on
+pre-Q18 commit `752bc1c`** (so pre-existing): **(1)** a replacement binding/runtime
+registered during the approval pause executes under approval granted for the original;
+**(2)** a replacement whose `approval_policy` is `"allowed"` **overrides a human
+rejection** and executes with `approval_decision="not_required"` — also when the
+replacement keeps the same `binding_id` and only flips the policy — because the gate's
+live `get_binding()` before `interrupt()` re-runs on resume and discards the recorded
+decision. Trigger requires mutating the in-process registry during a pause (low
+likelihood today: one real binding), but it violates the replay-safety rule §13/§16
+already impose on the newer interrupts and weakens the approval guarantee `[P§24]`.
+Open design questions: where the execution-time check lives (execute node vs an expected-
+binding field on `SkillExecutionRequest`); what a caller-supplied `pending_execution`
+(ADR-0010 §10, no `binding_id`) pins; whether strict description pinning (owner decision,
+#42) extends through the input-recovery retry and approval (today a description-only change
+during the *second* pause of a chained recovery runs); and ADR-0010 §16.3's scope wording.
+Architectural (changes `pending_execution`'s shape) — **an ADR amendment must precede
+code.** Not implemented. *Blocks: treating `approval_gate` as a hard guarantee under
+registry mutation.*
+
+**Q23.** *New 2026-09-21 (split out of PR #42 by owner decision; GitHub issue #44).*
+`python -m cv_agent workflow` builds a plain, unregistered `CVAgent` (ADR-0009 §5), so
+`approval_gate` / `provide_execution_inputs` / `choose_candidate` are never reachable
+against a **real** installed skill through the CLI; their CLI handling is proven only by
+fixture-graph and fake-runtime `CVAgent` tests (accepted for #42). Two sub-problems with
+different blockers: **(a)** opt-in registration of the real `trt-perf-analysis` binding from
+`workflow` would make `provide_execution_inputs` reachable for real (its `path`/`data` XOR
+contract is real, ADR-0009 §12) — an execution-surface design decision for the owner;
+`approval_gate` still would not be, since that binding's default policy is `"allowed"`;
+**(b)** `choose_candidate` needs **more than one** real binding, i.e. a second
+`ExecutionRuntime`, currently on `STATUS.md`'s "Do not start yet" list — blocked on that
+decision, not on engineering. *Blocks: any real-skill end-to-end CLI test of the three
+interrupt kinds.*
+
 ## Deferrable
 
 **Q11.** Multi-camera / multi-stream orchestration model. `[P§9]`

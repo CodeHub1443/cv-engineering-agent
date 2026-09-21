@@ -1220,3 +1220,50 @@ status.
                against a fresh worktree). Branch
                `feature/claude/q18-candidate-disambiguation`, PR #42 — not
                merged.
+
+
+## 2026-09-21 — Close out Q18; record the approval-pause integrity gap (docs-only PR)
+**Did:**       Merged PR #42 (squash, `3230361`; #41 closed; 493 tests green on
+               merged `main`), then filed two follow-ups and refreshed rolling
+               state in this docs-only PR. #43: the approval pause pins only
+               `skill_id`; two defects reproduced on current `main` AND on
+               pre-Q18 `752bc1c` — (1) a replacement binding/runtime registered
+               during the approval pause runs under approval granted for the
+               original; (2) a replacement with an `allowed` policy overrides a
+               human REJECTION (`approval_decision="not_required"`, execution
+               `completed`). #44: `workflow` cannot reach its interrupts against a
+               real skill. Recorded as Q22/Q23 and D-031; `STATUS.md` corrected
+               (it still said PR #42 was unmerged); ADR-0010 §16.3 gained a scope
+               note. No source or test file changed; nothing implemented.
+**Why:**       The #42 audit surfaced the approval gap while checking that a
+               changed binding can never run after a pause. It is outside #42's
+               diff and pre-existing, so it was split out rather than folded into
+               a PR that had already been audited and approved.
+**Learned:**   (1) I first reported the gap as "a replacement runs after
+               approval". Re-verifying before writing the issue showed the worse
+               half: a *rejection* is overridable. The cause is different, not a
+               variant — the gate does a live `get_binding()` BEFORE
+               `interrupt()`, LangGraph re-runs that on resume, and a replacement
+               whose policy is `allowed` makes the node return
+               `not_required` without ever reaching the recorded decision. An
+               execution-time `binding_id` check alone would block the run but
+               would still record `not_required`, and would miss a replacement
+               that keeps the same `binding_id` and flips only the policy — the
+               latter confirmed by a probe (`not_required`, `completed`, original
+               runtime ran), not just by reading code. (2) "Pre-existing" was
+               established by running the probe on a `git worktree` of `752bc1c`
+               and printing `cv_agent.__file__` to prove which tree was loaded,
+               not inferred from the diff not touching the gate. (3) A claim in
+               my own draft of the issue ("fixing only the execution-time check
+               would not fix Defect 2") was wrong as worded — that check WOULD
+               block scenario C's execution — and was corrected before anyone
+               relied on it. (4) The approval gate violates the replay-safety
+               rule (no live registry read before `interrupt()` on resume) that
+               ADR-0010 §13/§16 already impose on the two newer interrupts;
+               that asymmetry is the root of Defect 2.
+**Left open:** #43 (needs an ADR amendment first, then implementation and the
+               regression tests listed in the issue, asserting the replacement
+               runtime is never invoked), #44 (owner decisions; `choose_candidate`
+               also needs a second real binding, currently prohibited), Q3, Q19
+               (already tracked, untouched). Health marked yellow in `STATUS.md`
+               until #43 is resolved.

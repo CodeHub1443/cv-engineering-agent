@@ -1201,9 +1201,20 @@ description still equals what was shown; otherwise it is a terminal
 `"binding_changed"` or `"description_changed"`. The description is compared
 against the live registry *on the retry* (authoritative post-interrupt code,
 where a live lookup is correct and required); the replay-safety rule forbids
-live reads only *before* `interrupt()`. The replacement runtime is never
-planned, approved or executed. Rebinding only the *unchosen* candidate, or
-re-registering an identical binding, is correctly not a mismatch.
+live reads only *before* `interrupt()`. Within the `choose_candidate` pause
+and its retry, the replacement runtime is never planned, approved or executed.
+Rebinding only the *unchosen* candidate, or re-registering an identical
+binding, is correctly not a mismatch.
+
+**Scope of this guarantee (added 2026-09-21).** It covers the
+`choose_candidate` pause only — it is *not* a whole-graph guarantee. The
+approval pause (`approval_gate` → `execute`) pins only `skill_id`, and a
+binding replaced *during that pause* can execute — including one whose
+`allowed` policy overrides a human rejection. This is pre-existing (reproduced
+on `752bc1c`, before Q18) and outside this section; it is tracked as issue #43
+/ `OPEN_QUESTIONS.md` Q22 and needs its own ADR amendment. A chained
+`provide_execution_inputs` retry likewise compares `binding_id` + schema but
+not description (also #43).
 
 ### 16.4 Composition with the other recovery kinds
 
