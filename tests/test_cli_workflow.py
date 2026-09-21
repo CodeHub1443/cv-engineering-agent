@@ -399,6 +399,7 @@ def _build_graph(
         InputField(name="path", required=True, description="folder path"),
         InputField(name="model_name", required=True, description="model label"),
     ),
+    binding_description: str = "",
 ) -> Any:
     _write_fixture_skill(tmp_path, skill_id, _PLANNING_SKILL_DESCRIPTION)
     executor = SkillExecutor(execution_registry)
@@ -415,6 +416,7 @@ def _build_graph(
             approval_policy=approval_policy,  # type: ignore[arg-type]
             verified=True,
             input_schema=input_schema,
+            description=binding_description,
         )
     )
     skill_inventory = SkillInventory(
@@ -718,4 +720,138 @@ class TestChooseCandidateCli:
         assert any(
             "Candidate selection: outcome=invalid terminal=True chosen=None" in line
             for line in lines
+        )
+
+
+class TestApprovalPromptContext:
+    """Issue #47: the `workflow` approval prompt and the `[INTERRUPT] approval`
+    echo show the runtime and description carried by the pinned approval payload
+    (ADR-0003 section 10.2). Display only - the payload and decisions are unchanged."""
+
+    _PAYLOAD: dict[str, Any] = {
+        "type": "approval",
+        "skill_id": "trt-perf-analysis",
+        "binding_id": "trt-perf-analysis-v1",
+        "runtime_id": "fake-runtime-trt-perf-analysis",
+        "description": "Layer timing analysis",
+        "task": "bench it",
+        "inputs": {},
+    }
+
+    @staticmethod
+    def _ask(payload: dict[str, Any]) -> str:
+        seen: list[str] = []
+
+        def prompt(msg: str) -> str:
+            seen.append(msg)
+            return "n"
+
+        value = _resume_value_for_interrupt(
+            payload, answers={}, inputs={}, approve=False, reject=False, prompt=prompt
+        )
+        assert value == "rejected" and len(seen) == 1
+        return seen[0]
+
+    def test_prompt_shows_runtime_and_description_from_the_payload(self) -> None:
+        assert self._ask(self._PAYLOAD) == (
+            "Approval required for skill 'trt-perf-analysis' via binding "
+            "'trt-perf-analysis-v1' "
+            "(runtime='fake-runtime-trt-perf-analysis', policy=approval_required, "
+            "description='Layer timing analysis'). Approve execution? [y/N]: "
+        )
+
+    @pytest.mark.parametrize("empty", ["", "  ", None])
+    def test_empty_description_renders_as_no_description(self, empty: Any) -> None:
+        msg = self._ask({**self._PAYLOAD, "description": empty})
+        assert msg == (
+            "Approval required for skill 'trt-perf-analysis' via binding "
+            "'trt-perf-analysis-v1' "
+            "(runtime='fake-runtime-trt-perf-analysis', policy=approval_required, "
+            "description=(no description)). Approve execution? [y/N]: "
+        )
+        assert "None" not in msg
+
+    def test_payload_without_the_new_keys_does_not_crash(self) -> None:
+        legacy = {k: v for k, v in self._PAYLOAD.items() if k not in ("runtime_id", "description")}
+        assert self._ask(legacy) == (
+            "Approval required for skill 'trt-perf-analysis' via binding "
+            "'trt-perf-analysis-v1' (runtime=(unknown), policy=approval_required, "
+            "description=(no description)). Approve execution? [y/N]: "
+        )
+
+    def test_flags_still_decide_without_prompting(self) -> None:
+        def unreachable(msg: str) -> str:
+            raise AssertionError("must not prompt")
+
+        for approve, reject, expected in ((True, False, "approved"), (False, True, "rejected")):
+            assert (
+                _resume_value_for_interrupt(
+                    self._PAYLOAD, answers={}, inputs={}, approve=approve, reject=reject,
+                    prompt=unreachable,
+                )
+                == expected
+            )
+
+    def test_real_pinned_payload_end_to_end_prompt_and_echo(self, tmp_path: Path) -> None:
+        """Through the real graph: the payload comes from the pin, so the human
+        sees the runtime/description the approval is bound to."""
+        registry = ExecutionBindingRegistry()
+        graph = _build_graph(tmp_path, registry, binding_description="Layer timing analysis")
+        out_lines: list[str] = []
+        prompts: list[str] = []
+
+        def prompt(msg: str) -> str:
+            prompts.append(msg)
+            return "y"
+
+        state = _run_workflow_interactive(
+            _GraphAgent(graph),
+            _PLANNING_TASK,
+            "prompt-ctx-1",
+            answers={},
+            inputs={"path": "/data/run1", "model_name": "yolov8"},
+            approve=False,
+            reject=False,
+            prompt=prompt,
+            out=out_lines.append,
+        )
+
+        assert state["approval_decision"] == "approved"  # decision handling unchanged
+        assert state["execution_result"]["status"] == "completed"
+        assert prompts == [
+            "Approval required for skill 'trt-perf-analysis' via binding "
+            "'trt-perf-analysis-v1' "
+            "(runtime='fake-runtime-trt-perf-analysis', policy=approval_required, "
+            "description='Layer timing analysis'). Approve execution? [y/N]: "
+        ]
+        echo = [line for line in out_lines if line.startswith("  skill=trt-perf-analysis")]
+        assert len(echo) == 1
+        assert echo[0].startswith(
+            "  skill=trt-perf-analysis binding=trt-perf-analysis-v1 "
+            "runtime='fake-runtime-trt-perf-analysis' "
+            "description='Layer timing analysis' inputs="
+        )
+
+    def test_real_pinned_payload_with_an_empty_description_echo(self, tmp_path: Path) -> None:
+        registry = ExecutionBindingRegistry()
+        graph = _build_graph(tmp_path, registry)  # binding_description defaults to ""
+        out_lines: list[str] = []
+
+        _run_workflow_interactive(
+            _GraphAgent(graph),
+            _PLANNING_TASK,
+            "prompt-ctx-2",
+            answers={},
+            inputs={"path": "/data/run1", "model_name": "yolov8"},
+            approve=False,
+            reject=True,
+            prompt=lambda msg: "",
+            out=out_lines.append,
+        )
+
+        echo = [line for line in out_lines if line.startswith("  skill=trt-perf-analysis")]
+        assert len(echo) == 1
+        assert echo[0].startswith(
+            "  skill=trt-perf-analysis binding=trt-perf-analysis-v1 "
+            "runtime='fake-runtime-trt-perf-analysis' description=(no description) inputs="
         )

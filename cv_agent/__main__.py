@@ -291,6 +291,15 @@ def _authorize_and_execute(
     the `SkillExecutionResult`, or `None` if approval was not granted (nothing
     ran). Other policies pass no pin, unchanged. May raise `ValueError` if the
     binding cannot be pinned.
+
+    Caller contract (issue #47): `binding` must be the binding the caller just read
+    from `agent.execution_bindings` for `skill.skill_id`. The pin is captured from
+    the registry on the next line and the prompt then shows `binding`, so the human
+    sees what the pin was taken from only because nothing runs - and nothing can
+    mutate the registry - between the caller's `get_binding()` and that `pin()`
+    read (straight-line, single-threaded code on a `CVAgent` private to the
+    process; the sole caller is `_cmd_execute`). A caller that passes a binding
+    that did not come from the registry breaks that guarantee.
     """
     from cv_agent.execution.models import SkillExecutionRequest
 
@@ -310,6 +319,35 @@ def _authorize_and_execute(
         expected_binding_pin=pin,
     )
     return agent.execute(skill, request)
+
+
+def _shown(value: Any, fallback: str) -> str:
+    """
+    One-line, quoted rendering of an approval-context value (issue #47): runs of
+    whitespace (including newlines) are collapsed so a multi-line binding
+    description cannot break the prompt across lines; a missing, non-string or
+    blank value renders as `fallback` instead of `None`/an empty pair of quotes.
+    """
+    text = " ".join(value.split()) if isinstance(value, str) else ""
+    return f"'{text}'" if text else fallback
+
+
+def _approval_prompt(
+    skill_id: Any, binding_id: Any, runtime_id: Any, description: Any
+) -> str:
+    """
+    The one human-facing approval question, shared by `workflow` (values from the
+    checkpointed approval payload) and `execute` (values from the binding captured
+    for that approval) so both show the same context: skill, binding, runtime,
+    policy and description — the things the pinned execution is compared on
+    (ADR-0003 section 10). Display only: it decides nothing.
+    """
+    return (
+        f"Approval required for skill '{skill_id}' via binding '{binding_id}' "
+        f"(runtime={_shown(runtime_id, '(unknown)')}, policy=approval_required, "
+        f"description={_shown(description, '(no description)')}). "
+        "Approve execution? [y/N]: "
+    )
 
 
 def _confirm_approval(
@@ -339,10 +377,12 @@ def _confirm_approval(
     if approve_flag:
         return True
     try:
+        # runtime_id/description come from the `binding` this attempt was
+        # captured with - never a second registry lookup (issue #47).
         answer = prompt(
-            f"Approval required for skill '{binding.skill_id}' via binding "
-            f"'{binding.binding_id}' (policy=approval_required). "
-            "Approve execution? [y/N]: "
+            _approval_prompt(
+                binding.skill_id, binding.binding_id, binding.runtime_id, binding.description
+            )
         )
     except EOFError:
         return False
@@ -584,9 +624,12 @@ def _resume_value_for_interrupt(
             return "rejected"
         try:
             answer = prompt(
-                f"Approval required for skill '{payload['skill_id']}' via binding "
-                f"'{payload['binding_id']}' (policy=approval_required). "
-                "Approve execution? [y/N]: "
+                _approval_prompt(
+                    payload["skill_id"],
+                    payload["binding_id"],
+                    payload.get("runtime_id"),
+                    payload.get("description"),
+                )
             )
         except EOFError:
             return "rejected"
@@ -652,6 +695,8 @@ def _run_workflow_interactive(
         elif kind == "approval":
             out(
                 f"  skill={payload['skill_id']} binding={payload['binding_id']} "
+                f"runtime={_shown(payload.get('runtime_id'), '(unknown)')} "
+                f"description={_shown(payload.get('description'), '(no description)')} "
                 f"inputs={payload['inputs']}"
             )
 
