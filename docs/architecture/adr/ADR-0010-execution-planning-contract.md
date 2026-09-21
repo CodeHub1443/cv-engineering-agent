@@ -8,8 +8,10 @@
   `missing_required_inputs` via a third interrupt kind is implemented too
   (see §13); group-aware planning + recovery, resolving Q20, is implemented
   too (see §14); a review correction enforcing true oneOf/XOR ("exactly
-  one," not "at least one") is implemented too (see §15)
-- **Date:** 2026-09-16 (§13: 2026-09-17; §14: 2026-09-18; §15: 2026-09-18)
+  one," not "at least one") is implemented too (see §15); ambiguous-candidate
+  disambiguation via a fourth interrupt kind, resolving Q18, is implemented
+  too (see §16)
+- **Date:** 2026-09-16 (§13: 2026-09-17; §14/§15: 2026-09-18; §16: 2026-09-20)
 - **Layer:** orchestration
 - **Canon:** `[P§19]`, `[P§21]`, `[P§22]`, `[P§24]`, `[P§34]`, `[P§35]`
 - **Supersedes / Superseded by:** — (extends ADR-0003 §3's graph topology and
@@ -1081,3 +1083,275 @@ diff` against `main`), plus the one new `"__interrupt__"` TypedDict-gap finding
 §14 already disclosed, which remains the same single occurrence (not
 multiplied by these new tests, which all use `assert ... is not None`
 narrowing before indexing).
+
+
+## 16. Status — ambiguous-candidate disambiguation (`choose_candidate`), resolving Q18
+
+**Added (branch `feature/claude/q18-candidate-disambiguation`, issue #41).**
+§3 step 5 (and §8's own "not decided" note) deliberately produced *no plan*
+when more than one executable candidate matched, surfacing them only via
+`planning_result.candidate_skill_ids` — nothing ever asked anyone to choose.
+The owner decided Q18 directly (2026-09-18, asked alongside Q20): **a
+clarification-style interrupt**, explicitly *not* a CLI `--skill <id>`
+override. This section implements it. Q20's own PR (#40) intentionally left
+Q18 unbuilt; nothing here depends on or changes Q20's group/XOR machinery.
+
+### 16.1 `plan_execution()`: `selected_skill_id` + `candidate_descriptions`
+
+`plan_execution()` gains one optional keyword, `selected_skill_id: str | None
+= None`. It is consulted **only** when more than one candidate survives step 1–2:
+if it names one of them, that candidate is selected and *everything after
+selection is the identical code path* as if it had been the sole candidate
+(input completeness, XOR checks, plan construction) — the disambiguation
+path never duplicates or forks that logic. `None`, or a value naming no
+current candidate, changes nothing: `"ambiguous_candidates"` is returned as
+before. The function never treats an unrecognized choice as a default, and
+ignores the parameter entirely when there is exactly one candidate.
+
+`PlanningResult` gains `candidate_descriptions: tuple[str, ...]`, parallel
+(same order, same length) to `candidate_skill_ids`, populated only for
+`"ambiguous_candidates"`. The source is each candidate's
+`ExecutionBinding.description`, deliberately not `Skill.description`
+(`SKILL.md` frontmatter): `plan_execution()`'s only dependencies are
+`RequirementsAnalysis` and `ExecutionBindingRegistry`, and reading `Skill`
+would mean also depending on `SkillInventory` — a boundary this function has
+never crossed. The snapshot is captured once, at plan time, so the interrupt
+never needs a live lookup (§16.3). `PlanningResult` also gains
+`candidate_binding_ids` (same order/length), each candidate's
+`ExecutionBinding.binding_id` at plan time — the piece that lets §16.3 pin
+a choice to the exact binding the human was shown, not just its `skill_id`.
+
+### 16.2 The interrupt: `choose_candidate`
+
+A new node, inserted on the same `plan_execution` fan-out as
+`provide_execution_inputs`, and checked **first** in `_route_after_planning`:
+`plan_execution()` cannot even evaluate a candidate's input completeness until
+exactly one candidate is selected, so unresolved ambiguity always takes
+routing priority.
+
+```
+plan_execution ──ambiguous_candidates AND selection not yet attempted──> choose_candidate
+      ^                                                                        │
+      └──────────────────── plain edge, always loops back ─────────────────────┘
+```
+
+- **Payload:** `{"type": "choose_candidate", "candidates": [{"skill_id": ...,
+  "description": ...}, ...]}` — every offered candidate's ID and description.
+- **Resume value:** a bare `skill_id` string (like `approval_gate`'s bare
+  `"approved"`/`"rejected"`; this is a single choice, not a key/value set).
+- **Classification** (`_classify_candidate_choice`, deterministic): not a
+  non-blank string → `"cancelled"` (never coerced — `""`, whitespace, `[]`,
+  `False`, `0` and a non-empty dict are all cancelled; `None` and `{}` are
+  **not** in this list — they never reach the classifier at all, see §16.6); a string, after `strip()`, not *exactly* in the
+  offered set → `"invalid"` (no case folding, no prefix/"closest match", no
+  fallback candidate); otherwise `"selected"`.
+- **Persistence:** a `"selected"` choice is written to `AgentState.
+  candidate_choice` (a namespace distinct from `execution_inputs`/
+  `clarification_answers` — a `skill_id` is a different kind of thing than an
+  `InputField.name`); the full record goes to `AgentState.
+  candidate_selection` (`attempted`, `outcome`, `terminal`,
+  `expected_candidate_skill_ids`, `expected_binding_id`,
+  `expected_description`, `chosen_skill_id`, `mismatch_detail`). `candidate_choice` is
+  never set for an invalid/cancelled answer.
+- **One shot:** `candidate_selection["attempted"]` bounds this to exactly one
+  interrupt/resume round per run, the same explicit-flag pattern
+  `clarification_attempted` and `execution_input_recovery["attempted"]`
+  already use. An invalid, cancelled, or no-longer-valid choice is
+  `terminal=True`, routes straight to `END` (bypassing `approval_gate`,
+  same "a failed recovery can never read as approval-not-required" rule as
+  §13), and sets `status="done"`. There is never a second prompt and never a
+  default candidate.
+
+### 16.3 Replay safety and the retry's authoritative re-check
+
+Everything `choose_candidate` reads *before* `interrupt()` comes only from
+the already-checkpointed `planning_result` — never a live
+`ExecutionBindingRegistry` lookup — for the same reason §13 documents
+(LangGraph re-runs a node's pre-interrupt code on resume).
+
+The interrupt node's `"selected"` only proves the choice matched what was
+*offered*; it says nothing about whether the choice still resolves anything
+*now*. So `terminal` is left `None` there and finalized only by
+`_node_plan_execution`'s retry, which re-runs `plan_execution(...,
+selected_skill_id=candidate_choice)` against the current registry and
+requires `result.selected_skill_id == chosen_skill_id`. Anything else is
+`"candidate_mismatch"`, terminal. **This must be an identity check, not
+merely "still ambiguous?"**: if the chosen skill's binding is deregistered
+during the pause, only the *other* candidate remains; `plan_execution()` then
+sees exactly one candidate and would plan it — silently running a skill the
+human never chose. (Found while writing the retry logic, before any test was
+written; pinned by `test_chosen_skill_deregistered_during_the_pause_never_
+falls_back_to_the_other`, which was mutation-checked: with the identity check
+weakened to an "is it still ambiguous?" test, it fails.)
+
+**The identity check covers the binding, not just the skill_id (audit finding
+D1).** An independent audit reproduced a hole in the check above: same
+`skill_id`, re-registered during the pause under a different `binding_id`, a
+different runtime and a different description — the retry saw the same
+`selected_skill_id`, accepted the choice, and ran the *replacement* runtime
+under a choice the human made about something else (`provide_execution_inputs`
+already pinned `binding_id` + schema against exactly this; the direct path did
+not). The choose node now records, from the same checkpointed snapshot the
+human was shown (still no live registry read before `interrupt()`), the chosen
+candidate's `expected_binding_id` and `expected_description`. On retry the
+choice is accepted only if the fresh call resolves to the same `skill_id`
+**and** the same `binding_id` **and** the current registry binding's
+description still equals what was shown; otherwise it is a terminal
+`"candidate_mismatch"` with `mismatch_detail` of `"skill_not_resolved"`,
+`"binding_changed"` or `"description_changed"`. The description is compared
+against the live registry *on the retry* (authoritative post-interrupt code,
+where a live lookup is correct and required); the replay-safety rule forbids
+live reads only *before* `interrupt()`. The replacement runtime is never
+planned, approved or executed. Rebinding only the *unchosen* candidate, or
+re-registering an identical binding, is correctly not a mismatch.
+
+### 16.4 Composition with the other recovery kinds
+
+`_node_plan_execution` previously gated its recovery-finalization block on
+`recovery.get("attempted") is True` alone. That was safe only because the old
+topology never re-entered the node after `execution_input_recovery` was
+finalized. With two independent recovery kinds a run can now visit the node
+several times (ambiguous → choose → retry finalizes candidate selection →
+missing input → provide inputs → retry finalizes input recovery), so both
+finalization blocks are now gated on `attempted is True AND terminal is
+None` — each round is finalized exactly once and never re-finalized by a later
+retry. For every pre-existing test this gate is behavior-preserving
+(`_node_provide_execution_inputs` always writes `terminal: None`, so the
+first retry always satisfies it). If the chosen candidate then needs inputs,
+the chain continues into `provide_execution_inputs` as before, with its own
+identity/schema guard (§13) also catching a mid-pause candidate swap.
+
+### 16.5 What is deliberately unchanged
+
+- **Caller-supplied `pending_execution`** (§10) is still checked first in
+  `_node_plan_execution`, before any planning: no `planning_result`, no
+  disambiguation, no interrupt, even when several candidates are in play.
+- **`python -m cv_agent execute <skill_id>`** (ADR-0009 §10) is a separate code
+  path that never touches `plan_execution()` or the workflow graph.
+- **Exactly one candidate** never raises the interrupt.
+- **`approval_gate`'s policy is untouched**: choosing a skill is not
+  approving it — an `approval_required` chosen candidate still reaches the
+  approval interrupt (tested).
+- **No `--skill` flag and no pre-supply channel** — the owner chose the
+  interrupt design over an override; `start_workflow()` gained no parameter.
+  It only initializes the two new state keys to `None`.
+
+### 16.6 CLI
+
+`python -m cv_agent workflow` handles the new kind: it prints every candidate
+and prompts for the `skill_id`; a blank/EOF answer resumes with `""`
+(classified `"cancelled"`), and `--approve` is never read as a candidate
+choice. `_print_workflow_summary` reports `Candidate selection: outcome=…
+terminal=… chosen=…`. `_MAX_INTERRUPT_ROUNDS` (8) already covers the new
+maximum of four interrupt kinds; its and `_run_workflow_interactive`'s
+docstrings now say four. `_cmd_workflow` still registers no execution
+binding, so the interrupt remains unreachable through that command against
+any real installed skill today — exactly the documented posture of
+`provide_execution_inputs`/`approval_gate` (only one real binding exists) —
+and is exercised through fixture-graph-backed tests instead.
+
+**Empty resumes are LangGraph behavior, not this node's (audit finding D2).**
+The first draft of this section, and `_classify_candidate_choice`'s docstring,
+listed `None` and `{}` among answers classified `"cancelled"`. They never reach
+the classifier: the installed LangGraph does not deliver `Command(resume={})`
+(the graph silently re-pauses at the same interrupt — nothing finalized,
+nothing executed, a later real answer still works) and `Command(resume=None)`
+raises an `UnboundLocalError` from inside LangGraph itself (thread left cleanly
+paused, still resumable). This is the same characteristic ADR-0003 §9 and
+`CVAgent.resume_workflow()` already documented for `clarify`/
+`provide_execution_inputs`; it is now documented and pinned by tests for
+`choose_candidate` too, and deliberately **not** worked around here (no
+contract-consistent fix exists in the supported API). Consequence: the "one
+shot, never a second prompt" guarantee holds for every answer that is
+*delivered*; a programmatic caller passing `{}` is simply re-prompted. A caller
+declining must pass a non-`None`, non-`{}` falsy value such as `""`, which the
+CLI does. `[]`, `False`, `0` and a non-empty dict are delivered and classified
+`"cancelled"`.
+
+### 16.7 Terminal-state hygiene and the fail-closed offer (audit findings D3, D4)
+
+**No plan survives a terminal recovery failure (D3).** On a terminal
+`candidate_mismatch` the fresh planning call can still have produced a
+`"planned"` `PlanningResult` — for the *other* candidate, when the chosen skill
+vanished and one candidate remained. Nothing executed (`pending_execution` was
+`None`), but `planning_result["plan"]` held a full plan for a skill the human
+explicitly did not choose, which a downstream reader could mistake for
+executable intent. `plan` is now forced to `None` whenever either recovery
+record finalizes as terminal; `status` and the `candidate_*`/`selected_*`
+fields are deliberately kept, as diagnostics of what the fresh call resolved
+(they describe planning's result, not intent — the recovery record and
+`pending_execution is None` are the authority). The same invariant was
+**applied to `execution_input_recovery`'s terminal outcomes** (§13), not only
+the new kind: a terminal `binding_mismatch` means the fresh call planned a
+binding the human was never asked about, so the identical rationale holds, and
+a rule that depended on *which* recovery kind failed would be an invariant only
+half the readers could rely on. A successful recovery keeps its plan
+(tested). No pre-existing test asserted a plan surviving a terminal outcome;
+the few that assert `planning_result["status"] == "planned"` after a terminal
+mismatch still hold, because `status` is preserved.
+
+**A malformed offer fails closed (D4).** `_node_choose_candidate` built the
+prompt with `zip(candidate_ids, candidate_descriptions)`, which silently drops
+the tail if the lists differ in length, while validation would still accept
+the hidden IDs. It now requires `candidate_skill_ids`,
+`candidate_descriptions` and `candidate_binding_ids` to be non-empty and equal
+in length — checked before `interrupt()`, from checkpointed state only — and
+otherwise returns a terminal `"malformed_offer"` record (`mismatch_detail`
+carrying the three lengths), `status="done"`, without ever prompting; the
+existing routing sends the run to `END`. `plan_execution()` always builds equal
+lists, so this is unreachable today; it exists so a future producer or
+checkpoint that breaks the invariant is a loud terminal diagnostic instead of a
+silent truncation. Tested at the node level (four malformed shapes, including
+binding_ids absent entirely) and end to end through the compiled graph with a
+patched planner.
+
+### 16.8 Tests
+
+31 tests in the original PR commit, plus 25 added for the audit findings (56
+in total, no test deleted; one dict-equality assertion in
+`test_one_executable_candidate_populates_pending_execution` extended for the
+new `candidate_descriptions`/`candidate_binding_ids` keys). The audit-fix
+tests are listed at the end of this section. `tests/test_execution_planning_contract.py::
+TestCandidateDisambiguationSelection` (7: descriptions parallel to sorted IDs;
+a valid selection resolves ambiguity; an unoffered ID is ignored, never a
+default; `None` never picks; the selected candidate still gets input-
+completeness checks; irrelevant with a single candidate; a non-executable
+skill cannot be selected). `tests/test_workflow.py::TestChooseCandidateInterrupt`
+(16, real compiled graph + real `MemorySaver`: payload lists every ID and
+description; either candidate can be chosen and only it runs; whitespace
+tolerated; 7 parametrized invalid/cancelled answers — unknown ID, prefix, wrong
+case, `""`, whitespace, a dict, `0` — all terminal, nothing executed, no
+second interrupt, `approval_gate` bypassed; mid-pause deregistration →
+`candidate_mismatch`; chosen candidate then missing inputs chains into
+`provide_execution_inputs` with the candidate round *not* re-finalized;
+`approval_required` choice still reaches approval; caller-supplied
+`pending_execution` bypasses disambiguation; a single candidate never
+interrupts) plus `TestChooseCandidateThroughCVAgent` (2, the real `CVAgent`
+API with real skill discovery and durable memory). `tests/test_cli_workflow.py::
+TestChooseCandidateCli` (6). Full suite 437 → 468 passing, zero regressions;
+`ruff` and `mypy` on every touched file show exactly the findings `main`
+already has (compared directly against a disposable `git worktree` of `main`).
+
+**Audit-fix tests (25).** `tests/test_execution_planning_contract.py::
+TestCandidateDisambiguationSelection` (2: binding_ids parallel to sorted IDs;
+none on a resolved result). `tests/test_workflow.py::TestChooseCandidateAuditFixes`
+(23, real compiled graph + real `MemorySaver`): **D1** (5) the audit's exact
+re-binding reproduction — same `skill_id`, new `binding_id`/runtime/description
+— asserting terminal `candidate_mismatch`/`binding_changed`, no approval, no
+execution, and the replacement runtime never called; description-only change;
+identical re-registration is *not* a mismatch; rebinding only the unchosen
+candidate is irrelevant; the offered identity is checkpointed as lists and
+survives a mid-pause registry wipe. **Audit-listed coverage** (6) chosen skill
+removed during the *second* pause of a chained recovery; each recovery record
+finalized exactly once across three `plan_execution` visits (step-log count);
+both candidates removed; three candidates with a non-chosen one removed, and
+with the chosen one removed while two others remain (still ambiguous, no
+fallback); chosen skill swapped to an unverified binding (executor refuses,
+nothing runs). **D2** (4) `resume={}` re-pauses and a later real answer works;
+`resume=None` raises inside LangGraph leaving the pause intact; `[]` and
+`False` are delivered and cancelled. **D3** (3) candidate mismatch clears the
+plan but keeps diagnostics; `binding_mismatch` clears it too; a successful
+recovery keeps its plan. **D4** (5) four malformed offer shapes fail closed at
+the node level without prompting, plus one end-to-end through the compiled
+graph. Each of D1 (both the binding and the description comparison), D3 and D4
+was **mutation-checked**: removing the fix makes its tests fail.

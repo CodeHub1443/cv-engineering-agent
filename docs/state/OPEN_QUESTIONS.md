@@ -53,21 +53,6 @@ not.
 
 **Q10.** Dataset storage and versioning: DVC, Git LFS, or external object store? `[P§26]`
 
-**Q18.** When ADR-0010's V1 selection rule finds **more than one** executable
-`SkillLink` candidate for a task component, it explicitly produces no plan rather than
-silently picking one (`[P§35]`) — surfaced via `AgentState.planning_result.
-candidate_skill_ids` (ADR-0010 §11). What should actually happen instead — an explicit
-CLI `--skill <id>` override (mirroring `_cmd_execute`'s existing explicit-skill_id
-CLI contract), a clarification-style interrupt asking the human to choose, or something
-else? *Decided by owner 2026-09-18 (asked directly alongside Q20): a clarification-style
-interrupt* — a fourth interrupt kind, architecturally consistent with `clarify`/
-`provide_execution_inputs`, that pauses the graph and asks the human to choose among
-`candidate_skill_ids`. **Not implemented** — this decision only answers *which design*;
-the interrupt itself is separate future work (a new issue), scoped independently of
-Q20's schema-layer change (`feature/claude/q20-input-field-groups`, D-027). Left here,
-not struck through, until the implementation lands. *Blocks: making the already-built
-`plan_execution` node's ambiguous-candidate case do anything beyond "produce no plan."*
-
 **Q19.** `docs/APPROVALS.md`'s real approval workflow — specifically, *producing a
 cost estimate before asking* ("Before asking, the agent estimates the cost" — the
 rule's own first line) — has no implementation anywhere in this codebase (confirmed:
@@ -205,3 +190,25 @@ __post_init__` also rejects a field belonging to more than one group (ADR-0009
 against the real binding — including the true-XOR "both supplied" rejection
 path — is now written and passing (skipped, not faked, on a machine without
 the skill installed) — see ADR-0009 §12/§13, ADR-0010 §14/§15, D-027, D-028.
+
+~~**Q18.** When ADR-0010's V1 selection rule finds **more than one** executable
+`SkillLink` candidate for a task component, it explicitly produces no plan rather than
+silently picking one (`[P§35]`) — surfaced via `AgentState.planning_result.
+candidate_skill_ids` (ADR-0010 §11). What should actually happen instead — an explicit
+CLI `--skill <id>` override (mirroring `_cmd_execute`'s existing explicit-skill_id
+CLI contract), a clarification-style interrupt asking the human to choose, or something
+else?~~ — **Answered 2026-09-18 (owner decision, asked directly alongside Q20): a
+clarification-style interrupt**; **implemented 2026-09-20 (ADR-0010 §16, D-029, issue
+#41):** a fourth interrupt kind, `choose_candidate`, fires when `plan_execution()`
+reports `"ambiguous_candidates"`, presents every candidate's skill_id + description,
+validates the human's bare-skill_id answer against the exact checkpointed offered set,
+persists it (`AgentState.candidate_choice`/`candidate_selection`) and resumes planning
+via `plan_execution(..., selected_skill_id=...)`, whose retry independently re-confirms
+the choice against the current registry. One shot: an invalid/cancelled/no-longer-valid
+choice is terminal and never silently defaults. **Audit-corrected 2026-09-20 (D-030):**
+the choice is pinned to the exact binding *shown* (`binding_id` + description snapshotted
+at ask time), not merely a `skill_id`; a terminal recovery failure clears
+`planning_result.plan`; a malformed offer fails closed; and empty `{}`/`None` resumes are
+documented as LangGraph behavior, not classified answers. No CLI `--skill` override was built
+(not chosen). Caller-supplied `pending_execution` and `python -m cv_agent execute` are
+untouched.

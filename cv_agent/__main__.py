@@ -411,9 +411,9 @@ def _cmd_execute(
 
 
 _MAX_INTERRUPT_ROUNDS = 8
-"""Generous upper bound over the graph's own documented maximum of three
-interrupt kinds per run — clarify, provide_execution_inputs, approval_gate,
-each at most once (ADR-0010 §13's own topology). Originally added as a
+"""Generous upper bound over the graph's own documented maximum of four
+interrupt kinds per run — clarify, choose_candidate (ADR-0010 §16),
+provide_execution_inputs, approval_gate, each at most once (ADR-0010 §13's own topology). Originally added as a
 CLI-only safety net for a real, pre-existing gap (`_route_after_analysis`
 routing on `clarification_answers` truthiness instead of "was clarify
 already attempted"): declining every clarification question re-paused at
@@ -515,6 +515,23 @@ def _resume_value_for_interrupt(
                 collected[name] = value
         return collected if collected else ""
 
+    if kind == "choose_candidate":
+        # ADR-0010 §16 (Q18): the owner chose an interrupt, not a CLI
+        # --skill override, so there is deliberately no flag for this — the
+        # human is always asked, and a blank/EOF answer is "" (a non-
+        # matching string the graph classifies "cancelled"), never a
+        # default candidate.
+        candidates = payload.get("candidates") or []
+        lines = "\n".join(f"    {c['skill_id']}: {c['description']}" for c in candidates)
+        try:
+            answer = prompt(
+                "Multiple executable skills match. Type the skill_id to use:\n"
+                f"{lines}\n  > "
+            )
+        except EOFError:
+            return ""
+        return answer.strip()
+
     if kind == "approval":
         if approve:
             return "approved"
@@ -547,7 +564,7 @@ def _run_workflow_interactive(
 ) -> dict[str, Any]:
     """
     Drive one workflow run to completion, resolving every interrupt it
-    actually raises (zero to three: `clarify`, `provide_execution_inputs`,
+    actually raises (zero to four: `clarify`, `choose_candidate`, `provide_execution_inputs`,
     `approval_gate` — ADR-0010 §13's own topology diagram) with a real
     answer from `_resume_value_for_interrupt`, never a synthetic one.
 
@@ -584,6 +601,9 @@ def _run_workflow_interactive(
             out(f"  skill={payload['skill_id']} binding={payload['binding_id']}")
             for field in payload["missing_inputs"]:
                 out(f"  - missing: {field['name']} ({field['description']})")
+        elif kind == "choose_candidate":
+            for candidate in payload["candidates"]:
+                out(f"  - candidate: {candidate['skill_id']} ({candidate['description']})")
         elif kind == "approval":
             out(
                 f"  skill={payload['skill_id']} binding={payload['binding_id']} "
@@ -622,6 +642,14 @@ def _print_workflow_summary(state: dict[str, Any], *, out: Callable[[str], None]
     planning = state.get("planning_result")
     if planning:
         out(f"Planning status: {planning.get('status')}")
+
+    candidate_selection = state.get("candidate_selection")
+    if candidate_selection is not None:
+        out(
+            f"Candidate selection: outcome={candidate_selection.get('outcome')} "
+            f"terminal={candidate_selection.get('terminal')} "
+            f"chosen={candidate_selection.get('chosen_skill_id')}"
+        )
 
     recovery = state.get("execution_input_recovery")
     if recovery is not None:

@@ -118,17 +118,32 @@ class AgentState(TypedDict, total=False):
     planning`) produced by the most recent actual `plan_execution()` call
     this run — same serialization rationale as `requirements_analysis`/
     `execution_result` below. Shape: `{"status": PlanningStatus, "plan":
-    dict | None, "candidate_skill_ids": tuple/list[str], "missing_inputs":
-    tuple/list[str], "conflicting_inputs": tuple/list[str]}` (tuple on a
+    dict | None, "candidate_skill_ids": tuple/list[str],
+    "candidate_descriptions": tuple/list[str], "candidate_binding_ids":
+    tuple/list[str], "missing_inputs": tuple/list[str],
+    "conflicting_inputs": tuple/list[str]}` (tuple on a
     fresh, non-checkpoint-restored run; may come back as a list after a
     checkpoint save/restore, same instability `requirements_analysis`'s own
     tuple fields already have — see `CVAgent._sync_memory_after_run()`);
-    `plan`/`candidate_skill_ids`/`missing_inputs`/`conflicting_inputs` are
-    only meaningfully populated for the `PlanningStatus` value they document
-    (see `cv_agent.graph.planning.PlanningResult`) — `conflicting_inputs`
-    (ADR-0010 §15, Q20 true-XOR correction) is set only for status ==
-    "conflicting_inputs", never alongside `missing_inputs` in the same
-    result.
+    `plan`/`candidate_skill_ids`/`candidate_descriptions`/`missing_inputs`/
+    `conflicting_inputs` are only meaningfully populated for the
+    `PlanningStatus` value they document (see `cv_agent.graph.planning.
+    PlanningResult`) — `candidate_descriptions`/`candidate_binding_ids`
+    (ADR-0010 §16, resolving Q18) are the same order/length as
+    `candidate_skill_ids`, set only for status == "ambiguous_candidates";
+    `conflicting_inputs` (ADR-0010 §15, Q20 true-XOR correction) is set only
+    for status == "conflicting_inputs", never alongside `missing_inputs` in
+    the same result.
+
+    `plan` is additionally forced to `None` whenever a recovery round
+    (`candidate_selection` or `execution_input_recovery`) finalizes as a
+    TERMINAL failure this run (ADR-0010 §16.7): the fresh planning call may
+    still have produced a "planned" result — e.g. for the *other* candidate
+    after the chosen skill vanished — but a run with no executable intent
+    must not carry a plan a reader could mistake for one. `status` and the
+    `candidate_*`/`selected_*` fields are kept as diagnostics of what that
+    fresh call resolved; they describe planning's result, not intent — the
+    recovery record and `pending_execution is None` are the authority.
 
     `None` has two causes, exactly the same ambiguity `execution_result`
     already carries for `execute`: this run's `plan_execution` node has
@@ -203,6 +218,72 @@ class AgentState(TypedDict, total=False):
     recovery-failure terminal from ordinary completion by checking
     `execution_input_recovery.get("terminal")` alone, without reasoning
     about the nullability of unrelated fields."""
+
+    # ── Candidate disambiguation (ADR-0010 §16, resolving Q18) ───────────
+    candidate_choice: Optional[str]
+    """A validated human choice among `planning_result.candidate_skill_ids`
+    (status == "ambiguous_candidates"), fed into `plan_execution()`'s
+    `selected_skill_id` parameter on the retry `choose_candidate` always
+    routes back to — a deliberately distinct namespace from
+    `execution_inputs`/`clarification_answers`: an `InputField.name` or a
+    `RequirementField.name` and a `skill_id` mean different things, and
+    conflating them would be exactly the kind of silent inference `[P§35]`
+    forbids. Only ever set by `choose_candidate` on a `"selected"`
+    classification (never on invalid/cancelled) — `None` by default,
+    never inferred or pre-filled."""
+
+    candidate_selection: Optional[dict[str, Any]]
+    """Same-session recovery from `planning_result.status ==
+    "ambiguous_candidates"` via a fourth interrupt kind, `choose_candidate`
+    — architecturally consistent with `clarify`/`provide_execution_inputs`
+    (ADR-0003/ADR-0010 §13) but its own distinct namespace: it only ever
+    reads/writes `candidate_choice` above, never `execution_inputs`/
+    `clarification_answers`. Limited to exactly one interrupt/resume round
+    per workflow run — an invalid, cancelled, or no-longer-valid choice is
+    a terminal outcome, never a second prompt.
+
+    Shape: `{"attempted": bool, "outcome": "selected" | "invalid" |
+    "cancelled" | "candidate_mismatch" | "malformed_offer", "terminal":
+    bool | None, "expected_candidate_skill_ids": list[str],
+    "expected_binding_id": str | None, "expected_description": str | None,
+    "chosen_skill_id": str | None, "mismatch_detail": str | None}`.
+    `expected_binding_id`/`expected_description` (ADR-0010 §16.3, audit
+    finding D1) pin the choice to the exact binding *shown* to the human —
+    the chosen candidate's `binding_id` and description from the same
+    checkpointed snapshot — so a same-`skill_id` re-registration during the
+    pause cannot run something the human never saw; both are `None` unless
+    the choice was `"selected"`. `mismatch_detail` names why a
+    `"candidate_mismatch"` happened: `"skill_not_resolved"`,
+    `"binding_changed"` (different `binding_id`) or `"description_changed"`
+    (same `binding_id`, different description); for `"malformed_offer"`
+    (the offer lists disagreed or were empty — the node fails closed
+    *before* prompting, so no human ever sees a truncated list) it is a
+    human-readable diagnostic. `expected_candidate_skill_ids` is the exact, checkpointed set
+    that was actually offered — read only from the already-checkpointed
+    `planning_result` before `interrupt()`, never a live
+    `ExecutionBindingRegistry` lookup, the same replay-safety rule
+    `provide_execution_inputs` already documents (LangGraph's dynamic
+    `interrupt()` re-runs a node's pre-interrupt code on resume).
+
+    `outcome` at write time is never `"candidate_mismatch"` and `terminal`
+    is left `None` — both are finalized only by `plan_execution` on the
+    retry this always routes back to: a fresh, authoritative
+    `plan_execution(..., selected_skill_id=candidate_choice)` call either
+    resolves the ambiguity (the choice was real and the registry has not
+    changed underneath the pause) or still reports
+    `"ambiguous_candidates"` — the latter becomes `"candidate_mismatch"`,
+    terminal, never a fabricated resolution. This is the *only* place
+    `candidate_choice`'s validity against the *current* registry state is
+    confirmed — the interrupt node's own `"selected"` classification only
+    proves the choice matched what was offered at ask time, not that it
+    still resolves anything now.
+
+    Terminal contract: identical in shape and meaning to
+    `execution_input_recovery`'s own — `terminal is True` for every
+    outcome except `"selected"` with a confirmed match; when `terminal`,
+    `pending_execution`/`approval_decision`/`execution_result` are all
+    guaranteed `None`, the run reaches `status == "done"` without ever
+    calling `approval_gate` or `execute`."""
 
     # ── Approval + execution (ADR-0003, ADR-0009) ───────────────────────────
     pending_execution: Optional[dict[str, Any]]

@@ -19,6 +19,7 @@ unmodified by every pre-existing test in this file.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -672,6 +673,7 @@ class TestPlanExecutionIntegration:
         input_schema: tuple[InputField, ...] = (),
         input_field_groups: tuple[RequiredFieldGroup, ...] = (),
         binding_id: str | None = None,
+        description: str = "",
     ) -> "FakeRuntime":
         # A distinct runtime_id per skill_id — registering two bindings that
         # both default to "fake-runtime" would silently overwrite one
@@ -688,6 +690,7 @@ class TestPlanExecutionIntegration:
                 runtime_id=rt.runtime_id,
                 approval_policy=approval_policy,  # type: ignore[arg-type]
                 verified=True,
+                description=description,
                 input_schema=input_schema,
                 input_field_groups=input_field_groups,
             )
@@ -734,6 +737,8 @@ class TestPlanExecutionIntegration:
                 "source_task": _PLANNING_TASK,
             },
             "candidate_skill_ids": (),
+            "candidate_descriptions": (),
+            "candidate_binding_ids": (),
             "missing_inputs": (),
             "conflicting_inputs": (),
             "selected_skill_id": "trt-perf-analysis",
@@ -1748,3 +1753,788 @@ class TestProvideExecutionInputsRecovery:
         assert result["execution_input_recovery"] is None
         assert result["planning_result"] is None
         assert result["pending_execution"]["skill_id"] == "trt-perf-analysis"
+
+
+class TestChooseCandidateInterrupt:
+    """
+    ADR-0010 §16 (Q18): the fourth interrupt kind. Ambiguous executable
+    candidates pause at `choose_candidate` instead of silently producing no
+    plan; the human's bare-skill_id answer is validated against the exact
+    offered set, persisted, and fed back into a fresh plan_execution().
+    Every test drives the real compiled graph + real MemorySaver checkpoint
+    (via _start/_resume), never a bypassed node.
+    """
+
+    _register = staticmethod(TestPlanExecutionIntegration._register)
+
+    def _graph_for(
+        self,
+        tmp_path: Path,
+        execution_registry: ExecutionBindingRegistry,
+        *,
+        skill_ids: tuple[str, ...],
+    ) -> Any:
+        return TestPlanExecutionIntegration()._graph_for(
+            tmp_path, execution_registry, skill_ids=skill_ids
+        )
+
+    _IDS = ("bench-tool-b", "trt-perf-analysis")
+
+    def _two(self, tmp_path: Path, **kwargs: Any):
+        registry = ExecutionBindingRegistry()
+        rt_a = self._register(
+            registry, "trt-perf-analysis", description="TensorRT layer analysis", **kwargs
+        )
+        rt_b = self._register(registry, "bench-tool-b", description="Generic benchmark tool")
+        graph = self._graph_for(tmp_path, registry, skill_ids=self._IDS)
+        return graph, registry, rt_a, rt_b
+
+    # ── The pause itself ─────────────────────────────────────────────────
+
+    def test_ambiguity_pauses_with_every_candidate_id_and_description(
+        self, tmp_path: Path
+    ) -> None:
+        graph, _, rt_a, rt_b = self._two(tmp_path)
+
+        started = _start(graph, _PLANNING_TASK, "cand-1")
+
+        assert "__interrupt__" in started
+        payload = started["__interrupt__"][0].value
+        assert payload["type"] == "choose_candidate"
+        assert payload["candidates"] == [
+            {"skill_id": "bench-tool-b", "description": "Generic benchmark tool"},
+            {"skill_id": "trt-perf-analysis", "description": "TensorRT layer analysis"},
+        ]
+        assert started["pending_execution"] is None
+        assert started["execution_result"] is None
+        assert rt_a.calls == [] and rt_b.calls == []
+
+    # ── Valid choice ─────────────────────────────────────────────────────
+
+    def test_valid_choice_is_persisted_and_planning_resumes_with_only_that_skill(
+        self, tmp_path: Path
+    ) -> None:
+        graph, _, rt_a, rt_b = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "cand-2")
+        resumed = _resume(graph, "cand-2", "bench-tool-b")
+
+        assert "__interrupt__" not in resumed
+        assert resumed["candidate_choice"] == "bench-tool-b"
+        selection = resumed["candidate_selection"]
+        assert selection["outcome"] == "selected"
+        assert selection["terminal"] is False
+        assert selection["chosen_skill_id"] == "bench-tool-b"
+        assert sorted(selection["expected_candidate_skill_ids"]) == list(self._IDS)
+        assert resumed["planning_result"]["status"] == "planned"
+        assert resumed["pending_execution"]["skill_id"] == "bench-tool-b"
+        assert resumed["execution_result"]["status"] == "completed"
+        assert resumed["status"] == "done"
+        assert [c[0] for c in rt_b.calls] == ["bench-tool-b"]
+        assert rt_a.calls == []  # the other candidate is never touched
+
+    def test_choice_of_the_other_candidate_runs_the_other_skill(self, tmp_path: Path) -> None:
+        graph, _, rt_a, rt_b = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "cand-3")
+        resumed = _resume(graph, "cand-3", "trt-perf-analysis")
+
+        assert resumed["pending_execution"]["skill_id"] == "trt-perf-analysis"
+        assert [c[0] for c in rt_a.calls] == ["trt-perf-analysis"]
+        assert rt_b.calls == []
+
+    def test_surrounding_whitespace_in_the_choice_is_tolerated(self, tmp_path: Path) -> None:
+        graph, _, _, rt_b = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "cand-4")
+        resumed = _resume(graph, "cand-4", "  bench-tool-b \n")
+
+        assert resumed["candidate_selection"]["outcome"] == "selected"
+        assert [c[0] for c in rt_b.calls] == ["bench-tool-b"]
+
+    # ── Never silently choose: every non-selection is terminal ───────────
+
+    @pytest.mark.parametrize(
+        "answer, outcome",
+        [
+            ("definitely-not-offered", "invalid"),
+            ("bench-tool", "invalid"),  # a prefix/"closest match" is not a match
+            ("BENCH-TOOL-B", "invalid"),  # exact match only, no case folding
+            ("", "cancelled"),
+            ("   ", "cancelled"),
+            ({"skill_id": "bench-tool-b"}, "cancelled"),  # wrong shape, never coerced
+            (0, "cancelled"),
+        ],
+    )
+    def test_invalid_or_cancelled_choice_is_terminal_and_executes_nothing(
+        self, tmp_path: Path, answer: Any, outcome: str
+    ) -> None:
+        graph, _, rt_a, rt_b = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "cand-5")
+        resumed = _resume(graph, "cand-5", answer)
+
+        assert "__interrupt__" not in resumed  # one shot, never a second prompt
+        selection = resumed["candidate_selection"]
+        assert selection["outcome"] == outcome
+        assert selection["terminal"] is True
+        assert selection["chosen_skill_id"] is None
+        assert resumed.get("candidate_choice") is None
+        assert resumed["pending_execution"] is None
+        assert resumed["approval_decision"] is None  # approval_gate bypassed
+        assert resumed["execution_result"] is None
+        assert resumed["status"] == "done"
+        assert rt_a.calls == [] and rt_b.calls == []
+
+    def test_chosen_skill_deregistered_during_the_pause_never_falls_back_to_the_other(
+        self, tmp_path: Path
+    ) -> None:
+        """With bench-tool-b's binding removed mid-pause only trt-perf-
+        analysis remains, so a naive retry would see ONE candidate and plan
+        it — silently running a skill the human did not pick. Must be a
+        terminal candidate_mismatch instead."""
+        graph, registry, rt_a, rt_b = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "cand-6")
+        del registry._bindings["bench-tool-b"]  # simulate a mid-pause registry change
+        resumed = _resume(graph, "cand-6", "bench-tool-b")
+
+        selection = resumed["candidate_selection"]
+        assert selection["outcome"] == "candidate_mismatch"
+        assert selection["terminal"] is True
+        assert resumed["pending_execution"] is None
+        assert resumed["execution_result"] is None
+        assert resumed["status"] == "done"
+        assert rt_a.calls == [] and rt_b.calls == []
+
+    # ── Composition with the other interrupt kinds ───────────────────────
+
+    def test_chosen_candidate_then_missing_inputs_chains_into_the_input_recovery(
+        self, tmp_path: Path
+    ) -> None:
+        """choose_candidate resolves ambiguity, the now-unambiguous
+        candidate is missing a required input, so the SECOND, separate
+        provide_execution_inputs interrupt follows — each bounded to one
+        round, each finalized exactly once."""
+        registry = ExecutionBindingRegistry()
+        self._register(registry, "trt-perf-analysis")
+        rt_b = self._register(
+            registry,
+            "bench-tool-b",
+            input_schema=(InputField(name="path", required=True, description="folder"),),
+        )
+        graph = self._graph_for(tmp_path, registry, skill_ids=self._IDS)
+
+        first = _start(graph, _PLANNING_TASK, "cand-7")
+        assert first["__interrupt__"][0].value["type"] == "choose_candidate"
+
+        second = _resume(graph, "cand-7", "bench-tool-b")
+        assert second["__interrupt__"][0].value["type"] == "provide_execution_inputs"
+        assert second["__interrupt__"][0].value["skill_id"] == "bench-tool-b"
+        assert second["candidate_selection"]["terminal"] is False
+
+        done = _resume(graph, "cand-7", {"path": "/data/clips"})
+        assert "__interrupt__" not in done
+        assert done["candidate_selection"]["outcome"] == "selected"
+        assert done["candidate_selection"]["terminal"] is False  # not re-finalized
+        assert done["execution_input_recovery"]["outcome"] == "supplied"
+        assert done["pending_execution"] == {
+            "skill_id": "bench-tool-b",
+            "inputs": {"path": "/data/clips"},
+            "task": _PLANNING_TASK,
+        }
+        assert rt_b.calls == [("bench-tool-b", {"path": "/data/clips"})]
+
+    def test_approval_required_choice_still_reaches_the_approval_gate(
+        self, tmp_path: Path
+    ) -> None:
+        registry = ExecutionBindingRegistry()
+        self._register(registry, "trt-perf-analysis")
+        rt_b = self._register(registry, "bench-tool-b", approval_policy="approval_required")
+        graph = self._graph_for(tmp_path, registry, skill_ids=self._IDS)
+
+        _start(graph, _PLANNING_TASK, "cand-8")
+        gated = _resume(graph, "cand-8", "bench-tool-b")
+
+        assert gated["__interrupt__"][0].value["type"] == "approval"
+        assert rt_b.calls == []  # choosing is not approving
+        approved = _resume(graph, "cand-8", "approved")
+        assert approved["execution_result"]["status"] == "completed"
+        assert [c[0] for c in rt_b.calls] == ["bench-tool-b"]
+
+    # ── Existing behavior preserved ──────────────────────────────────────
+
+    def test_caller_supplied_pending_execution_bypasses_disambiguation(
+        self, tmp_path: Path
+    ) -> None:
+        """Direct execution intent (ADR-0010 §10) is never second-guessed:
+        even with two ambiguous candidates in play, a caller-supplied
+        pending_execution runs as given, with no choose_candidate interrupt
+        and no planning_result."""
+        graph, _, rt_a, rt_b = self._two(tmp_path)
+
+        result = _start(
+            graph,
+            _PLANNING_TASK,
+            "cand-9",
+            pending_execution={"skill_id": "bench-tool-b", "inputs": {}, "task": "t"},
+        )
+
+        assert "__interrupt__" not in result
+        assert result["planning_result"] is None
+        assert result.get("candidate_selection") is None
+        assert result["execution_result"]["status"] == "completed"
+        assert [c[0] for c in rt_b.calls] == ["bench-tool-b"]
+        assert rt_a.calls == []
+
+    def test_a_single_candidate_never_raises_the_interrupt(self, tmp_path: Path) -> None:
+        registry = ExecutionBindingRegistry()
+        rt = self._register(registry, "trt-perf-analysis")
+        graph = self._graph_for(tmp_path, registry, skill_ids=("trt-perf-analysis",))
+
+        result = _start(graph, _PLANNING_TASK, "cand-10")
+
+        assert "__interrupt__" not in result
+        assert result.get("candidate_selection") is None
+        assert [c[0] for c in rt.calls] == ["trt-perf-analysis"]
+
+
+class TestChooseCandidateThroughCVAgent:
+    """ADR-0010 §16 (Q18) through the real `CVAgent.start_workflow()`/
+    `.resume_workflow()` API — real skill discovery, real `AgentConfig`,
+    real durable Project Memory (pinned to tmp_path, ADR-0004 §1 item 13) —
+    not only the raw compiled graph."""
+
+    def _agent(self, tmp_path: Path):
+        from cv_agent.config.settings import AgentConfig
+        from cv_agent.runtime.agent import CVAgent
+
+        skills = tmp_path / "skills"
+        for skill_id in ("bench-tool-b", "trt-perf-analysis"):
+            _write_planning_skill(skills, skill_id)
+        agent = CVAgent(AgentConfig(skill_paths=(skills,), workspace_root=tmp_path))
+        runtimes = {}
+        for skill_id in ("bench-tool-b", "trt-perf-analysis"):
+            rt = FakeRuntime(
+                runtime_id=f"fake-runtime-{skill_id}",
+                outcome=RuntimeOutcome(success=True, output={"ok": True}),
+            )
+            runtimes[skill_id] = rt
+            agent.execution_bindings.register_runtime(rt)
+            agent.execution_bindings.register_binding(
+                ExecutionBinding(
+                    skill_id=skill_id,
+                    binding_id=f"{skill_id}-v1",
+                    runtime_id=rt.runtime_id,
+                    approval_policy="allowed",
+                    verified=True,
+                    description=f"desc of {skill_id}",
+                )
+            )
+        return agent, runtimes
+
+    def test_start_pauses_and_resume_with_a_valid_choice_executes_only_that_skill(
+        self, tmp_path: Path
+    ) -> None:
+        agent, runtimes = self._agent(tmp_path)
+
+        paused = agent.start_workflow(_PLANNING_TASK, session_id="cva-cand-1")
+
+        payload = paused["__interrupt__"][0].value
+        assert payload["type"] == "choose_candidate"
+        assert payload["candidates"] == [
+            {"skill_id": "bench-tool-b", "description": "desc of bench-tool-b"},
+            {"skill_id": "trt-perf-analysis", "description": "desc of trt-perf-analysis"},
+        ]
+        assert paused["candidate_selection"] is None  # nothing decided yet
+
+        resumed = agent.resume_workflow("cva-cand-1", "trt-perf-analysis")
+
+        assert resumed["status"] == "done"
+        assert resumed["candidate_selection"]["outcome"] == "selected"
+        assert [c[0] for c in runtimes["trt-perf-analysis"].calls] == ["trt-perf-analysis"]
+        assert runtimes["bench-tool-b"].calls == []
+        assert agent.memory.get_session("cva-cand-1").status == "done"
+
+    def test_resume_with_an_unoffered_skill_is_terminal_and_runs_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        agent, runtimes = self._agent(tmp_path)
+
+        agent.start_workflow(_PLANNING_TASK, session_id="cva-cand-2")
+        resumed = agent.resume_workflow("cva-cand-2", "some-other-skill")
+
+        assert resumed["candidate_selection"]["outcome"] == "invalid"
+        assert resumed["candidate_selection"]["terminal"] is True
+        assert resumed["execution_result"] is None
+        assert all(rt.calls == [] for rt in runtimes.values())
+
+
+class TestChooseCandidateAuditFixes:
+    """
+    Independent-audit findings on PR #42 (D1-D4), each pinned by a test that
+    reproduces the audit's scenario against the real compiled graph + real
+    `MemorySaver`.
+    """
+
+    _register = staticmethod(TestPlanExecutionIntegration._register)
+    _IDS = ("bench-tool-b", "trt-perf-analysis")
+
+    def _graph_for(
+        self,
+        tmp_path: Path,
+        execution_registry: ExecutionBindingRegistry,
+        *,
+        skill_ids: tuple[str, ...],
+    ) -> Any:
+        return TestPlanExecutionIntegration()._graph_for(
+            tmp_path, execution_registry, skill_ids=skill_ids
+        )
+
+    def _two(
+        self,
+        tmp_path: Path,
+        ids: tuple[str, ...] = _IDS,
+        schemas: dict[str, tuple[InputField, ...]] | None = None,
+    ):
+        registry = ExecutionBindingRegistry()
+        runtimes = {
+            sid: self._register(
+                registry,
+                sid,
+                description=f"desc-{sid}",
+                input_schema=(schemas or {}).get(sid, ()),
+            )
+            for sid in ids
+        }
+        graph = self._graph_for(tmp_path, registry, skill_ids=ids)
+        return graph, registry, runtimes
+
+    @staticmethod
+    def _ran(runtimes: dict[str, Any]) -> dict[str, list[str]]:
+        return {sid: [c[0] for c in rt.calls] for sid, rt in runtimes.items() if rt.calls}
+
+    # ── D1: the choice is pinned to the exact binding that was shown ─────
+
+    def test_rebinding_the_chosen_skill_during_the_pause_is_terminal_and_runs_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        """The audit's reproduction: same skill_id, different binding_id,
+        runtime AND description, swapped in while the human is deciding."""
+        graph, registry, runtimes = self._two(tmp_path)
+        replacement = FakeRuntime(
+            runtime_id="replacement-runtime",
+            outcome=RuntimeOutcome(success=True, output={"who": "replacement"}),
+        )
+
+        _start(graph, _PLANNING_TASK, "fix-d1-1")
+        registry.register_runtime(replacement)
+        registry.register_binding(
+            ExecutionBinding(
+                skill_id="bench-tool-b",
+                binding_id="bench-tool-b-v2-DIFFERENT",
+                runtime_id="replacement-runtime",
+                approval_policy="allowed",
+                verified=True,
+                description="totally different tool",
+            )
+        )
+        resumed = _resume(graph, "fix-d1-1", "bench-tool-b")
+
+        assert "__interrupt__" not in resumed
+        selection = resumed["candidate_selection"]
+        assert selection["outcome"] == "candidate_mismatch"
+        assert selection["mismatch_detail"] == "binding_changed"
+        assert selection["terminal"] is True
+        assert selection["expected_binding_id"] == "bench-tool-b-v1"
+        assert selection["expected_description"] == "desc-bench-tool-b"
+        assert resumed["pending_execution"] is None
+        assert resumed["approval_decision"] is None
+        assert resumed["execution_result"] is None
+        assert resumed["status"] == "done"
+        assert replacement.calls == []  # the replacement runtime never runs
+        assert self._ran(runtimes) == {}
+
+    def test_same_binding_id_with_a_changed_description_is_also_a_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        graph, registry, runtimes = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-d1-2")
+        original = registry.get_binding("bench-tool-b")
+        assert original is not None
+        registry.register_binding(
+            ExecutionBinding(
+                skill_id=original.skill_id,
+                binding_id=original.binding_id,  # unchanged
+                runtime_id=original.runtime_id,
+                approval_policy=original.approval_policy,
+                verified=True,
+                description="silently reworded after the human read it",
+            )
+        )
+        resumed = _resume(graph, "fix-d1-2", "bench-tool-b")
+
+        selection = resumed["candidate_selection"]
+        assert selection["outcome"] == "candidate_mismatch"
+        assert selection["mismatch_detail"] == "description_changed"
+        assert resumed["execution_result"] is None
+        assert self._ran(runtimes) == {}
+
+    def test_choice_records_the_shown_identity_and_an_unchanged_binding_still_runs(
+        self, tmp_path: Path
+    ) -> None:
+        """No false positive: re-registering an IDENTICAL binding (same
+        binding_id, description, runtime) during the pause is not a change."""
+        graph, registry, runtimes = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-d1-3")
+        same = registry.get_binding("bench-tool-b")
+        assert same is not None
+        registry.register_binding(dataclasses.replace(same))
+        resumed = _resume(graph, "fix-d1-3", "bench-tool-b")
+
+        selection = resumed["candidate_selection"]
+        assert selection["outcome"] == "selected"
+        assert selection["terminal"] is False
+        assert selection["mismatch_detail"] is None
+        assert selection["expected_binding_id"] == "bench-tool-b-v1"
+        assert selection["expected_description"] == "desc-bench-tool-b"
+        assert self._ran(runtimes) == {"bench-tool-b": ["bench-tool-b"]}
+
+    def test_rebinding_only_the_unchosen_candidate_does_not_matter(
+        self, tmp_path: Path
+    ) -> None:
+        graph, registry, runtimes = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-d1-4")
+        registry.register_binding(
+            ExecutionBinding(
+                skill_id="trt-perf-analysis",
+                binding_id="trt-perf-analysis-v9",
+                runtime_id="fake-runtime-trt-perf-analysis",
+                approval_policy="allowed",
+                verified=True,
+                description="changed, but the human chose the other one",
+            )
+        )
+        resumed = _resume(graph, "fix-d1-4", "bench-tool-b")
+
+        assert resumed["candidate_selection"]["outcome"] == "selected"
+        assert self._ran(runtimes) == {"bench-tool-b": ["bench-tool-b"]}
+
+    def test_offered_identity_is_checkpointed_before_the_pause(self, tmp_path: Path) -> None:
+        """Replay safety: the binding_ids/descriptions the choose node reads
+        come from the checkpointed planning_result, as lists (a real
+        MemorySaver round trip normalizes tuples), and stay the ORIGINAL
+        offered values even after the live registry is mutated."""
+        graph, registry, _ = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-d1-5")
+        paused = graph.get_state({"configurable": {"thread_id": "fix-d1-5"}}).values
+        planning = paused["planning_result"]
+        assert planning["candidate_skill_ids"] == ["bench-tool-b", "trt-perf-analysis"]
+        assert planning["candidate_binding_ids"] == [
+            "bench-tool-b-v1",
+            "trt-perf-analysis-v1",
+        ]
+        assert planning["candidate_descriptions"] == ["desc-bench-tool-b", "desc-trt-perf-analysis"]
+
+        registry._bindings.clear()  # mutate the live registry mid-pause
+        after = graph.get_state({"configurable": {"thread_id": "fix-d1-5"}}).values
+        assert after["planning_result"]["candidate_binding_ids"] == planning["candidate_binding_ids"]
+
+    # ── Audit-listed regression coverage (registry mutation / eligibility /
+    #    chained recovery) ────────────────────────────────────────────────
+
+    def test_chosen_skill_removed_during_the_second_pause_of_a_chained_recovery(
+        self, tmp_path: Path
+    ) -> None:
+        graph, registry, runtimes = self._two(
+            tmp_path,
+            schemas={"bench-tool-b": (InputField(name="path", required=True, description="p"),)},
+        )
+
+        _start(graph, _PLANNING_TASK, "fix-chain-1")
+        second = _resume(graph, "fix-chain-1", "bench-tool-b")
+        assert second["__interrupt__"][0].value["type"] == "provide_execution_inputs"
+        del registry._bindings["bench-tool-b"]
+        done = _resume(graph, "fix-chain-1", {"path": "/x"})
+
+        assert done["candidate_selection"]["terminal"] is False  # finalized once, earlier
+        assert done["execution_input_recovery"]["outcome"] == "binding_mismatch"
+        assert done["execution_input_recovery"]["terminal"] is True
+        assert done["pending_execution"] is None
+        assert done["execution_result"] is None
+        assert self._ran(runtimes) == {}  # the remaining candidate never runs either
+
+    def test_each_recovery_record_is_finalized_exactly_once_across_a_chained_run(
+        self, tmp_path: Path
+    ) -> None:
+        graph, _, _ = self._two(
+            tmp_path,
+            schemas={"bench-tool-b": (InputField(name="path", required=True, description="p"),)},
+        )
+
+        _start(graph, _PLANNING_TASK, "fix-chain-2")
+        _resume(graph, "fix-chain-2", "bench-tool-b")
+        done = _resume(graph, "fix-chain-2", {"path": "/x"})
+
+        plan_steps = [s for s in done["steps"] if s["node"] == "plan_execution"]
+        assert len(plan_steps) == 3  # ambiguous, after choose, after provide inputs
+        assert sum("candidate_outcome" in s for s in plan_steps) == 1
+        assert sum("recovery_outcome" in s for s in plan_steps) == 1
+        snapshot = graph.get_state({"configurable": {"thread_id": "fix-chain-2"}}).values
+        assert isinstance(snapshot["candidate_selection"]["expected_candidate_skill_ids"], list)
+        assert snapshot["candidate_choice"] == "bench-tool-b"
+
+    def test_both_candidates_removed_during_the_pause(self, tmp_path: Path) -> None:
+        graph, registry, runtimes = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-gone-1")
+        registry._bindings.clear()
+        resumed = _resume(graph, "fix-gone-1", "bench-tool-b")
+
+        assert resumed["candidate_selection"]["outcome"] == "candidate_mismatch"
+        assert resumed["candidate_selection"]["mismatch_detail"] == "skill_not_resolved"
+        assert resumed["planning_result"]["status"] == "no_executable_candidate"
+        assert resumed["execution_result"] is None
+        assert self._ran(runtimes) == {}
+
+    def test_three_candidates_unchosen_removed_still_resolves_the_chosen_one(
+        self, tmp_path: Path
+    ) -> None:
+        ids = ("a-tool", "bench-tool-b", "trt-perf-analysis")
+        graph, registry, runtimes = self._two(tmp_path, ids=ids)
+
+        started = _start(graph, _PLANNING_TASK, "fix-three-1")
+        assert [c["skill_id"] for c in started["__interrupt__"][0].value["candidates"]] == list(ids)
+        del registry._bindings["a-tool"]
+        resumed = _resume(graph, "fix-three-1", "trt-perf-analysis")
+
+        assert resumed["candidate_selection"]["outcome"] == "selected"
+        assert resumed["candidate_selection"]["expected_candidate_skill_ids"] == list(ids)
+        assert self._ran(runtimes) == {"trt-perf-analysis": ["trt-perf-analysis"]}
+
+    def test_three_candidates_chosen_removed_never_falls_back_to_another(
+        self, tmp_path: Path
+    ) -> None:
+        ids = ("a-tool", "bench-tool-b", "trt-perf-analysis")
+        graph, registry, runtimes = self._two(tmp_path, ids=ids)
+
+        _start(graph, _PLANNING_TASK, "fix-three-2")
+        del registry._bindings["trt-perf-analysis"]  # two others remain: still ambiguous
+        resumed = _resume(graph, "fix-three-2", "trt-perf-analysis")
+
+        assert resumed["candidate_selection"]["outcome"] == "candidate_mismatch"
+        assert resumed["planning_result"]["status"] == "ambiguous_candidates"
+        assert resumed["pending_execution"] is None
+        assert self._ran(runtimes) == {}
+
+    def test_chosen_skill_swapped_to_an_unverified_binding_never_executes(
+        self, tmp_path: Path
+    ) -> None:
+        """Eligibility change WITHOUT disappearance: the chosen skill stays
+        registered but its binding is no longer verified. The executor's own
+        gate (ADR-0009) refuses it; nothing runs, nothing falls back."""
+        graph, registry, runtimes = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-unverified-1")
+        current = registry.get_binding("bench-tool-b")
+        assert current is not None
+        registry.register_binding(dataclasses.replace(current, verified=False))
+        resumed = _resume(graph, "fix-unverified-1", "bench-tool-b")
+
+        assert resumed["execution_result"]["status"] == "not_executable"
+        assert self._ran(runtimes) == {}
+
+    # ── D2: empty resumes are LangGraph behavior, pinned not worked around ─
+
+    def test_empty_dict_resume_is_not_delivered_and_the_interrupt_simply_repauses(
+        self, tmp_path: Path
+    ) -> None:
+        """Pins the installed LangGraph's `Command(resume={})` behavior, not
+        a regression of this PR (the same characteristic ADR-0003 §9 /
+        `CVAgent.resume_workflow()` document for clarify and
+        provide_execution_inputs)."""
+        graph, _, runtimes = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-d2-1")
+        repaused = _resume(graph, "fix-d2-1", {})
+
+        assert repaused["__interrupt__"][0].value["type"] == "choose_candidate"
+        assert repaused.get("candidate_selection") is None  # nothing finalized
+        assert self._ran(runtimes) == {}
+        done = _resume(graph, "fix-d2-1", "bench-tool-b")  # a real answer still works
+        assert done["candidate_selection"]["outcome"] == "selected"
+
+    def test_none_resume_raises_inside_langgraph_and_leaves_the_pause_intact(
+        self, tmp_path: Path
+    ) -> None:
+        """Pins observed framework behavior (an UnboundLocalError raised by
+        the installed LangGraph itself for `Command(resume=None)`); asserts
+        only that it raises and that the thread is left cleanly paused — not
+        the exception type, which is LangGraph's to change."""
+        graph, _, runtimes = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-d2-2")
+        with pytest.raises(Exception):
+            _resume(graph, "fix-d2-2", None)
+
+        snapshot = graph.get_state({"configurable": {"thread_id": "fix-d2-2"}})
+        assert snapshot.next == ("choose_candidate",)
+        assert snapshot.values.get("candidate_selection") is None
+        assert self._ran(runtimes) == {}
+        done = _resume(graph, "fix-d2-2", "trt-perf-analysis")
+        assert done["candidate_selection"]["outcome"] == "selected"
+
+    @pytest.mark.parametrize("answer", [[], False])
+    def test_other_falsy_resumes_are_delivered_and_classified_cancelled(
+        self, tmp_path: Path, answer: Any
+    ) -> None:
+        graph, _, runtimes = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-d2-3")
+        resumed = _resume(graph, "fix-d2-3", answer)
+
+        assert resumed["candidate_selection"]["outcome"] == "cancelled"
+        assert resumed["candidate_selection"]["terminal"] is True
+        assert self._ran(runtimes) == {}
+
+    # ── D3: no plan survives a terminal recovery failure ─────────────────
+
+    def test_candidate_mismatch_clears_the_plan_but_keeps_diagnostics(
+        self, tmp_path: Path
+    ) -> None:
+        graph, registry, runtimes = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-d3-1")
+        del registry._bindings["bench-tool-b"]  # only trt-perf-analysis remains
+        resumed = _resume(graph, "fix-d3-1", "bench-tool-b")
+
+        planning = resumed["planning_result"]
+        assert planning["plan"] is None  # no plan for the skill the human did not choose
+        assert planning["status"] == "planned"  # diagnostics preserved, not rewritten
+        assert planning["selected_skill_id"] == "trt-perf-analysis"
+        assert resumed["candidate_selection"]["outcome"] == "candidate_mismatch"
+        assert resumed["pending_execution"] is None
+        assert resumed["approval_decision"] is None
+        assert resumed["execution_result"] is None
+        assert self._ran(runtimes) == {}
+
+    def test_binding_mismatch_in_input_recovery_also_clears_the_plan(
+        self, tmp_path: Path
+    ) -> None:
+        """Same invariant for the execution-input recovery kind (ADR-0010
+        §13): a swapped binding means the fresh call planned something the
+        human was never asked about, so a terminal `binding_mismatch` must
+        not leave that plan in planning_result either."""
+        registry = ExecutionBindingRegistry()
+        self._register(
+            registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="p"),),
+        )
+        graph = self._graph_for(tmp_path, registry, skill_ids=("trt-perf-analysis",))
+
+        _start(graph, _PLANNING_TASK, "fix-d3-2")
+        self._register(
+            registry,
+            "trt-perf-analysis",
+            input_schema=(InputField(name="path", required=True, description="p"),),
+            binding_id="trt-perf-analysis-v2-different",
+        )
+        resumed = _resume(graph, "fix-d3-2", {"path": "/x"})
+
+        assert resumed["execution_input_recovery"]["outcome"] == "binding_mismatch"
+        assert resumed["planning_result"]["plan"] is None
+        assert resumed["planning_result"]["status"] == "planned"  # diagnostic kept
+        assert resumed["pending_execution"] is None
+
+    def test_successful_recovery_keeps_its_plan(self, tmp_path: Path) -> None:
+        """The clearing is for terminal failures only — a run whose choice
+        succeeded still reports the plan it executed."""
+        graph, _, _ = self._two(tmp_path)
+
+        _start(graph, _PLANNING_TASK, "fix-d3-3")
+        resumed = _resume(graph, "fix-d3-3", "bench-tool-b")
+
+        assert resumed["planning_result"]["plan"]["skill_id"] == "bench-tool-b"
+
+    # ── D4: a malformed offer fails closed ───────────────────────────────
+
+    @pytest.mark.parametrize(
+        "planning",
+        [
+            {  # descriptions truncated
+                "candidate_skill_ids": ["a", "b"],
+                "candidate_descriptions": ["desc a"],
+                "candidate_binding_ids": ["a-v1", "b-v1"],
+            },
+            {  # binding_ids truncated
+                "candidate_skill_ids": ["a", "b"],
+                "candidate_descriptions": ["da", "db"],
+                "candidate_binding_ids": ["a-v1"],
+            },
+            {  # binding_ids absent entirely (e.g. an older checkpoint)
+                "candidate_skill_ids": ["a", "b"],
+                "candidate_descriptions": ["da", "db"],
+            },
+            {  # nothing to offer
+                "candidate_skill_ids": [],
+                "candidate_descriptions": [],
+                "candidate_binding_ids": [],
+            },
+        ],
+    )
+    def test_mismatched_offer_lists_fail_closed_without_prompting(
+        self, planning: dict[str, Any]
+    ) -> None:
+        from cv_agent.graph.workflow import _make_choose_candidate_node
+
+        node = _make_choose_candidate_node()
+        # No LangGraph runtime here on purpose: the guard runs BEFORE
+        # interrupt(), so a fail-closed node must return without ever
+        # calling it (calling interrupt() outside a graph would raise).
+        update = node({"planning_result": planning, "steps": []})
+
+        selection = update["candidate_selection"]
+        assert selection["outcome"] == "malformed_offer"
+        assert selection["terminal"] is True
+        assert selection["chosen_skill_id"] is None
+        assert "skill_ids" in selection["mismatch_detail"]
+        assert update["status"] == "done"
+        assert "candidate_choice" not in update
+        assert update["steps"][-1]["action"] == "candidate_offer_malformed_terminal"
+
+    def test_malformed_offer_routes_to_end_through_the_real_graph(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End to end: with a planner that (hypothetically) produced
+        disagreeing lists, the compiled graph never prompts, never executes,
+        and terminates at END with status done."""
+        from cv_agent.graph import workflow as workflow_module
+        from cv_agent.graph.planning import PlanningResult
+
+        graph, _, runtimes = self._two(tmp_path)
+        monkeypatch.setattr(
+            workflow_module,
+            "plan_execution",
+            lambda *a, **k: PlanningResult(
+                status="ambiguous_candidates",
+                candidate_skill_ids=("bench-tool-b", "trt-perf-analysis"),
+                candidate_descriptions=("only one description",),
+                candidate_binding_ids=("bench-tool-b-v1", "trt-perf-analysis-v1"),
+            ),
+        )
+
+        result = _start(graph, _PLANNING_TASK, "fix-d4-graph")
+
+        assert "__interrupt__" not in result
+        assert result["candidate_selection"]["outcome"] == "malformed_offer"
+        assert result["candidate_selection"]["terminal"] is True
+        assert result["status"] == "done"
+        assert result["pending_execution"] is None
+        assert result["approval_decision"] is None
+        assert result["execution_result"] is None
+        assert self._ran(runtimes) == {}
