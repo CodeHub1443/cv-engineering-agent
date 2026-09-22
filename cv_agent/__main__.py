@@ -397,6 +397,7 @@ def _cmd_execute(
     model_name: str | None,
     task: str | None,
     approve: bool,
+    prompt: Callable[[str], str] = input,
 ) -> int:
     """
     The real execution path: CVAgent -> SkillExecutor -> ExecutionBindingRegistry
@@ -406,6 +407,14 @@ def _cmd_execute(
     requested skill, verify it is executable, construct the execution
     request, invoke the existing CVAgent/SkillExecutor path, return the
     real result, surface errors clearly.
+
+    `prompt` (issue #48): the same injectable seam `_authorize_and_execute`/
+    `_confirm_approval` already accept, threaded one layer further out so a
+    test can supply approval answers without touching real stdin. Defaults to
+    the real `input` builtin — `main()` never passes this argument, so live
+    CLI behavior is unchanged; a default parameter value is bound once, at
+    import time, so this is the only place able to override it for a caller
+    that never goes through `main()`.
     """
     import json
 
@@ -464,7 +473,7 @@ def _cmd_execute(
 
     try:
         result = _authorize_and_execute(
-            agent, skill, binding, inputs=inputs, task=task, approve_flag=approve
+            agent, skill, binding, inputs=inputs, task=task, approve_flag=approve, prompt=prompt
         )
     except ValueError as exc:
         # The binding cannot be pinned (non-JSON-native default, ADR-0003
