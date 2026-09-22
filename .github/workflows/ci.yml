@@ -1,0 +1,46 @@
+name: CI
+
+# Phase 0 governance scope ("GitHub labels, templates, CI" — see
+# docs/roadmap/ROADMAP.md) — runs ruff, mypy, and the full pytest suite on
+# every push to main and every pull request targeting it, so future PRs no
+# longer rely solely on self-reported local results.
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.10 is this repo's declared minimum (pyproject.toml
+      # requires-python = ">=3.10") and the version this codebase has
+      # actually been developed and validated against.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install project and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff (cv_agent, tests)
+        run: ruff check cv_agent tests
+
+      # mypy covers cv_agent only, matching this project's established
+      # baseline (every prior PR's "mypy clean" claim was against cv_agent,
+      # never the whole tests/ tree). tests/ as a whole is not yet
+      # mypy-clean (18 pre-existing errors across 5 files, confirmed by
+      # running `mypy tests` directly); broadening this to tests/ is future
+      # work, not folded into this baseline to avoid unrelated cleanup.
+      - name: mypy (cv_agent)
+        run: mypy cv_agent
+
+      - name: pytest (full suite)
+        run: pytest

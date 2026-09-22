@@ -198,8 +198,6 @@ def _node_clarify(state: AgentState) -> dict[str, Any]:
         "problem_statement": analysis.get("problem_statement"),
         "questions": questions,
     }
-    prompt_lines = [f"- {q['question']} (why: {q['why_it_matters']})" for q in questions]
-    pending_prompt = "Clarification needed:\n" + "\n".join(prompt_lines)
 
     answers = interrupt(payload)
     # `answers` is whatever the caller passed to Command(resume=...) — must

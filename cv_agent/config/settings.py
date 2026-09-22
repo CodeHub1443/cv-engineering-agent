@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from importlib.resources.abc import Traversable  # Python 3.12+
+    # Real stdlib module, but typeshed ships no stubs for it under the
+    # mypy/Python combination this repo runs — ignored below, not a bug.
+    from importlib.resources.abc import Traversable  # type: ignore[import-untyped]  # Python 3.12+
 except ImportError:  # pragma: no cover - exercised on Python < 3.12
     from importlib.abc import Traversable  # Python 3.10-3.11
 
@@ -35,7 +37,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 def _resource_path(relative_path: str) -> Path:
     """Return the installed filesystem path for a packaged runtime resource."""
     resource = resources.files(_RESOURCE_PACKAGE).joinpath(relative_path)
-    return Path(resource)
+    # A Traversable backed by a real filesystem package (the only kind this
+    # repo produces) implements __fspath__ at runtime; the Traversable
+    # Protocol itself just doesn't declare that, so mypy can't verify it.
+    return Path(resource)  # type: ignore[arg-type]
 
 _DEFAULT_CONFIG_RESOURCE = resource_files("cv_agent").joinpath("resources/default.toml")
 _DEFAULT_REGISTRY_RESOURCE = resource_files("cv_agent").joinpath("resources/capability_registry.json")

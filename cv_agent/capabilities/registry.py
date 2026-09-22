@@ -22,13 +22,16 @@ implemented yet (see docs/state/STATUS.md).
 
 from __future__ import annotations
 
+import builtins
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Optional
 
 try:
-    from importlib.resources.abc import Traversable  # Python 3.12+
+    # Real stdlib module, but typeshed ships no stubs for it under the
+    # mypy/Python combination this repo runs — ignored below, not a bug.
+    from importlib.resources.abc import Traversable  # type: ignore[import-untyped]  # Python 3.12+
 except ImportError:  # pragma: no cover - exercised on Python < 3.12
     from importlib.abc import Traversable  # Python 3.10-3.11
 
@@ -216,14 +219,20 @@ class CapabilityRegistry:
                 "risk_level": cap.risk_level, "reason": reason,
                 "missing_prerequisites": missing_prereqs}
 
-    def select(self, task_type: str, *, category: Optional[str] = None) -> list[Capability]:
+    # Return type is `builtins.list[...]`, not the bare `list[...]` this class
+    # uses elsewhere: this class also defines an instance method named `list`
+    # (see above), which shadows the builtin for annotations resolved within
+    # this class body under `from __future__ import annotations` — a real
+    # mypy resolution quirk, not a behavior difference (annotations are
+    # unevaluated strings at runtime either way).
+    def select(self, task_type: str, *, category: Optional[str] = None) -> builtins.list[Capability]:
         self._ensure_loaded()
         results = [c for c in self._capabilities.values()
                    if task_type in c.applicable_task_types and c.is_available
                    and (category is None or c.category == category)]
         return sorted(results, key=lambda c: c.id)
 
-    def list_items(self, item_type: Optional[ItemType] = None) -> list[RegistryItem]:
+    def list_items(self, item_type: Optional[ItemType] = None) -> builtins.list[RegistryItem]:
         self._ensure_loaded()
         items = list(self._items.values())
         if item_type is not None:

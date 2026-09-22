@@ -55,7 +55,16 @@ def get_provider(name: str, model: str) -> LLMProvider:
             f"Registered providers: {available}"
         )
     cls = _REGISTRY[name]
-    return cls(model=model)
+    # `LLMProvider` (the ABC) declares no __init__, since its only concrete
+    # subclasses today are free to accept whatever their own adapter needs
+    # (API keys, timeouts, ...) — `register_provider()` enforces `issubclass
+    # (cls, LLMProvider)` but not a constructor signature. Every provider
+    # actually registered is required, by this function's own contract
+    # above ("model: Model identifier passed to the provider constructor"),
+    # to accept `model` as shown; mypy cannot verify that through a bare
+    # `Type[LLMProvider]`, so this is a real, load-bearing runtime contract,
+    # not a bug — a provider that violates it fails loudly here, uncaught.
+    return cls(model=model)  # type: ignore[call-arg]
 
 
 def list_providers() -> list[str]:

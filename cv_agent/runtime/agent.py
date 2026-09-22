@@ -594,7 +594,8 @@ class CVAgent:
             from importlib.metadata import version
             
             lg_version: str = version("langgraph")
-            import langgraph  # noqa: PLC0415
+            import langgraph  # noqa: F401,PLC0415 — presence probe: the import itself is
+            # the check (distribution metadata alone doesn't prove the package imports).
             lg_ok = True
         except Exception as exc:  # noqa: BLE001
             lg_version = str(exc)

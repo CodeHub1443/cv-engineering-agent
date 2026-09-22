@@ -22,7 +22,7 @@ match's `executable` stays False, exactly as before this amendment.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from cv_agent.capabilities.registry import Capability, CapabilityRegistry
 from cv_agent.skills.inventory import SkillInventory

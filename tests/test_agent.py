@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -186,7 +185,7 @@ class TestRequirementsAnalysisSkillLinks:
 
         analysis = agent.analyze_requirements(_TRT_PERF_REQUEST)
 
-        trt_links = [l for l in analysis.skill_links if l.skill_id == "trt-perf-analysis"]
+        trt_links = [link for link in analysis.skill_links if link.skill_id == "trt-perf-analysis"]
         assert len(trt_links) == 1
         assert trt_links[0].executable is True
 
@@ -201,7 +200,7 @@ class TestRequirementsAnalysisSkillLinks:
 
         analysis = agent.analyze_requirements(_TRT_PERF_REQUEST)
 
-        trt_links = [l for l in analysis.skill_links if l.skill_id == "trt-perf-analysis"]
+        trt_links = [link for link in analysis.skill_links if link.skill_id == "trt-perf-analysis"]
         assert len(trt_links) == 1
         assert trt_links[0].executable is False
 
@@ -224,7 +223,7 @@ class TestRequirementsAnalysisSkillLinks:
 
         analysis = agent.analyze_requirements(_TRT_PERF_REQUEST)
 
-        trt_links = [l for l in analysis.skill_links if l.skill_id == "trt-perf-analysis"]
+        trt_links = [link for link in analysis.skill_links if link.skill_id == "trt-perf-analysis"]
         assert len(trt_links) == 1
         assert trt_links[0].executable is False
 
@@ -258,12 +257,12 @@ class TestRealTrtPerfAnalysisSkillLink:
 
         agent = CVAgent()
         before = agent.analyze_requirements(_TRT_PERF_REQUEST)
-        before_links = [l for l in before.skill_links if l.skill_id == "trt-perf-analysis"]
+        before_links = [link for link in before.skill_links if link.skill_id == "trt-perf-analysis"]
         assert len(before_links) == 1
         assert before_links[0].executable is False
 
         register(agent.execution_bindings)
         after = agent.analyze_requirements(_TRT_PERF_REQUEST)
-        after_links = [l for l in after.skill_links if l.skill_id == "trt-perf-analysis"]
+        after_links = [link for link in after.skill_links if link.skill_id == "trt-perf-analysis"]
         assert len(after_links) == 1
         assert after_links[0].executable is True

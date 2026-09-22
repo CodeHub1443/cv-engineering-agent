@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 try:
     from importlib.resources.abc import Traversable  # Python 3.12+
 except ImportError:  # pragma: no cover - exercised on Python < 3.12

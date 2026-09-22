@@ -22,6 +22,15 @@ GitHub labels, templates, CI.
 correct account of the project's next three actions and its hard rules — without being
 told anything in chat.
 
+**Status:** rolling state files, policy docs, ADR template, and GitHub labels/templates
+are in place and actively maintained (`docs/state/DECISIONS.md` has 32+ logged rows as
+of `main` `0e86979`). **Was not done, now added:** GitHub Actions CI (`ruff` + `mypy` +
+`pytest` on push/PR to `main`) — previously the scope item this phase names ("GitHub
+labels, templates, CI") had labels and templates but no CI at all, and `ruff`/`mypy`
+weren't even declared as dev dependencies. The exit test itself (a fresh session
+producing a correct account unprompted) has not been formally run/recorded — this
+Status line does not claim the phase is done, only that its named scope items now exist.
+
 ---
 
 ## Phase 1 — Substrate
@@ -44,8 +53,21 @@ implemented, **and now wired into `CVAgent`**: `AgentConfig.workspace_root` +
 restarts) — `start_workflow()`/`resume_workflow()` write a `SessionRecord` per
 session and an immutable `ProjectUnderstandingRevision` whenever requirements
 analysis factually changes. `cv_agent/graph/workflow.py` itself remains untouched —
-persistence wraps the graph invocation in `CVAgent`, not inside a node. **Not done:**
-ADR-0002 (LLM gateway is currently mock-provider-only, no real swap demonstrated).
+persistence wraps the graph invocation in `CVAgent`, not inside a node. **Since
+2026-09-21 (issue #43, ADR-0003 §10, PR #46, merged as `a92ec2e`):** the approval
+pause itself was hardened — `pending_execution` now carries an immutable
+`execution_pin` (a canonical binding snapshot + runtime-registration generation)
+captured once at plan time; `approval_gate` decides from that pin only, never a live
+registry read; a recorded rejection is checked before any pin validation or executor
+call, so a binding/runtime replaced during the pause can neither execute under a stale
+approval nor override a rejection. `SkillExecutor`/`ExecutionBindingRegistry`
+(ADR-0009) gained the comparison primitives this depends on (`ExecutionBinding.pin()`,
+runtime-generation tracking) — cross-cutting into Phase 3's scope. 108 dedicated tests
+(`tests/test_approval_integrity.py`). **Not done:** ADR-0002 (LLM gateway is currently
+mock-provider-only, no real swap demonstrated); the cost-estimate + persisted
+approval-record mechanism `docs/APPROVALS.md` specifies is still unimplemented
+(`docs/state/OPEN_QUESTIONS.md` Q19) — low-impact today only because the one real
+binding defaults to `"allowed"`, so no approval gate fires in practice yet.
 
 **Exit test:**
 1. A capability with no satisfying skill resolves to "known but unavailable" and is
@@ -68,6 +90,9 @@ ADR-0002 (LLM gateway is currently mock-provider-only, no real swap demonstrated
 
 **Scope:** ADR-0005 tool/MCP boundary · ADR-0006 retrieval, provenance, freshness ·
 research pipeline per `docs/RESEARCH_POLICY.md` · source-class weighting.
+
+**Status:** not started. Neither ADR-0005 nor ADR-0006 has been written; no `cv_agent`
+module for retrieval, MCP, or web research exists.
 
 **Exit test:** asked "what should we use to detect small objects on a Jetson today", the
 agent returns candidates each carrying source, source class, and date; it declines to
@@ -93,8 +118,16 @@ first real tenant: `trt-perf-analysis` is an individually-verified, CLI-executab
 `ExecutionRuntime` binding (`python -m cv_agent execute trt-perf-analysis`) — but
 inspection of the other 83 installed skills found every one is prose for an LLM agent
 to read and act on with its own tools, not a program with a verifiable invocation
-contract (see ADR-0009 §1). **Not done:** adapters for those other 83 skills, a second
-`SkillSource` (only local filesystem discovery exists).
+contract (see ADR-0009 §1). **Since 2026-09-21 (issues #47/#48, PRs #49/#50, merged as
+`9f7ad6a`/`0e86979`):** the CLI's approval prompts (`workflow` and `execute`) now show
+the runtime and description the pinned approval is compared against, not just the
+skill/binding id (#47); `_cmd_execute`'s approval-required and unpinnable-binding
+branches — previously unreachable, since the one real binding is `"allowed"` — are now
+covered by 6 fixture-based, in-process tests via a monkeypatched registration and an
+injectable `prompt` parameter, with no approval-required binding ever registered for
+the real skill (#48). Both are CLI-surface/test-coverage work on top of the ADR-0003
+§10 hardening above, not new capability. **Not done:** adapters for those other 83
+skills, a second `SkillSource` (only local filesystem discovery exists).
 
 **Exit test:** a quantization capability resolves to an external NVIDIA skill; the repo
 contains **no** reimplementation of that skill's logic; and the agent can enumerate which
@@ -151,8 +184,14 @@ programmatically.)*
 
 **Goal:** measurable ground truth. `[P§26]`, `[P§29.2]`
 
-**Scope:** ADR-0009 dataset subsystem · manifests, versions, splits, leakage checks ·
-baseline establishment workflow.
+**Scope:** a dataset-subsystem ADR (number TBD — `ADR-0009` is now
+`docs/architecture/adr/ADR-0009-skill-execution-boundary.md`, assigned to the skill
+execution-boundary work instead, per this repo's real numbering practice; same
+situation Phase 6 below already documents for `ADR-0010`) · manifests, versions,
+splits, leakage checks · baseline establishment workflow.
+
+**Status:** not started. No `cv_agent` module, no dataset ADR, no manifest/version/
+leakage-check code exists. `docs/DATA.md` (policy) exists but is unexercised.
 
 **Exit test:** a dataset version is created, a temporal- and camera-leakage check runs and
 **fails** a deliberately leaky split, and a baseline run is recorded with accuracy,
@@ -169,6 +208,10 @@ latency, memory, and power on a named target.
 that decision was actually written, per this repo's real numbering practice —
 see its own header note) · ADR-0011 evaluation & failure analysis.
 
+**Status:** not started. No training-execution or evaluation ADR has been written; no
+`cv_agent` training/evaluation module exists; `docs/state/EXPERIMENTS.md`'s schema is a
+hand-maintained convention with zero real rows recorded — no code reads or writes it.
+
 **Exit test:** a training run requests approval with a cost estimate, runs after approval,
 writes a complete ledger row, produces a composite result per `docs/EVALUATION.md`, and
 returns a ranked failure-category analysis with a proposed next experiment.
@@ -182,6 +225,11 @@ returns a ranked failure-category analysis with a proposed next experiment.
 **Scope:** ADR-0012 optimization & deployment · ONNX → TensorRT → FP16 → INT8 pipeline ·
 profiling · DeepStream integration.
 
+**Status:** not started. ADR-0012 has not been written. Note: `trt-perf-analysis`
+(Phase 3's one real binding) *analyzes* already-produced TensorRT layer/profile JSON —
+it does not export, quantize, or deploy anything, so it is not partial progress on this
+phase's own scope.
+
 **Exit test:** an optimization is applied, re-measured for accuracy **and** system
 metrics, compared to baseline under identical conditions, and rejected automatically if
 accuracy regressed beyond the stated tolerance.
@@ -193,6 +241,9 @@ accuracy regressed beyond the stated tolerance.
 **Goal:** the system outlives deployment. `[P§28]`
 
 **Scope:** ADR-0013 monitoring · drift detection against the validated baseline.
+
+**Status:** not started. ADR-0013 has not been written; no monitoring/drift-detection
+code exists. Blocked behind Phases 5–7 (nothing is deployed yet to monitor).
 
 **Exit test:** a simulated production deviation (confidence-distribution shift, FPS drop,
 camera degradation) is detected and reported against the validated baseline.

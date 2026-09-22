@@ -17,7 +17,7 @@ a permanent property of the skill — see `SkillLink`'s own docstring.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 InfoStatus = Literal["known", "unknown", "assumed"]
