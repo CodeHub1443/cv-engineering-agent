@@ -19,9 +19,10 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    # Real stdlib module, but typeshed ships no stubs for it under the
-    # mypy/Python combination this repo runs — ignored below, not a bug.
-    from importlib.resources.abc import Traversable  # type: ignore[import-untyped]  # Python 3.12+
+    # Real stdlib module, but typeshed gates it to Python 3.11+ (see
+    # typeshed stdlib/VERSIONS); mypy targeting 3.10 correctly reports
+    # import-not-found here — ignored below, not a bug.
+    from importlib.resources.abc import Traversable  # type: ignore[import-untyped, import-not-found]  # Python 3.11+
 except ImportError:  # pragma: no cover - exercised on Python < 3.12
     from importlib.abc import Traversable  # Python 3.10-3.11
 
