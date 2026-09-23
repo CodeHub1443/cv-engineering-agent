@@ -8,6 +8,7 @@ get_provider(); it never imports a concrete adapter directly.
 
 from __future__ import annotations
 
+import importlib
 from typing import Type
 
 from cv_agent.llm.base import LLMProvider
@@ -16,6 +17,16 @@ from cv_agent.llm.mock import FakeLLMProvider
 # Internal registry: provider name → concrete class
 _REGISTRY: dict[str, Type[LLMProvider]] = {
     FakeLLMProvider.PROVIDER_NAME: FakeLLMProvider,
+}
+
+# Provider name -> adapter module to import lazily on first request. The
+# adapter module registers itself (register_provider()) as a side effect of
+# being imported. Kept as a plain literal map, not a discovery mechanism —
+# adding a provider means adding one entry here and one new module (ADR-0002
+# §4: a generic plugin-scanner was rejected as speculative with only one
+# real adapter to justify it).
+_LAZY_ADAPTERS: dict[str, str] = {
+    "anthropic": "cv_agent.llm.anthropic_provider",
 }
 
 
@@ -46,8 +57,21 @@ def get_provider(name: str, model: str) -> LLMProvider:
         Configured LLMProvider instance.
 
     Raises:
-        ValueError: If the provider name is not registered.
+        ValueError: If the provider name is not registered and has no known
+            adapter module, or its adapter module failed to import (e.g. the
+            provider's optional dependency is not installed).
     """
+    if name not in _REGISTRY and name in _LAZY_ADAPTERS:
+        module_name = _LAZY_ADAPTERS[name]
+        try:
+            importlib.import_module(module_name)
+        except ImportError as exc:
+            raise ValueError(
+                f"LLM provider {name!r} is known but its adapter module "
+                f"{module_name!r} failed to import (its optional dependency "
+                f"may not be installed): {exc}"
+            ) from exc
+
     if name not in _REGISTRY:
         available = ", ".join(sorted(_REGISTRY))
         raise ValueError(
@@ -68,5 +92,12 @@ def get_provider(name: str, model: str) -> LLMProvider:
 
 
 def list_providers() -> list[str]:
-    """Return sorted list of registered provider names."""
-    return sorted(_REGISTRY)
+    """Return sorted list of provider names, registered or known-lazy.
+
+    Includes names in `_LAZY_ADAPTERS` that have not been imported yet, so a
+    caller can discover "anthropic" is available without first triggering
+    get_provider() — importing its adapter module may still fail later (e.g.
+    a missing optional dependency), which get_provider() reports at that
+    point, not here.
+    """
+    return sorted(set(_REGISTRY) | set(_LAZY_ADAPTERS))

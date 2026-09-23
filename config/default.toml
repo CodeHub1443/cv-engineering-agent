@@ -6,4 +6,4 @@ model    = "fake-1"
 # Example:
 # [llm.overrides.planner]
 # provider = "anthropic"
-# model    = "claude-opus-4-5"
+# model    = "claude-sonnet-4-5"

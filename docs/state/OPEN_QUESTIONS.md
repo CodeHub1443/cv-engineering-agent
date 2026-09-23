@@ -37,9 +37,6 @@ whether these are MCP servers, CLI tools, Python SDKs, or agent skills.
 **Q6.** What are the default cost thresholds for approval gates (GPU-hours, $, dataset
 mutation scope)? `docs/APPROVALS.md` has placeholders. `[P§24]`
 
-**Q7.** Which LLM providers are actually available with keys, and what is the routing
-policy per task class? `[P§20]`
-
 **Q16.** What is the persistence backend for the experiment ledger (`docs/state/
 EXPERIMENTS.md`)? Files, SQLite, or a service? — split off from the former Q8
 2026-09-15 when Q8's project-memory half was resolved (SQLite; see Q8, Answered,
@@ -115,6 +112,13 @@ interrupt kinds.*
 **Q14.** Multi-user / team usage, or single-operator? Affects memory and approvals.
 
 ## Answered
+
+~~**Q7.** Which LLM providers are actually available with keys, and what is the
+routing policy per task class?~~ `[P§20]` — **Answered 2026-09-23 (owner decision,
+D-033):** **Anthropic**, with credentials available; routing policy is **a single
+configured model, no automatic fallback** — task-complexity-based routing (`[P§20]`'s
+long-term vision) is explicitly deferred, not decided against, pending a second
+authorized provider. See ADR-0002.
 
 ~~**Q0.** Should the canonical document be edited into the repository docs, or kept
 verbatim?~~ — **Answered 2026-08-30:** kept verbatim and frozen as `docs/PROJECT.md`;

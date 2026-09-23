@@ -63,17 +63,26 @@ call, so a binding/runtime replaced during the pause can neither execute under a
 approval nor override a rejection. `SkillExecutor`/`ExecutionBindingRegistry`
 (ADR-0009) gained the comparison primitives this depends on (`ExecutionBinding.pin()`,
 runtime-generation tracking) — cross-cutting into Phase 3's scope. 108 dedicated tests
-(`tests/test_approval_integrity.py`). **Not done:** ADR-0002 (LLM gateway is currently
-mock-provider-only, no real swap demonstrated); the cost-estimate + persisted
+(`tests/test_approval_integrity.py`). **Since 2026-09-23 (ADR-0002, D-033):** the LLM
+gateway gained its first real adapter, `AnthropicProvider` (`cv_agent/llm/
+anthropic_provider.py`), lazily registered in `cv_agent.llm.registry`; `FakeLLMProvider`
+remains the default and every existing call site is unaffected. Single configured
+model, no automatic fallback — task-complexity routing (`[P§20]`) remains future work
+pending a second authorized provider. **Not done:** the cost-estimate + persisted
 approval-record mechanism `docs/APPROVALS.md` specifies is still unimplemented
 (`docs/state/OPEN_QUESTIONS.md` Q19) — low-impact today only because the one real
-binding defaults to `"allowed"`, so no approval gate fires in practice yet.
+binding defaults to `"allowed"`, so no approval gate fires in practice yet; this is
+unchanged by ADR-0002, which deliberately does not invent a cost/call-budget
+mechanism for the same reason.
 
 **Exit test:**
 1. A capability with no satisfying skill resolves to "known but unavailable" and is
    reported as such, not as an error.
 2. Two different LLM providers are swappable by configuration alone; `grep` finds no
-   provider name outside the gateway.
+   provider name outside the gateway. *(Met 2026-09-23, ADR-0002: `"mock"` and
+   `"anthropic"` are both selectable via `LLMConfig.provider` alone; a structural
+   test — `tests/test_llm_anthropic.py::TestArchitectureBoundary` — enforces that
+   `anthropic` is imported nowhere outside `cv_agent/llm/anthropic_provider.py`.)*
 3. A workflow run halts at an approval gate, the process is restarted, and the run
    resumes from the checkpoint with the approval still pending. *(Halts at an approval
    gate and resumes with the decision as the source of truth: met, in-process —
