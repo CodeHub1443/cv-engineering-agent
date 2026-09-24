@@ -107,8 +107,10 @@ research pipeline per `docs/RESEARCH_POLICY.md` · source-class weighting.
 **Accepted and implemented** — `cv_agent/tools/` (`docs/architecture/adr/ADR-0005-
 tool-mcp-boundary.md`), the generic `ToolSpec`/`ToolInvoker`/`ToolRegistry`/
 `ToolExecutor` boundary, fail-closed, invoker-registration-generation protected,
-71 tests. Zero tools/invokers registered, no MCP SDK/vendor selected,
-`OPEN_QUESTIONS.md` Q5's MCP-vs-skill half left explicitly unresolved — this is the
+71 tests. Zero tools/invokers registered, no MCP SDK/vendor selected.
+`OPEN_QUESTIONS.md` Q5's MCP-vs-skill half was left unresolved when this landed and was
+**answered 2026-09-24 (D-042): V1 uses the existing Skill/CLI mechanism, MCP SDK
+integration deferred, abstraction stays transport-agnostic** — this is still the
 boundary only, not a real integration. **Also since 2026-09-24:** ADR-0006 (knowledge/
 context boundary) is **Accepted and implemented** — `cv_agent/knowledge/`
 (`docs/architecture/adr/ADR-0006-knowledge-context-boundary.md`): `Provenance`/
@@ -224,9 +226,17 @@ camera / subject / annotation-round / supplied-hash near-duplicate leakage check
 storage-agnostic `DatasetStore` protocol and an in-memory reference implementation,
 88 tests. **Not done:** any storage/versioning backend (`OPEN_QUESTIONS.md` Q10 is
 still open — none was chosen), computing perceptual hashes (they are supplied), the
-baseline establishment workflow (Phase 5b — needs Q4/Q2 and a real execution
-mechanism), and any wiring into `CVAgent` or the experiment ledger. `docs/DATA.md`
-remains the authoritative policy.
+baseline establishment workflow (Phase 5b), and any wiring into `CVAgent` or the
+experiment ledger. `docs/DATA.md` remains the authoritative policy.
+
+**Phase 5b preparation (2026-09-24):** Q2, Q4 and Q5 are decided — V1 runs on a local
+Linux/NVIDIA GPU host with workloads as controlled jobs separate from the Agent process
+(D-040); validation uses a controlled reference project first (D-041); the execution
+mechanism is the existing Skill/CLI path with MCP deferred (D-042). Phase 5b still needs:
+the reference project named (Q24), the host/GPU named (Q25), and a real, individually
+verified execution mechanism (an ADR-0009 binding or an ADR-0005 `ToolInvoker`). If the
+baseline includes a training or other gated run it also needs Q6/Q19; a durable dataset
+store needs Q10. No baseline execution exists yet.
 
 **Exit test:** a dataset version is created, a temporal- and camera-leakage check runs and
 **fails** a deliberately leaky split, and a baseline run is recorded with accuracy,
