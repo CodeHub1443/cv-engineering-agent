@@ -211,14 +211,22 @@ programmatically.)*
 
 **Goal:** measurable ground truth. `[P§26]`, `[P§29.2]`
 
-**Scope:** a dataset-subsystem ADR (number TBD — `ADR-0009` is now
-`docs/architecture/adr/ADR-0009-skill-execution-boundary.md`, assigned to the skill
-execution-boundary work instead, per this repo's real numbering practice; same
-situation Phase 6 below already documents for `ADR-0010`) · manifests, versions,
-splits, leakage checks · baseline establishment workflow.
+**Scope:** a dataset-subsystem ADR (`ADR-0009` had been reserved for it but went to
+the skill execution-boundary work, per this repo's real numbering practice; it is
+`ADR-0012`) · manifests, versions, splits, leakage checks · baseline establishment
+workflow.
 
-**Status:** not started. No `cv_agent` module, no dataset ADR, no manifest/version/
-leakage-check code exists. `docs/DATA.md` (policy) exists but is unexercised.
+**Status:** partially started. **Phase 5a — Dataset Core — is implemented (2026-09-24,
+ADR-0012, issue #59):** `cv_agent/datasets/` — immutable `DatasetManifest` (the dataset
+version, `docs/DATA.md`'s manifest fields), recorded splits, deterministic temporal /
+camera / subject / annotation-round / supplied-hash near-duplicate leakage checks
+(a manifest cannot exist with a failed check; the report is recorded in it), a
+storage-agnostic `DatasetStore` protocol and an in-memory reference implementation,
+88 tests. **Not done:** any storage/versioning backend (`OPEN_QUESTIONS.md` Q10 is
+still open — none was chosen), computing perceptual hashes (they are supplied), the
+baseline establishment workflow (Phase 5b — needs Q4/Q2 and a real execution
+mechanism), and any wiring into `CVAgent` or the experiment ledger. `docs/DATA.md`
+remains the authoritative policy.
 
 **Exit test:** a dataset version is created, a temporal- and camera-leakage check runs and
 **fails** a deliberately leaky split, and a baseline run is recorded with accuracy,
