@@ -37,12 +37,20 @@ whether these are MCP servers, CLI tools, Python SDKs, or agent skills.
 **Q6.** What are the default cost thresholds for approval gates (GPU-hours, $, dataset
 mutation scope)? `docs/APPROVALS.md` has placeholders. `[P§24]`
 
-**Q16.** What is the persistence backend for the experiment ledger (`docs/state/
+~~**Q16.** What is the persistence backend for the experiment ledger (`docs/state/
 EXPERIMENTS.md`)? Files, SQLite, or a service? — split off from the former Q8
 2026-09-15 when Q8's project-memory half was resolved (SQLite; see Q8, Answered,
 D-017) — the experiment-ledger half was explicitly **not** resolved by that decision
 (ADR-0004 does not move `EXPERIMENTS.md` into SQLite or change its contract) and
-remains open. Does not block ADR-0004/`cv_agent/memory/` implementation.
+remains open. Does not block ADR-0004/`cv_agent/memory/` implementation.~~ —
+**Answered 2026-09-24 (owner decision, D-038): SQLite**, mirroring `cv_agent/memory/`'s
+`ProjectMemoryStore`/`SqliteProjectMemoryStore` pattern. Implemented as
+`cv_agent/experiments/` (ADR-0011, issue #57): a separate `experiments.sqlite` file
+(not a table inside project memory's database), behind an `ExperimentLedger`
+`Protocol`. `docs/state/EXPERIMENTS.md` remains the human-facing schema definition;
+the SQLite ledger is its machine-readable enforcement. Not yet wired into
+`CVAgent`/the CLI — no training/evaluation subsystem exists to write real rows.
+Does not resolve Q3, Q23, or any other open question.
 
 **Q9.** LinkedIn as a research source `[P§17]` — what is the actual access mechanism, and
 what are the terms-of-service constraints? The requirement is clear; the mechanism is

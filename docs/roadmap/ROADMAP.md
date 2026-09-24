@@ -89,6 +89,9 @@ mechanism for the same reason.
    `tests/test_workflow.py`. Survives an actual process restart: not yet — the default
    checkpointer, `MemorySaver`, is in-process only; see ADR-0003 §1/§8.)*
 4. An experiment row can be written and read back with the full `[P§25]` schema enforced.
+   *(Met 2026-09-24, ADR-0011/Q16: `cv_agent/experiments/`'s SQLite-backed
+   `ExperimentLedger` — `tests/test_experiments.py`, 90 tests. Not yet wired into
+   `CVAgent`/the CLI; no real training run has written a row.)*
 
 ---
 

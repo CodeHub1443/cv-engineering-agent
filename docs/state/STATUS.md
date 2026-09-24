@@ -8,42 +8,43 @@
 
 ## Where we are
 
-`main` is at `d730838`. **PR #52 (ADR-0002) and PR #54 (ADR-0005) are both merged.**
-**ADR-0006 (Knowledge/Context boundary) is drafted, self-reviewed, and implemented**
-on `feature/claude/adr-0006-knowledge-context-boundary` (issue #55), PR pending:
-`cv_agent/knowledge/` — `Provenance`/`KnowledgeItem` (fail-closed at construction),
-`SourceClass`→`EvidenceWeight` per `docs/RESEARCH_POLICY.md`, `KnowledgeStore`
-protocol + in-memory reference impl, deterministic `assemble_context()`. 55 new
-tests, suite 717 → 772, `ruff`/`mypy cv_agent` clean. No durable backend, no
-acquisition/web-research mechanism, no embeddings — storage/provenance contract only.
+`main` is at `10fb89f` (PR #52 ADR-0002, #54 ADR-0005, #56 ADR-0006 all merged).
+**Q16 is resolved (owner: SQLite) and the Experiment Ledger is implemented** on
+`feature/claude/q16-sqlite-experiment-ledger` (issue #57), PR pending:
+`cv_agent/experiments/` (ADR-0011) — `ExperimentRecord` (every `EXPERIMENTS.md`
+schema field verbatim; `hardware`/`latency`/`memory` as nested value objects),
+`ExperimentLedger` protocol, `SqliteExperimentLedger` in its own `experiments.sqlite`
+file. Rule 1 enforced: upsertable while `proposed`/`running`, locked once terminal.
+90 new tests, suite 772 → 862, `ruff`/`mypy cv_agent` clean. Not wired into
+`CVAgent`/CLI — no training/evaluation subsystem exists to write real rows.
 
 **Implemented:** LLM gateway w/ one real provider (ADR-0002), skill discovery/
-resolution (ADR-0007), requirements analysis + skill_links (ADR-0008), execution
-boundary (ADR-0009, one real `ExecutionRuntime`), Tool/MCP boundary (ADR-0005, no
-real tool), **Knowledge/Context boundary (ADR-0006, this branch)**, orchestration +
-four interrupt kinds (ADR-0003, ADR-0010 §13/§16), project memory (ADR-0004),
-planning + true-XOR recovery + candidate disambiguation (ADR-0010 §9–§16), approval
-integrity (ADR-0003 §10, #43), enforced CI (ruff+mypy+pytest on push/PR to `main`).
+resolution (ADR-0007), requirements analysis (ADR-0008), execution boundary (ADR-0009,
+one real `ExecutionRuntime`), Tool/MCP boundary (ADR-0005, no real tool), Knowledge/
+Context boundary (ADR-0006, in-memory only), **Experiment Ledger (ADR-0011, this
+branch)**, orchestration + four interrupt kinds (ADR-0003, ADR-0010), project memory
+(ADR-0004), approval integrity (ADR-0003 §10, #43), enforced CI.
 
-**Still NOT implemented:** any real `ToolInvoker`/MCP client or research/acquisition
-producing `KnowledgeItem`s, a durable `KnowledgeStore` backend, bindings for 83
-other skills, autonomous training, multi-provider routing/fallback, call/spend-limit
-enforcement (Q6/Q19), a persistent checkpointer (Q3), an experiment-ledger backend
-(Q16), real-skill CLI reachability (#44).
+**Still NOT implemented:** any real `ToolInvoker`/MCP client or research/acquisition,
+a durable `KnowledgeStore` backend, bindings for 83 other skills, autonomous
+training, multi-provider routing/fallback, call/spend-limit enforcement (Q6/Q19), a
+persistent checkpointer (Q3), real-skill CLI reachability (Q23/#44), wiring
+`cv_agent.experiments` into anything.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| ADR-0006 Knowledge/Context boundary | #55 | implemented, branch pushed; PR pending |
-| `workflow` CLI real-skill reachability | #44 | tracked; needs owner decisions |
+| Q16 SQLite Experiment Ledger (ADR-0011) | #57 | implemented, branch pushed; PR pending |
+| `workflow` CLI real-skill reachability | #44 | tracked; needs owner decision (Q23) |
 
 ## Next 3 actions
 
-1. Owner reviews and merges the ADR-0006 PR (#55).
-2. Owner decides whether/when a first real `ToolInvoker`/acquisition mechanism is
-   built (would populate `KnowledgeStore` for real) — not started.
-3. Owner decisions on Q3/Q16/Q23 — each blocks a concrete next increment.
+1. Owner reviews and merges the Q16 PR (#57).
+2. Owner decisions on Q3 (durable checkpointer) and Q23 (CLI real-skill wiring) —
+   separate, independent; neither is implied by Q16's answer.
+3. Owner decides whether/when a first real `ToolInvoker`/acquisition mechanism or
+   a training/evaluation subsystem (which would write real ledger rows) is built.
 
 ## Blockers
 
@@ -54,7 +55,6 @@ enforcement (Q6/Q19), a persistent checkpointer (Q3), an experiment-ledger backe
 A real `ToolInvoker`/MCP client, real web-research/acquisition, a durable
 `KnowledgeStore` backend, MCP vendor selection, autonomous training, a second LLM
 provider/fallback, cost estimation, an unverified binding, a second
-`ExecutionRuntime`/skill binding, skill ranking, unrestricted autonomous execution,
-merging the two graphs, wiring `cv_agent.tools`/`cv_agent.knowledge` into
-`CVAgent`/`LangGraph`, a second `ProjectMemoryStore` backend, embeddings/vector
-search — `[P§34]`.
+`ExecutionRuntime`/skill binding, unrestricted autonomous execution, merging the two
+graphs, wiring `cv_agent.tools`/`knowledge`/`experiments` into `CVAgent`/`LangGraph`,
+embeddings/vector search — `[P§34]`.
