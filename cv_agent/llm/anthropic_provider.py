@@ -42,7 +42,7 @@ class AnthropicProvider(LLMProvider):
     Real LLMProvider adapter backed by the Anthropic Messages API.
 
     Args:
-        model:       Anthropic model identifier (e.g. "claude-sonnet-4-5").
+        model:       Anthropic model identifier (e.g. "claude-sonnet-5").
         api_key:     Explicit API key override. Not read from AgentConfig —
                      the default (None) reads ANTHROPIC_API_KEY from the
                      environment. Provided only for direct construction/tests.

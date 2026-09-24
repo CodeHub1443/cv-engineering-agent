@@ -89,39 +89,39 @@ class TestAnthropicProviderConstruction:
 
     def test_provider_name(self) -> None:
         client = _FakeAnthropicClient()
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
         assert p.provider_name == "anthropic"
 
     def test_model_name(self) -> None:
         client = _FakeAnthropicClient()
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
-        assert p.model_name == "claude-sonnet-4-5"
+        p = AnthropicProvider("claude-sonnet-5", client=client)
+        assert p.model_name == "claude-sonnet-5"
 
     def test_missing_api_key_raises_config_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(_ENV_VAR, raising=False)
         with pytest.raises(AnthropicConfigError, match=_ENV_VAR):
-            AnthropicProvider("claude-sonnet-4-5")
+            AnthropicProvider("claude-sonnet-5")
 
     def test_explicit_api_key_overrides_missing_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(_ENV_VAR, raising=False)
         # Construction only builds the client; no network call is made here.
-        p = AnthropicProvider("claude-sonnet-4-5", api_key="sk-ant-test-not-real")
-        assert p.model_name == "claude-sonnet-4-5"
+        p = AnthropicProvider("claude-sonnet-5", api_key="sk-ant-test-not-real")
+        assert p.model_name == "claude-sonnet-5"
 
     def test_env_var_supplies_key_when_no_override_given(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv(_ENV_VAR, "sk-ant-test-not-real")
-        p = AnthropicProvider("claude-sonnet-4-5")
-        assert p.model_name == "claude-sonnet-4-5"
+        p = AnthropicProvider("claude-sonnet-5")
+        assert p.model_name == "claude-sonnet-5"
 
     def test_injected_client_bypasses_credential_check_entirely(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv(_ENV_VAR, raising=False)
         client = _FakeAnthropicClient()
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
-        assert p.model_name == "claude-sonnet-4-5"
+        p = AnthropicProvider("claude-sonnet-5", client=client)
+        assert p.model_name == "claude-sonnet-5"
 
 
 # ── complete() — success path ───────────────────────────────────────────────
@@ -131,13 +131,13 @@ class TestAnthropicProviderComplete:
     def test_complete_returns_mapped_response(self) -> None:
         message = _FakeMessage("Hello from Claude.", input_tokens=12, output_tokens=4)
         client = _FakeAnthropicClient(response=message)
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         resp = p.complete(LLMRequest(prompt="hi"))
 
         assert isinstance(resp, LLMResponse)
         assert resp.content == "Hello from Claude."
-        assert resp.model == "claude-sonnet-4-5"
+        assert resp.model == "claude-sonnet-5"
         assert resp.provider == "anthropic"
         assert resp.usage == {
             "prompt_tokens": 12,
@@ -148,18 +148,18 @@ class TestAnthropicProviderComplete:
 
     def test_complete_passes_prompt_as_user_message(self) -> None:
         client = _FakeAnthropicClient(response=_FakeMessage("ok"))
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         p.complete(LLMRequest(prompt="describe this frame"))
 
         call = client.messages.calls[0]
         assert call["messages"] == [{"role": "user", "content": "describe this frame"}]
-        assert call["model"] == "claude-sonnet-4-5"
+        assert call["model"] == "claude-sonnet-5"
         assert "system" not in call
 
     def test_complete_passes_system_prompt_when_given(self) -> None:
         client = _FakeAnthropicClient(response=_FakeMessage("ok"))
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         p.complete(LLMRequest(prompt="q", system="You are a CV assistant."))
 
@@ -167,7 +167,7 @@ class TestAnthropicProviderComplete:
 
     def test_complete_passes_max_tokens_and_temperature(self) -> None:
         client = _FakeAnthropicClient(response=_FakeMessage("ok"))
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         p.complete(LLMRequest(prompt="q", max_tokens=256, temperature=0.5))
 
@@ -179,7 +179,7 @@ class TestAnthropicProviderComplete:
         message = _FakeMessage("kept")
         message.content.insert(0, type("ToolUseBlock", (), {"type": "tool_use"})())
         client = _FakeAnthropicClient(response=message)
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         resp = p.complete(LLMRequest(prompt="q"))
 
@@ -195,7 +195,7 @@ class TestAnthropicProviderErrorHandling:
             "invalid api key", response=_http_response(401), body=None
         )
         client = _FakeAnthropicClient(exc=exc)
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         with pytest.raises(AnthropicRequestError, match="authentication failed"):
             p.complete(LLMRequest(prompt="q"))
@@ -205,7 +205,7 @@ class TestAnthropicProviderErrorHandling:
             "rate limited", response=_http_response(429), body=None
         )
         client = _FakeAnthropicClient(exc=exc)
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         with pytest.raises(AnthropicRequestError, match="rate limit"):
             p.complete(LLMRequest(prompt="q"))
@@ -214,7 +214,7 @@ class TestAnthropicProviderErrorHandling:
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
         exc = anthropic.APIConnectionError(message="connection failed", request=request)
         client = _FakeAnthropicClient(exc=exc)
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         with pytest.raises(AnthropicRequestError, match="connection failed"):
             p.complete(LLMRequest(prompt="q"))
@@ -224,7 +224,7 @@ class TestAnthropicProviderErrorHandling:
             "server exploded", response=_http_response(500), body=None
         )
         client = _FakeAnthropicClient(exc=exc)
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         with pytest.raises(AnthropicRequestError, match="status 500"):
             p.complete(LLMRequest(prompt="q"))
@@ -234,7 +234,7 @@ class TestAnthropicProviderErrorHandling:
             response=_http_response(200), body=None, message="schema mismatch"
         )
         client = _FakeAnthropicClient(exc=exc)
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         with pytest.raises(AnthropicRequestError, match="Anthropic API error"):
             p.complete(LLMRequest(prompt="q"))
@@ -247,7 +247,7 @@ class TestAnthropicProviderErrorHandling:
             "invalid api key", response=_http_response(401), body=None
         )
         client = _FakeAnthropicClient(exc=exc)
-        p = AnthropicProvider("claude-sonnet-4-5", client=client)
+        p = AnthropicProvider("claude-sonnet-5", client=client)
 
         with pytest.raises(AnthropicRequestError) as exc_info:
             p.complete(LLMRequest(prompt="q"))
@@ -272,24 +272,24 @@ class TestAnthropicRegistryIntegration:
         # makes no network request. A dummy key proves only that the
         # registry -> lazy-import -> construction path works end to end.
         monkeypatch.setenv(_ENV_VAR, "sk-ant-test-not-real")
-        p = get_provider("anthropic", "claude-sonnet-4-5")
+        p = get_provider("anthropic", "claude-sonnet-5")
         assert isinstance(p, AnthropicProvider)
         assert p.provider_name == "anthropic"
-        assert p.model_name == "claude-sonnet-4-5"
+        assert p.model_name == "claude-sonnet-5"
 
     def test_get_provider_reports_missing_credentials_clearly(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv(_ENV_VAR, raising=False)
         with pytest.raises(AnthropicConfigError, match=_ENV_VAR):
-            get_provider("anthropic", "claude-sonnet-4-5")
+            get_provider("anthropic", "claude-sonnet-5")
 
     def test_no_automatic_fallback_to_mock_on_anthropic_failure(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv(_ENV_VAR, raising=False)
         with pytest.raises(AnthropicConfigError):
-            get_provider("anthropic", "claude-sonnet-4-5")
+            get_provider("anthropic", "claude-sonnet-5")
         # A failure to construct "anthropic" must not silently hand back a
         # mock/fake provider instead - the exception above is the entire
         # observable behavior; nothing else is returned.

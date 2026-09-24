@@ -12,7 +12,7 @@
 `feature/codehub1443/llm-gateway-anthropic`, uncommitted:** ADR-0002 (LLM gateway)
 implemented per D-033 — Anthropic is the first real provider
 (`cv_agent/llm/anthropic_provider.py`), lazily registered; `FakeLLMProvider` stays
-default; single model (`claude-sonnet-4-5`), no fallback; credentials from
+default; single model (`claude-sonnet-5`), no fallback; credentials from
 `ANTHROPIC_API_KEY` only, never `AgentConfig`/TOML. 24 new tests (mocked client, no
 real network/credentials), suite 622 → 646, `ruff`/`mypy` clean. Approval-integrity
 + real skill binding (200 tests) re-run, confirmed unaffected.

@@ -81,7 +81,7 @@ ask for it.
 
 `LLMConfig`/`load_config()` (`cv_agent/config/settings.py`) are **unchanged** — a
 user selects the provider/model the same way as today, via
-`[llm] provider = "anthropic"` / `model = "claude-sonnet-4-5"` in TOML (or a role
+`[llm] provider = "anthropic"` / `model = "claude-sonnet-5"` in TOML (or a role
 override). The **default stays `provider = "mock"`** — choosing Anthropic is opt-in
 configuration, never a new default that would require credentials just to run the
 existing test suite or CLI.
@@ -217,7 +217,7 @@ directly onto `anthropic.Anthropic().messages.create(...)`'s `messages`/`system`
 - Each of `AuthenticationError`, `RateLimitError`, `APIConnectionError`, and a generic
   `APIStatusError`/`APIError` raised by the injected fake client is caught and
   re-raised as `AnthropicRequestError` with an informative, credential-free message.
-- `get_provider("anthropic", "claude-sonnet-4-5")` succeeds once `ANTHROPIC_API_KEY`
+- `get_provider("anthropic", "claude-sonnet-5")` succeeds once `ANTHROPIC_API_KEY`
   is set (via a fake client monkeypatched onto the lazily-imported module, or a
   cleared-env negative case), and `"mock"` continues to work unmodified.
 - Structural test: `anthropic` (the third-party package) is imported by exactly one
@@ -240,3 +240,38 @@ directly onto `anthropic.Anthropic().messages.create(...)`'s `messages`/`system`
   `AnthropicProvider` output for something closer to a real decision — at that point
   the evidence-provenance design rule (§6a) should be reconsidered as an enforced
   type, not just a documented convention.
+
+## 9. Revision — model identifier corrected during PR review (2026-09-24)
+
+The initial implementation (PR #52) configured `claude-sonnet-4-5` — asked and
+confirmed explicitly with the owner before implementation, not invented, per §1's
+original decision. PR review (Tanvir) flagged this before merge: Anthropic's own
+documentation states that for any model **before the 4.6 generation**, the undated
+API alias "is a convenience pointer that resolves to the dated ID" — meaning
+`claude-sonnet-4-5` was never a pinned identifier, and the actual dated snapshot
+behind it is `claude-sonnet-4-5-20250929` (confirmed present in the installed
+`anthropic` SDK's own `ModelParam` type literal).
+
+Investigating further (fetched `platform.claude.com/docs/en/models/overview`
+directly) surfaced a larger fact the review comment itself hadn't raised: **Claude
+Sonnet 4.5 is now a legacy model**, superseded in the current lineup by **Claude
+Sonnet 5** (`claude-sonnet-5`). Critically, for models in the 4.6+ generation
+(which includes Sonnet 5), Anthropic states *"every Claude model ID is a pinned
+snapshot, including the dateless IDs... Dateless IDs are their own pinned snapshot;
+the alias row repeats them"* — i.e. `claude-sonnet-5` has no drift problem at all;
+it is already a fully pinned identifier by Anthropic's own design, with no dated
+suffix to track.
+
+Given a choice between (a) staying on the legacy Sonnet 4.5 family pinned to its
+dated snapshot, or (b) moving to the current-generation Sonnet 5 family, which
+solves the exact pinning concern more durably and has a longer committed retirement
+horizon, the owner chose (b). **Corrected: the configured model is `claude-sonnet-5`**
+everywhere this ADR, `cv_agent/llm/anthropic_provider.py`'s docstring,
+`config/default.toml`'s example, and `tests/test_llm_anthropic.py` reference one —
+this file's body text above reads `claude-sonnet-5` directly rather than carrying a
+stale reference forward, since the ADR was still an open, unmerged PR at the time of
+correction (§1's original decision text is preserved above for provenance; this
+section documents why it changed). No interface, adapter logic, or test *shape*
+changed — only the literal model-ID string used throughout. See `docs/state/
+DECISIONS.md` D-034 for the recorded correction (D-033 itself is left unedited,
+per this project's append-only decision-ledger convention).
