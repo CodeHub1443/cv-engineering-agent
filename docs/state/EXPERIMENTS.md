@@ -6,6 +6,15 @@
 >
 > This file exists so the agent can answer *"why did we choose this model?"* from record
 > rather than from conversational memory `[P§25]`.
+>
+> **Relationship to `cv_agent/experiments/` (ADR-0011, `OPEN_QUESTIONS.md` Q16,
+> resolved 2026-09-24):** this file remains the authoritative, human-facing definition
+> of the schema and rules below. `cv_agent.experiments` is the machine-readable
+> SQLite-backed ledger that enforces this exact schema in code (`ExperimentRecord`,
+> `ExperimentLedger`, `SqliteExperimentLedger`) — it does not replace or redefine
+> this file, and nothing writes real rows to it yet (no training/evaluation subsystem
+> exists to call it). If this schema changes, `cv_agent/experiments/models.py` must
+> change with it.
 
 ## Rules
 
@@ -67,8 +76,8 @@ _None yet. The first entry must be a baseline (`baseline_id = SELF`)._
 
 The table below is a condensed rollup view for scanning; it does not repeat every
 field from the schema above (e.g. `status`, `approval_ref`, `created_at`) — those
-live in the full row record when a real experiment-tracking backend exists
-(`OPEN_QUESTIONS.md` Q8).
+live in the full row record in `cv_agent.experiments`'s SQLite ledger
+(`OPEN_QUESTIONS.md` Q16, ADR-0011).
 
 | exp_id | hypothesis | baseline | model | dataset_ver | precision | target hw | mAP@.5:.95 | recall | FPS | latency | VRAM | power | gpu_h | decision |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
