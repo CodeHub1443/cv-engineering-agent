@@ -100,8 +100,14 @@ mechanism for the same reason.
 **Scope:** ADR-0005 tool/MCP boundary · ADR-0006 retrieval, provenance, freshness ·
 research pipeline per `docs/RESEARCH_POLICY.md` · source-class weighting.
 
-**Status:** not started. Neither ADR-0005 nor ADR-0006 has been written; no `cv_agent`
-module for retrieval, MCP, or web research exists.
+**Status:** partially started. **Since 2026-09-24:** ADR-0005 (tool/MCP boundary) is
+**Accepted and implemented** — `cv_agent/tools/` (`docs/architecture/adr/ADR-0005-
+tool-mcp-boundary.md`), the generic `ToolSpec`/`ToolInvoker`/`ToolRegistry`/
+`ToolExecutor` boundary, fail-closed, invoker-registration-generation protected,
+71 tests. Zero tools/invokers registered, no MCP SDK/vendor selected,
+`OPEN_QUESTIONS.md` Q5's MCP-vs-skill half left explicitly unresolved — this is the
+boundary only, not a real integration. ADR-0006 (retrieval, provenance, freshness) has
+not been written. No `cv_agent` module for retrieval or web research exists yet.
 
 **Exit test:** asked "what should we use to detect small objects on a Jetson today", the
 agent returns candidates each carrying source, source class, and date; it declines to
