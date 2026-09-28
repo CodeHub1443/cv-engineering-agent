@@ -152,28 +152,6 @@ def _registry_with_binding(binding: ExecutionBinding) -> ExecutionBindingRegistr
     return reg
 
 
-def _executor(
-    binding: ExecutionBinding,
-    runtime: FakeJobRuntime | None = None,
-    verifier: LinuxNvidiaHostVerifier | None = None,
-) -> tuple[JobExecutor, FakeJobRuntime | None]:
-    reg = _registry_with_binding(binding)
-    rt = runtime or FakeJobRuntime()
-    job_runtimes: dict[str, FakeJobRuntime] = {}
-    if runtime is not None or True:
-        # Always register runtime unless explicitly excluded
-        job_runtimes = {rt.runtime_id: rt} if runtime is not None else {}
-        if runtime is None:
-            rt = None  # type: ignore[assignment]
-    v = verifier or _passing_verifier()
-    exec_ = JobExecutor(
-        registry=reg,
-        job_runtimes=job_runtimes,
-        host_verifier=v,
-    )
-    return exec_, rt
-
-
 def _full_executor(
     binding: ExecutionBinding | None = None,
     runtime: FakeJobRuntime | None = None,
