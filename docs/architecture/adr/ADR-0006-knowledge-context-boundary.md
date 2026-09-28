@@ -318,3 +318,19 @@ same five criteria ADR-0005's independent review used:
 
 No blocker was found. This status section is not a substitute for the PR review the
 repository's governance still requires before this branch lands on `main`.
+
+## 10. Status — research-acquisition mechanism named (owner decision, 2026-09-28, D-048)
+
+§8's second revisit trigger ("when a real acquisition mechanism... is authorized") has
+partially fired: the owner has named the mechanism, not yet authorized building it. V1's
+research-acquisition path — populating `KnowledgeStore.put()` with real, dated, sourced
+items, e.g. for Q24's Person Detection + Tracking research — will be **web research**,
+retaining provenance, and will be built as an **ADR-0005 `ToolInvoker`** (see ADR-0005
+§12), never bypassing this ADR's `Provenance`/`KnowledgeItem` fail-closed construction or
+the `SourceClass`→`EvidenceWeight` table this ADR already takes verbatim from
+`docs/RESEARCH_POLICY.md`. **Not built by this status note:** the `ToolInvoker` itself,
+which source(s)/API(s) it calls, or any code that constructs a real `KnowledgeItem` —
+`cv_agent.knowledge` still "accepts already-extracted items; nothing yet calls it with
+real research output," unchanged by this decision. `OPEN_QUESTIONS.md` is unmodified by
+this note; Q2, Q3, Q6, Q16, Q19, Q23 remain untouched (Q10 is answered separately,
+D-045). See `docs/state/DECISIONS.md` D-048.
