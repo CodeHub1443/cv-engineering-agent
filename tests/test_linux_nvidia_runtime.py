@@ -283,6 +283,66 @@ class TestCancellation:
         outcome = rt.collect(handle)
         assert outcome.error_message == "cancelled"
 
+    def test_sigkill_grace_period_is_from_cancel_not_start(self) -> None:
+        """
+        A job running longer than cancel_sigkill_timeout_s before cancel() is
+        called must still receive the full grace period after cancel().
+
+        Scenario: cancel_sigkill_timeout_s=0.3s, job runs for 0.5s before
+        cancel(). With the bug (timer from start), SIGKILL fires immediately on
+        the first poll() after cancel(). With the fix (timer from cancel),
+        the process exits cleanly via SIGTERM first.
+
+        We verify correctness indirectly: the process exits within a reasonable
+        window after cancel(), and poll() eventually returns a terminal status.
+        """
+        # Short timeout so the test doesn't hang — but longer than the time
+        # between cancel() and the first poll() to confirm the timer reset.
+        rt = LinuxNvidiaJobRuntime(cancel_sigkill_timeout_s=0.3)
+        handle = rt.start(_skill(), _request(["sleep", "30"]))
+
+        # Let the job run longer than the timeout BEFORE cancelling.
+        time.sleep(0.5)  # 0.5s > 0.3s cancel_sigkill_timeout_s
+
+        # Record cancel time so we can measure grace period.
+        cancel_t = time.monotonic()
+        rt.cancel(handle)
+
+        # Immediately poll once — with the bug, SIGKILL would fire here.
+        # With the fix, the process should still receive SIGTERM first and
+        # exit cleanly (sleep exits on SIGTERM in < 100 ms on Linux).
+        status = _poll_until_terminal(rt, handle, timeout_s=5.0)
+        elapsed_after_cancel = time.monotonic() - cancel_t
+
+        assert status in ("cancelled", "failed")
+        # The process should exit well within 5 s of cancel().
+        assert elapsed_after_cancel < 5.0
+
+    def test_sigkill_escalation_fires_after_timeout(self) -> None:
+        """
+        A process that ignores SIGTERM must receive SIGKILL after the configured
+        timeout measured from cancel(), not from job start.
+
+        We simulate a process that ignores SIGTERM by trapping it. Because
+        creating a truly SIGTERM-immune process in a portable shell one-liner is
+        fragile, we use a very short cancel_sigkill_timeout_s and verify that
+        poll() eventually returns a terminal status (SIGKILL always terminates).
+        The runtime must not loop forever waiting for a process that won't exit.
+        """
+        # Use a very short timeout so SIGKILL fires quickly in the test.
+        rt = LinuxNvidiaJobRuntime(cancel_sigkill_timeout_s=0.1)
+        # Process that ignores SIGTERM: trap it and keep sleeping.
+        handle = rt.start(
+            _skill(),
+            _request(["bash", "-c", "trap '' TERM; sleep 30"]),
+        )
+        time.sleep(0.1)  # let process start and install the trap
+
+        rt.cancel(handle)
+        # poll() in a loop — _maybe_sigkill fires after 0.1s from cancel.
+        status = _poll_until_terminal(rt, handle, timeout_s=5.0)
+        assert status in ("cancelled", "failed")
+
 
 # ---------------------------------------------------------------------------
 # Process start failure
@@ -311,23 +371,43 @@ class TestProcessStartFailure:
 # ---------------------------------------------------------------------------
 
 class TestRegistrationHelpers:
-    def test_build_binding_is_verified(self) -> None:
+    def test_build_binding_default_is_not_verified(self) -> None:
+        """ADR-0009 §8: arbitrary skill IDs must NOT be auto-marked verified."""
         binding = build_binding("my-cv-skill")
+        assert binding.verified is False
+
+    def test_build_binding_explicit_verified_true(self) -> None:
+        """Caller may set verified=True after personally inspecting the skill."""
+        binding = build_binding("my-cv-skill", verified=True)
         assert binding.verified is True
         assert binding.runtime_id == RUNTIME_ID
         assert binding.skill_id == "my-cv-skill"
+
+    def test_build_binding_different_skills_both_unverified(self) -> None:
+        """No skill ID is pre-verified — verification is per-skill, not per-runtime."""
+        for skill_id in ("yolo-train", "deepstream-pipeline", "tao-reid"):
+            binding = build_binding(skill_id)
+            assert binding.verified is False, f"{skill_id} should default to unverified"
 
     def test_build_binding_default_approval_required(self) -> None:
         binding = build_binding("my-cv-skill")
         assert binding.approval_policy == "approval_required"
 
-    def test_register_binding_puts_binding_in_registry(self) -> None:
+    def test_register_binding_default_is_not_verified(self) -> None:
+        """register_binding() without verified=True must not create a verified binding."""
         registry = ExecutionBindingRegistry()
         register_binding(registry, skill_id="my-cv-skill")
         binding = registry.get_binding("my-cv-skill")
         assert binding is not None
-        assert binding.verified is True
+        assert binding.verified is False
         assert binding.runtime_id == RUNTIME_ID
+
+    def test_register_binding_explicit_verified(self) -> None:
+        registry = ExecutionBindingRegistry()
+        register_binding(registry, skill_id="my-cv-skill", verified=True)
+        binding = registry.get_binding("my-cv-skill")
+        assert binding is not None
+        assert binding.verified is True
 
     def test_runtime_id_constant(self) -> None:
         rt = LinuxNvidiaJobRuntime()

@@ -103,6 +103,7 @@ class LinuxNvidiaJobRuntime:
         self._cancel_sigkill_timeout_s = cancel_sigkill_timeout_s
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._start_times: dict[str, float] = {}
+        self._cancel_times: dict[str, float] = {}
         self._cancelled_jobs: set[str] = set()
         self._outcomes: dict[str, JobOutcome] = {}
 
@@ -193,6 +194,7 @@ class LinuxNvidiaJobRuntime:
             return  # Already exited.
 
         self._cancelled_jobs.add(handle.job_id)
+        self._cancel_times[handle.job_id] = time.monotonic()
         try:
             process.send_signal(signal.SIGTERM)
         except (ProcessLookupError, OSError):
@@ -264,10 +266,11 @@ class LinuxNvidiaJobRuntime:
     # ------------------------------------------------------------------
 
     def _maybe_sigkill(self, job_id: str, process: subprocess.Popen[str]) -> None:
-        """Escalate to SIGKILL if SIGTERM has not taken effect within the timeout."""
-        start = self._start_times.get(job_id, 0.0)
-        elapsed = time.monotonic() - start
-        if elapsed >= self._cancel_sigkill_timeout_s:
+        """Escalate to SIGKILL if SIGTERM has not taken effect within the timeout.
+        The timeout is measured from when cancel() was called, not from job start."""
+        cancel_time = self._cancel_times.get(job_id, time.monotonic())
+        elapsed_since_cancel = time.monotonic() - cancel_time
+        if elapsed_since_cancel >= self._cancel_sigkill_timeout_s:
             try:
                 process.send_signal(signal.SIGKILL)
             except (ProcessLookupError, OSError):
@@ -308,22 +311,25 @@ def _outcome_to_poll_status(
 def build_binding(
     skill_id: str,
     *,
+    verified: bool = False,
     approval_policy: ApprovalPolicy = "approval_required",
     binding_id: str = BINDING_ID,
     runtime_id: str = RUNTIME_ID,
 ) -> ExecutionBinding:
     """
-    Build the verified ExecutionBinding for a skill that will run through
+    Build an ExecutionBinding for a skill that will run through
     LinuxNvidiaJobRuntime.
 
-    Set `verified=True` because:
-    - Command execution is verified by this module's own tests
-      (tests/test_linux_nvidia_runtime.py) — not assumed from the description.
-    - stdout/stderr capture, exit code, and cancellation are all exercised
-      deterministically without NVIDIA hardware.
-    - The binding is still per-skill (ADR-0009 §8): `skill_id` is the
-      specific CV skill whose execution this binding authorises, not a
-      blanket grant to all skills.
+    `verified` defaults to False (ADR-0009 §8 discipline). The runtime
+    mechanism (subprocess execution, stdout/stderr capture, cancellation) is
+    tested by tests/test_linux_nvidia_runtime.py, but that does NOT constitute
+    verification of any *specific skill* — verified=True must be set only after
+    the caller has personally inspected the skill's implementation, confirmed
+    its CLI contract, and documented that inspection (following the trt-perf-
+    analysis precedent: script read, exit codes confirmed empirically, side
+    effects understood). Pass verified=True explicitly once that work is done:
+
+        build_binding("my-cv-skill", verified=True)
 
     approval_policy defaults to "approval_required" because running a
     GPU CV workload is an approval-gated action per docs/APPROVALS.md.
@@ -333,7 +339,7 @@ def build_binding(
         binding_id=binding_id,
         runtime_id=runtime_id,
         approval_policy=approval_policy,
-        verified=True,
+        verified=verified,
         description=(
             "Subprocess execution of a CV skill on a Linux/NVIDIA host. "
             "Command is taken from request.inputs['command']. "
@@ -372,19 +378,23 @@ def register_binding(
     registry: ExecutionBindingRegistry,
     *,
     skill_id: str,
+    verified: bool = False,
     approval_policy: ApprovalPolicy = "approval_required",
 ) -> None:
     """
     Explicit, opt-in wiring — never called automatically.
 
-    Registers the verified binding for `skill_id` in the registry.
+    Registers a binding for `skill_id` in the registry. `verified` defaults
+    to False per ADR-0009 §8 — pass verified=True only after personally
+    inspecting the specific skill's implementation (see build_binding()).
+
     The caller must separately pass a LinuxNvidiaJobRuntime instance in
     the `job_runtimes` dict when constructing JobExecutor:
 
         from cv_agent.execution.jobs.runtimes.linux_nvidia import (
             LinuxNvidiaJobRuntime, register_binding
         )
-        register_binding(registry, skill_id="my-cv-skill")
+        register_binding(registry, skill_id="my-cv-skill", verified=True)
         executor = JobExecutor(
             registry=registry,
             job_runtimes={LinuxNvidiaJobRuntime.RUNTIME_ID: LinuxNvidiaJobRuntime()},
@@ -392,5 +402,5 @@ def register_binding(
         )
     """
     registry.register_binding(
-        build_binding(skill_id, approval_policy=approval_policy)
+        build_binding(skill_id, verified=verified, approval_policy=approval_policy)
     )
