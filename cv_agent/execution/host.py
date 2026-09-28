@@ -157,8 +157,15 @@ class LinuxNvidiaHostVerifier:
                 )
 
         if requirement.min_vram_mb is not None:
-            # VRAM measurement is not yet implemented; refuse rather than guess.
             if not profile.gpu_available:
                 return False, "Job requires minimum VRAM but no GPU is available."
+            # VRAM measurement is not yet implemented; fail closed rather than
+            # pass a requirement we cannot verify.
+            return (
+                False,
+                f"Job requires {requirement.min_vram_mb} MB VRAM but VRAM "
+                "measurement is not yet implemented; cannot verify the "
+                "requirement. (V1 limitation — fail closed per ADR-0013 §3.3.)",
+            )
 
         return True, ""
