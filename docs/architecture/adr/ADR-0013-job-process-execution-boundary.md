@@ -395,17 +395,28 @@ class JobRuntime(Protocol):
         """
         Request cancellation of the job. Does NOT wait for the process to
         exit — the caller must poll() until "cancelled" or "failed".
-        Calling cancel() on an already-terminal job is a no-op.
+        Valid in any non-terminal state: "started" (process spawned but not
+        yet confirmed running) and "running" are both valid. Calling cancel()
+        on an already-terminal job is a no-op.
         """
         ...
 
     def collect(self, handle: JobHandle) -> JobOutcome:
         """
-        Wait for the job to reach a terminal state and collect all results
-        (exit code, stdout, stderr, artifacts, resource metadata).
-        Idempotent for already-terminal jobs.
+        Collect all results for a job that has already reached a terminal
+        state (exit code, stdout, stderr, artifacts, resource metadata).
+        Idempotent: multiple calls for the same handle return the same outcome.
         Must not raise; an unreachable process returns
         JobOutcome(success=False, exit_code=None, ...).
+
+        V1 CONTRACT: collect() must only be called AFTER poll() has returned
+        a terminal status ("completed", "failed", or "cancelled"). It is NOT
+        intended to block waiting for a running job to finish — that would
+        tie up the LangGraph executor thread for the job's full duration.
+        The _node_poll_or_collect_job graph node enforces this: it polls
+        until terminal, then calls collect_job() exactly once. Implementations
+        that rely on collect() blocking for a non-terminal job are incorrect
+        for V1 graph use.
         """
         ...
 ```
@@ -552,12 +563,37 @@ def _node_job_approval_gate(state: AgentState, ...) -> dict[str, Any]:
 
 def _node_start_job(state: AgentState, ...) -> dict[str, Any]:
     """Calls JobExecutor.start_job(); sets active_job_handle on success.
-    Analogous to _node_execute."""
+    Analogous to _node_execute.
+
+    Implementation requirements:
+    1. Pin transfer (required for approval-integrity): must construct
+       SkillExecutionRequest with
+           expected_binding_pin=state["pending_job"]["job_execution_pin"]
+       This carries the plan-time pin into the executor's pin_mismatch()
+       check (§5.4 step 5 / §7). Omitting it silently bypasses E1.
+    2. HostRequirement (V1 D-044 convention): must pass
+           HostRequirement(os="linux", gpu_vendor="nvidia")
+       This is the class confirmed by D-044 for the Linux + NVIDIA GPU
+       execution host. If a future binding requires different constraints
+       (e.g. min_vram_mb), an ADR amendment is needed before that binding
+       ships — this convention must not be silently extended.
+    """
     ...
 
 def _node_poll_or_collect_job(state: AgentState, ...) -> dict[str, Any]:
     """Polls the running job; transitions to collect when terminal.
-    Sets job_result and clears active_job_handle at terminal state."""
+    Sets job_result and clears active_job_handle at terminal state.
+
+    V1 collect() constraint: this node polls the job with poll_job() until
+    the status is terminal, then calls collect_job() exactly once. collect_job()
+    is NEVER called on a non-terminal job — see collect() contract in §5.3.
+    The implementation loop is:
+        status = executor.poll_job(handle)
+        if status in ("running",):
+            return {}  # re-enter node on next graph invocation
+        outcome = executor.collect_job(handle)
+        return {"job_result": ..., "active_job_handle": None}
+    """
     ...
 ```
 
