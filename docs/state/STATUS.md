@@ -4,20 +4,20 @@
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
 **Updated:** 2026-09-24 · **Phase:** 0 → 1 (partial) → 2 (partial) → 3 (partial) →
-4 (partial) → 5a (implemented, PR pending) · **Health:** green
+4 (partial) → 5a (complete) → 5b (prepared, not started) · **Health:** green
 
 ## Where we are
 
-`main` is at `44539c3` (PR #58, Q16 SQLite Experiment Ledger, ADR-0011, merged; CI green).
+`main` is at `e6cff6e` (PR #60: Phase 5a Dataset Core, ADR-0012; before it PR #58: Q16
+Experiment Ledger, ADR-0011). CI green, 950 tests.
 
-**Phase 5a — Dataset Core is implemented** on `feature/claude/dataset-core` (issue #59,
-ADR-0012), PR pending owner review: `cv_agent/datasets/` (stdlib only) — immutable
-`DatasetManifest` (the dataset version, `docs/DATA.md`'s fields, keyed
-`(dataset_id, version)`), recorded splits, deterministic temporal / camera / subject /
-annotation-round / supplied-hash near-duplicate leakage checks (a manifest cannot exist
-with a failed check; the report is recorded in it), a storage-agnostic `DatasetStore`
-protocol and `InMemoryDatasetStore`. 88 new tests, suite 862 → 950. **Q10 is not
-decided** — no backend, no persistence format, no hash computation.
+**Owner decisions recorded 2026-09-24 (issue #61, no ADR — not architectural):**
+Q2/D-040 — V1 runs on a local Linux/NVIDIA GPU host; Agent/controller and CV workloads
+are separate processes (controlled jobs). Q4/D-041 — V1 validates on a controlled
+reference CV project before any customer project. Q5/D-042 — V1 uses the existing
+Skill/CLI mechanism behind the `ToolInvoker`/execution boundaries; MCP SDK deferred,
+transport-agnostic. None decides cloud/remote/scheduler, a customer project, MCP,
+thresholds or any binding. New: Q24 (which reference project), Q25 (which host/GPU).
 
 **Implemented:** LLM gateway w/ one real provider (ADR-0002), skill discovery/resolution
 (ADR-0007), requirements analysis (ADR-0008), execution boundary + one real
@@ -35,20 +35,20 @@ real-skill CLI reachability (Q23/#44), and wiring any new package into `CVAgent`
 
 | Item | Issue | State |
 |---|---|---|
-| Phase 5a Dataset Core (ADR-0012) | #59 | implemented, branch pushed; PR pending |
+| Record Q2/Q4/Q5 decisions (D-040..D-042) | #61 | docs-only PR pending owner review |
 | `workflow` CLI real-skill reachability | #44 | tracked; needs owner decision (Q23) |
 
 ## Next 3 actions
 
-1. Owner reviews and merges the Dataset Core PR (issue #59).
-2. Owner decisions, each independent: Q2 (where runs execute), Q4 (real vs reference
-   target), Q10 (dataset storage backend), Q5 (first real tool), Q6/Q19 (approval
-   thresholds / cost estimation), Q3 (durable approvals), Q23 (CLI reachability).
-3. Next milestone, once Q2/Q4 and a real execution mechanism are decided: Phase 5b —
-   baseline establishment (first real ledger rows; the point to wire the ledger in).
+1. Owner reviews and merges the Q2/Q4/Q5 decision-record PR (issue #61).
+2. Owner decisions that gate Phase 5b: Q24 (name the reference project), Q25 (name the
+   host/GPU and controller topology); plus Q6/Q19 if the baseline includes a training or
+   otherwise gated run, and Q10 if the dataset needs a durable store.
+3. Phase 5b — baseline establishment: first needs an ADR for the job/execution boundary
+   and one individually verified Skill/CLI mechanism (ADR-0009 binding or ADR-0005
+   `ToolInvoker`); it produces the first real ledger rows.
 
 ## Blockers
-
 - Nothing blocked on engineering — every open item needs owner decision/review.
 
 ## Do not start yet

@@ -9,10 +9,10 @@
 
 ## Blocking — work cannot proceed until answered
 
-**Q2. Where does the agent run, and where does training run?** `[P§10]`, `[P§13]`,
+~~**Q2. Where does the agent run, and where does training run?** `[P§10]`, `[P§13]`,
 `[P§24]` — Local workstation, remote GPU box, cloud, or all three? Does the agent submit
 jobs or execute them in-process? *Blocks: ADR-0010.* (No longer blocks ADR-0003 — nothing
-in that ADR executes training or submits remote jobs; see ADR-0003 §1.)
+in that ADR executes training or submits remote jobs; see ADR-0003 §1.)~~ — **Answered 2026-09-24 (owner decision, D-040):** V1 runs on a **local Linux/NVIDIA GPU execution host**. The Agent/controller process and CV workload processes are **separate**: training, evaluation, benchmarking and optimization execute as **controlled jobs/processes**, not inside the Agent process. *Does NOT decide:* cloud execution, remote workers, Kubernetes, distributed training, or a future scheduler; nor the identity/model of the host, nor whether the controller runs on the same machine as the workloads (see Q25), nor a job lifecycle/supervision design (a future training-execution ADR must conform to this answer). It does not resolve Q3, Q6, or Q19.
 
 **Q3. What is the human-approval transport?** `[P§24]` — CLI prompt only, or must
 approvals survive process restart (a queued request answered hours later)? The latter
@@ -23,14 +23,14 @@ ADR-0003 ships with `MemorySaver` (confirmed: does not survive process restart) 
 defers the durable/queued-approval decision. *Still blocks: a durable/async approval
 transport (persistent checkpointer swap-in, ADR-0003 §8 revisit trigger).*
 
-**Q4. Is the first target a real project or a reference project?** `[P§30]` — Building
+~~**Q4. Is the first target a real project or a reference project?** `[P§30]` — Building
 against the prison/garment examples as a real deliverable versus as a test fixture
-changes Phase-1 scope substantially. *Blocks: ROADMAP Phase 1 exit test.*
+changes Phase-1 scope substantially. *Blocks: ROADMAP Phase 1 exit test.*~~ — **Answered 2026-09-24 (owner decision, D-041):** V1 validation uses a **controlled reference CV engineering project** before any customer-specific project. *Does NOT decide:* which reference project (see Q24), a customer project, or a permanent exclusion of customer projects.
 
-**Q5. Which NVIDIA capabilities are actually installed and invocable today?** `[P§15]` —
+~~**Q5. Which NVIDIA capabilities are actually installed and invocable today?** `[P§15]` —
 The design says "discover and invoke, do not duplicate." Discovery mechanism depends on
 whether these are MCP servers, CLI tools, Python SDKs, or agent skills.
-*Blocks: ADR-0005, ADR-0007.*
+*Blocks: ADR-0005, ADR-0007.*~~ — **Answered 2026-09-24 (owner decision, D-042), as a decision about the execution/tool *mechanism*:** V1 uses the **existing explicit Skill/CLI mechanism** behind the `ToolInvoker`/execution boundaries. **MCP SDK integration is deferred**; the abstraction must stay transport-agnostic so MCP can be added later without changing Agent reasoning or approval semantics. *Does NOT decide:* a future MCP implementation, multi-provider tooling, autonomous tool execution, or approval thresholds (Q6). It does not list which capabilities are installed — that stays a runtime fact reported by skill discovery (ADR-0007, `python -m cv_agent skills`) — and it authorizes no binding: each skill still needs its own individually verified binding (ADR-0009 §8). Whether the first real mechanism is an ADR-0009 skill binding or an ADR-0005 `ToolInvoker` wrapping a CLI is not decided here (ADR-0005 §8(c) stays open).
 
 ## Soon — needed within one or two phases
 
@@ -111,6 +111,22 @@ contract is real, ADR-0009 §12) — an execution-surface design decision for th
 `ExecutionRuntime`, currently on `STATUS.md`'s "Do not start yet" list — blocked on that
 decision, not on engineering. *Blocks: any real-skill end-to-end CLI test of the three
 interrupt kinds.*
+
+**Q24.** *New 2026-09-24 (surfaced while recording Q4/D-041).* Q4 chose a controlled
+*reference* project for V1 validation but did not name it. Which reference project —
+its CV task and target scenario, its dataset source and provenance, and the operational
+constraints (latency, recall, false-positive tolerance `[P§5]`) it is validated against?
+Phase 5's exit test needs "a baseline ... on a named target", and `docs/DATA.md` requires
+a dataset with a manifest. *Blocks: ROADMAP Phase 5b (baseline establishment).* `[P§30]`
+
+**Q25.** *New 2026-09-24 (surfaced while recording Q2/D-040).* Q2 chose a local
+Linux/NVIDIA GPU execution host with a controller process separate from workload
+processes, but did not say which host or GPU (a "named target" for every ledger row's
+`hardware` field, `[P§25]`), nor whether the controller runs on that same host or on
+another machine (this repository's sessions currently run on Windows, and
+`docs/APPROVALS.md` forbids running Linux-specific commands on another platform).
+*Blocks: ROADMAP Phase 5b (a baseline on a named target), and any execution binding that
+must state where it runs.* `[P§13]`, `[P§25]`
 
 ## Deferrable
 
