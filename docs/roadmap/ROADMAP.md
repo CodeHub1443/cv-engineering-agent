@@ -238,6 +238,25 @@ verified execution mechanism (an ADR-0009 binding or an ADR-0005 `ToolInvoker`).
 baseline includes a training or other gated run it also needs Q6/Q19; a durable dataset
 store needs Q10. No baseline execution exists yet.
 
+**Phase 5b preparation, continued (2026-09-28):** Q24, Q25, and Q10 are now decided. The
+reference project is **Person Detection + Tracking** — the Agent must research/select the
+model, research/recommend the dataset, and propose the metrics itself (D-043); the host
+class is confirmed as Linux + NVIDIA GPU, controller and workload as separate processes,
+no change to D-040's architecture (D-044); the dataset backend is the local filesystem,
+behind the already-generic `DatasetStore` protocol (D-045). The **job/process execution
+boundary** D-040 deferred now has a scope decision (D-046) and a **Proposed** ADR
+(`ADR-0013-job-process-execution-boundary.md`) — controlled local subprocess jobs, no
+Kubernetes/distributed/remote in V1 — but not yet a designed protocol; nothing can be
+implemented against it until a follow-up architect session resolves ADR-0013 §5's open
+questions and it is Accepted. The first V1 baseline is exempt from producing a
+cost/spend estimate before execution (approval itself still required) — D-047,
+`docs/APPROVALS.md`'s new "Scoped exceptions" section. The research-acquisition
+mechanism for Q24's model/dataset/metric research is decided as web research via an
+ADR-0005 `ToolInvoker` (D-048, ADR-0005 §12/ADR-0006 §10) — not yet built. **Still no
+baseline execution, dataset backend implementation, research tool, evaluation
+subsystem, or model binding exists.** See `docs/state/DECISIONS.md` D-043–D-048 and
+the design notes cited above for the full gap analysis and proposed sequence.
+
 **Exit test:** a dataset version is created, a temporal- and camera-leakage check runs and
 **fails** a deliberately leaky split, and a baseline run is recorded with accuracy,
 latency, memory, and power on a named target.

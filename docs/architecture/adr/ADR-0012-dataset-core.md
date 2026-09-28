@@ -153,3 +153,17 @@ and itself (no other `cv_agent` layer, no third-party/image/backend module). 88 
 - The first real dataset shows `DatasetItem` needs another attribute for a check.
 - `cv_agent.experiments` cross-validation of `dataset_version` is built (needs a decision
   on which layer owns the reference).
+
+## 9. Status — Q10 answered (owner decision, 2026-09-28, D-045)
+
+This §8 revisit trigger has fired: `OPEN_QUESTIONS.md` Q10 is answered — V1's dataset
+storage backend is the **local filesystem**. This ADR's own scoping (§4: "would
+silently decide Q10... would pre-decide Q10") is why the answer changes nothing here —
+`DatasetStore` stays the same `Protocol` (`put_manifest`/`get_manifest`/
+`list_versions`), unchanged, and stays storage-agnostic by the owner's own explicit
+instruction ("keep the Dataset Core storage abstraction generic so other backends can
+be added later"). **Not done by this status note:** a concrete
+`LocalFilesystemDatasetStore` implementing the protocol, an on-disk layout, perceptual-
+hash computation, or dataset acquisition — building the backend module itself is a
+separate, later task (issue #63 scoped this session to decision-recording only). See
+`docs/state/DECISIONS.md` D-045.

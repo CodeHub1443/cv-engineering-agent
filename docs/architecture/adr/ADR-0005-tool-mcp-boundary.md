@@ -664,3 +664,25 @@ skill_id/binding_id/runtime_id three-level scheme, and nothing in this boundary'
 current scope needs multiple candidate implementations of one `tool_id` the way
 ADR-0010's `choose_candidate` needed for skills. If that need arises later, it is an
 additive follow-up (a `binding_id`-equivalent field), not a reason to add one now.
+
+## 12. Status — research-acquisition mechanism decided (owner decision, 2026-09-28, D-048)
+
+§10 left `OPEN_QUESTIONS.md` Q5's MCP-vs-skill half explicitly unresolved in general.
+The owner has now resolved it **for one concrete case**: the V1 research-acquisition
+mechanism (populating `cv_agent.knowledge`, ADR-0006, with real, dated, sourced
+candidates — e.g. for Q24's Person Detection + Tracking model/dataset/metric research)
+will use **web research**, retaining provenance, and will be built as an **ADR-0005
+`ToolInvoker`** when implemented — not an ADR-0009 skill binding, and not a new
+boundary. **No MCP SDK** (reaffirms D-042). This is consistent with, and does not
+reopen, §9 rule 4 ("no `ToolInvoker` implementation may also implement
+`ExecutionRuntime`... without a follow-up ADR") — a research-fetch call was never a
+skill invocation to begin with (§2's own "why this responsibility does not belong to an
+existing component" already made this argument for exactly this kind of call).
+
+**Still open, exactly as §10 already stated:** which other concrete integrations (if
+any) should be MCP-backed vs. CLI/skill-backed; no MCP SDK/vendor is selected; Q2, Q3,
+Q6, Q10 (now answered separately, D-045), Q16, Q19, Q23 remain untouched by this note.
+**Not built by this status note:** any concrete `ToolInvoker` implementation, which web
+source(s)/API(s) are used, a `ToolSpec` registration, or any acquisition code — all
+explicitly out of scope for the session that recorded this decision (issue #63). See
+`docs/state/DECISIONS.md` D-048.

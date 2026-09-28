@@ -49,6 +49,19 @@ an external provider (LLM API, research tool, third-party service) unless the
 operation is authorized, the provider is permitted, and the data-handling policy
 allows it.
 
+## Scoped exceptions
+
+**First V1 baseline run (owner decision, 2026-09-28, D-047 — `docs/state/
+DECISIONS.md`):** the *first* baseline established for the V1 reference project (Q24)
+is exempt from this file's "before asking, the agent estimates the cost" rule — no
+cost/spend estimate is required before that one run executes. The approval gate/
+interrupt itself still applies; this exempts only the pre-execution estimate, not
+approval. Actual runtime/resource measurements (GPU-hours, wall time, VRAM/RAM, power
+where available) are captured *after* execution and written to the experiment ledger.
+This does not set any threshold value below and does not extend past the first
+baseline run — `OPEN_QUESTIONS.md` Q6 (thresholds) and Q19 (a general estimation
+mechanism) remain open for every run after it.
+
 ## Thresholds
 
 *Placeholders — see `OPEN_QUESTIONS.md` Q6. Set these before Phase 2.*

@@ -35,7 +35,10 @@ whether these are MCP servers, CLI tools, Python SDKs, or agent skills.
 ## Soon — needed within one or two phases
 
 **Q6.** What are the default cost thresholds for approval gates (GPU-hours, $, dataset
-mutation scope)? `docs/APPROVALS.md` has placeholders. `[P§24]`
+mutation scope)? `docs/APPROVALS.md` has placeholders. `[P§24]` — **Narrow exception
+added 2026-09-28 (owner decision, D-047):** the *first* V1 baseline run is exempt from
+needing a cost/spend estimate before execution (the normal approval gate/interrupt
+still applies); this does not set any threshold value and Q6 itself remains open.
 
 ~~**Q16.** What is the persistence backend for the experiment ledger (`docs/state/
 EXPERIMENTS.md`)? Files, SQLite, or a service? — split off from the former Q8
@@ -56,7 +59,15 @@ Does not resolve Q3, Q23, or any other open question.
 what are the terms-of-service constraints? The requirement is clear; the mechanism is
 not.
 
-**Q10.** Dataset storage and versioning: DVC, Git LFS, or external object store? `[P§26]`
+~~**Q10.** Dataset storage and versioning: DVC, Git LFS, or external object store?
+`[P§26]`~~ — **Answered 2026-09-28 (owner decision, D-045):** V1 dataset storage
+backend is the **local filesystem**. `cv_agent/datasets/`'s `DatasetStore` protocol
+(ADR-0012) is unchanged and stays storage-agnostic specifically so another backend
+(DVC, Git LFS, object store) can be added later without touching `DatasetManifest`,
+the leakage checks, or any caller. *Does NOT decide:* the on-disk layout, a concrete
+`LocalFilesystemDatasetStore` implementation, perceptual-hash computation, or dataset
+acquisition — none of that is built by this decision (see ADR-0012 §9). Building the
+backend module is explicitly out of scope for the session that recorded this answer.
 
 **Q19.** `docs/APPROVALS.md`'s real approval workflow — specifically, *producing a
 cost estimate before asking* ("Before asking, the agent estimates the cost" — the
@@ -71,7 +82,12 @@ policy, never gated) but becomes load-bearing the moment ADR-0010's planning
 connector — or anything else — ever selects a candidate whose binding is
 `approval_required`. `[P§24]`, `[P§29.8]`. *Blocks: any `approval_required` binding
 being exercised through a real, non-fake approval flow with an actual estimate
-attached, including via ADR-0010's future planning connector.*
+attached, including via ADR-0010's future planning connector.* — **Narrow exception
+added 2026-09-28 (owner decision, D-047):** the *first* V1 baseline run does not need
+a cost/spend estimate produced before it executes; actual runtime/resource
+measurements are captured *after* execution where available and written to the
+experiment ledger instead. No general estimation mechanism or cost model is invented
+by this exception, and Q19 itself remains open for every run after the first.
 
 ~~**Q22.** *New 2026-09-21 (independent audit of PR #42; tracked as GitHub issue #43).*
 `pending_execution` pins only `skill_id` (`{"skill_id", "inputs", "task"}`), and both
@@ -112,21 +128,44 @@ contract is real, ADR-0009 §12) — an execution-surface design decision for th
 decision, not on engineering. *Blocks: any real-skill end-to-end CLI test of the three
 interrupt kinds.*
 
-**Q24.** *New 2026-09-24 (surfaced while recording Q4/D-041).* Q4 chose a controlled
+~~**Q24.** *New 2026-09-24 (surfaced while recording Q4/D-041).* Q4 chose a controlled
 *reference* project for V1 validation but did not name it. Which reference project —
 its CV task and target scenario, its dataset source and provenance, and the operational
 constraints (latency, recall, false-positive tolerance `[P§5]`) it is validated against?
 Phase 5's exit test needs "a baseline ... on a named target", and `docs/DATA.md` requires
-a dataset with a manifest. *Blocks: ROADMAP Phase 5b (baseline establishment).* `[P§30]`
+a dataset with a manifest. *Blocks: ROADMAP Phase 5b (baseline establishment).* `[P§30]`~~
+— **Answered 2026-09-28 (owner decision, D-043):** the reference project is **Person
+Detection + Tracking** — objective: high-performance, real-time, low-resource person
+detection; input: CCTV/video stream; NVIDIA GPU is the target execution environment.
+The **Agent must research and select** the detection/tracking model or approach — it
+must not be hardcoded to YOLO, and the owner is not asked to pick one. The Agent must
+similarly **research/recommend the reference dataset** and **propose the evaluation
+metrics** (not have either handed to it). This is explicitly a **reference/proving-ground
+task, not a specialization of the Agent** — the design and any code built for it must
+stay generic. *Does NOT decide:* which specific model, dataset, or metric set is
+actually selected (that is the Agent's own researched output, not an owner choice); the
+job-execution mechanism that will run it (see D-046); the dataset storage backend (see
+D-045). See `docs/architecture/adr/ADR-0013-job-process-execution-boundary.md` and
+ADR-0005/ADR-0006's status appendices for what this now unblocks and what still doesn't
+exist to act on it.
 
-**Q25.** *New 2026-09-24 (surfaced while recording Q2/D-040).* Q2 chose a local
+~~**Q25.** *New 2026-09-24 (surfaced while recording Q2/D-040).* Q2 chose a local
 Linux/NVIDIA GPU execution host with a controller process separate from workload
 processes, but did not say which host or GPU (a "named target" for every ledger row's
 `hardware` field, `[P§25]`), nor whether the controller runs on that same host or on
 another machine (this repository's sessions currently run on Windows, and
 `docs/APPROVALS.md` forbids running Linux-specific commands on another platform).
 *Blocks: ROADMAP Phase 5b (a baseline on a named target), and any execution binding that
-must state where it runs.* `[P§13]`, `[P§25]`
+must state where it runs.* `[P§13]`, `[P§25]`~~
+— **Answered 2026-09-28 (owner decision, D-044):** the CV workload execution host is
+**Linux + NVIDIA GPU**; the Agent/controller process and CV workload processes **remain
+separate**, confirming — and explicitly **not changing** — D-040's architecture.
+*Does NOT decide:* a concrete host/GPU identity (hostname, GPU model, driver/CUDA
+version — the specific "named target" for a ledger row's `hardware` field is still not
+named, only the platform class is); whether the controller runs on the same physical
+machine as the workload or a different one (D-040 said "separate processes," which does
+not by itself say "separate hosts"); the job lifecycle/supervision design (see D-046,
+new ADR-0013).
 
 ## Deferrable
 
