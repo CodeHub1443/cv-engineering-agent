@@ -86,6 +86,8 @@
 Record here when a decision is overturned. Never delete the original row — mark it
 `superseded` and add the new row with a pointer.
 
+| D-050 | 2026-09-28 | Second real execution binding (ADR-0009 §8 revisit trigger fired, for exactly one skill): `cv_agent/execution/runtimes/deepstream_validate_pipeline.py` adds `build_binding()`, `resolve_command()`, and an explicit, opt-in `register(registry)` for the `deepstream-generate-pipeline` skill — specifically its `scripts/validate_pipeline.py`. Binding uses `LinuxNvidiaJobRuntime` (job path, ADR-0013) rather than `ExecutionRuntime` (synchronous path). Verified by personal inspection of all 777 lines: stdlib-only (no third-party packages), reads a GStreamer pipeline string and validates it WITHOUT running inference (syntax, element, property, structure checks + optional `gst-launch-1.0` dry-run with `fakesrc`/`fakesink`), exit 0 = valid JSON `{valid:true}`, exit 1 = invalid JSON `{valid:false,errors:[...]}` — confirmed empirically on this machine. `approval_policy="allowed"` per `docs/APPROVALS.md` "Read-only research, retrieval, analysis → ✅ free". `verified=True` for this one binding only; arbitrary uninspected skills remain `verified=False`. `resolve_command(skill, pipeline_string)` builds `["python3", script_path, "--pipeline", pipeline_string]` from `Skill.location`. No other skill's binding changes. 28 new tests; 1076/1076 pass. See ADR-0009 §8 | `[P§15]`, `[P§21]`, `[P§22]`, `[P§23]`, `[P§29.9]`, `[P§34]` | ADR-0009 | accepted |
+
 | # | Date | Reverses | Why | New ADR |
 |---|---|---|---|---|
 | — | — | — | — | — |

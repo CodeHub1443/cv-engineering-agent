@@ -1482,3 +1482,34 @@ ADR-0009 §8). First baseline run (Person Detection + Tracking, zero-shot) defer
 PR. `ExperimentRecord` wiring from `JobResult` also deferred. Q10 (dataset storage backend)
 still blocks a durable baseline. Q3 (restart-survivable checkpointer for jobs outliving the
 current process) unresolved but does not block the first baseline.
+
+## 2026-09-28 — Second real CV skill binding: deepstream-generate-pipeline (feature/claude/adr-0009-second-binding)
+
+**What changed:** Added `cv_agent/execution/runtimes/deepstream_validate_pipeline.py` — the second
+verified `ExecutionBinding` (ADR-0009 §8, D-050). Binding uses `LinuxNvidiaJobRuntime` (job path,
+ADR-0013) rather than the synchronous `ExecutionRuntime` path used by `trt-perf-analysis`.
+
+**Skill selected:** `deepstream-generate-pipeline` → `scripts/validate_pipeline.py`. Selected by:
+1. Enumerating all 62 installed skills under `~/.claude/skills/`.
+2. Filtering to those with executable scripts and clear CLI contracts.
+3. Reading all 777 lines of `validate_pipeline.py` for ADR-0009 §8 inspection.
+4. Confirming the CLI contract empirically: exit 0 + JSON `{valid:true}` for valid pipelines,
+   exit 1 + JSON `{valid:false, errors:[...]}` for invalid ones.
+
+**Why this skill:** Read-only DeepStream pipeline validation — genuine CV engineering operation,
+Python stdlib only, no GPU required, deterministic, `gst-inspect-1.0` and `gst-launch-1.0`
+present and functional on this machine. Fits APPROVALS.md "Read-only research, retrieval,
+analysis → ✅ free" → `approval_policy="allowed"`.
+
+**Key design decisions:**
+- `resolve_command(skill, pipeline_str) → list[str]` derives script path from `Skill.location`
+  (never hard-coded), same discipline as `TrtPerfAnalysisRuntime._build_argv()`.
+- 28 new tests cover skill discovery, binding metadata, command resolution, registry wiring,
+  approval/pin/host verification, and real subprocess execution (valid + invalid pipelines).
+- All 6 real-subprocess tests run against the installed skill (not skipped — skill is present).
+
+**Tests:** 1076/1076 pass. Ruff clean. Mypy clean.
+
+**Left open:** First baseline run (person detection + tracking, zero-shot) still deferred.
+`ExperimentRecord` wiring from `JobResult` not yet done. Q3 (restart-survivable checkpointer)
+unresolved but does not block.
