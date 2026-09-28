@@ -27,9 +27,10 @@ from cv_agent.config.settings import AgentConfig, load_config
 from cv_agent.execution.binding import ExecutionBindingRegistry
 from cv_agent.execution.executor import SkillExecutor
 from cv_agent.execution.models import SkillExecutionRequest, SkillExecutionResult
+from cv_agent.execution.jobs.executor import JobExecutor
 from cv_agent.graph.builder import build_graph
 from cv_agent.graph.state import AgentState
-from cv_agent.graph.workflow import build_requirements_workflow_graph
+from cv_agent.graph.workflow import build_job_workflow_graph, build_requirements_workflow_graph
 from cv_agent.llm.base import LLMProvider
 from cv_agent.llm.registry import get_provider
 from cv_agent.memory.models import ProjectUnderstandingRevision, SessionRecord
@@ -72,7 +73,12 @@ class CVAgent:
     from the default TOML file (config/default.toml).
     """
 
-    def __init__(self, config: Optional[AgentConfig] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[AgentConfig] = None,
+        *,
+        job_executor: Optional[JobExecutor] = None,
+    ) -> None:
         self._config: AgentConfig = config or load_config()
         self._llm: LLMProvider = get_provider(
             self._config.llm.provider,
@@ -112,6 +118,18 @@ class CVAgent:
             executor=self._executor,
             skill_inventory=self._skill_inventory,
             execution_registry=self._execution_registry,
+        )
+        # Job execution workflow (ADR-0013) — only built when a JobExecutor
+        # is supplied. None until a caller provides one explicitly.
+        self._job_executor: Optional[JobExecutor] = job_executor
+        self._job_workflow_graph: Optional[Any] = (
+            build_job_workflow_graph(
+                job_executor=job_executor,
+                skill_inventory=self._skill_inventory,
+                execution_registry=self._execution_registry,
+            )
+            if job_executor is not None
+            else None
         )
         # Durable Project Memory (ADR-0004) — lazily constructed on first
         # actual use. A CVAgent built only for health_check()/resolve()/
@@ -410,6 +428,87 @@ class CVAgent:
             self._try_mark_session_error(session_id, None, graph_exc)
             raise
         self._sync_memory_after_run(session_id, started_at=None, result=result)
+        return result
+
+    # ── Job execution workflow (ADR-0013) ─────────────────────────────────────
+
+    def start_job_workflow(
+        self,
+        task: str,
+        *,
+        pending_job: dict[str, Any],
+        session_id: Optional[str] = None,
+    ) -> AgentState:
+        """
+        Start a job execution run through the job workflow graph (ADR-0013).
+
+        The caller must supply `pending_job`: `{"skill_id": str, "inputs":
+        dict, "task": str | None}`. The graph captures `job_execution_pin`
+        from the live registry (plan_job node), gates on the binding's
+        approval policy (job_approval_gate, with an interrupt if
+        "approval_required"), then calls `JobExecutor.start_job()` with the
+        exact pinned request (start_job node), and polls until terminal
+        before collecting the outcome (poll_or_collect_job node).
+
+        Raises RuntimeError if no `job_executor` was supplied to
+        `CVAgent.__init__`.
+        """
+        if self._job_workflow_graph is None:
+            raise RuntimeError(
+                "CVAgent was not constructed with a job_executor; "
+                "start_job_workflow() requires one. Pass job_executor= to "
+                "CVAgent.__init__()."
+            )
+        sid = session_id or str(uuid.uuid4())
+        initial_state: AgentState = {
+            "session_id": sid,
+            "status": "initializing",
+            "task": task,
+            "steps": [],
+            "error": None,
+            "pending_human_input": None,
+            "human_feedback": None,
+            "requirements_analysis": None,
+            "clarification_answers": {},
+            "clarification_attempted": False,
+            "execution_inputs": {},
+            "planning_result": None,
+            "candidate_choice": None,
+            "candidate_selection": None,
+            "execution_input_recovery": None,
+            "pending_execution": None,
+            "approval_decision": None,
+            "execution_result": None,
+            "pending_job": pending_job,
+            "job_approval_decision": None,
+            "active_job_handle": None,
+            "job_result": None,
+        }
+        graph_config = {"configurable": {"thread_id": sid}}
+        result: AgentState = self._job_workflow_graph.invoke(
+            initial_state, config=graph_config
+        )
+        return result
+
+    def resume_job_workflow(self, session_id: str, resume_value: Any) -> AgentState:
+        """
+        Resume a paused job workflow run (e.g. after a job_approval interrupt).
+
+        Resume semantics are identical to `resume_workflow()` — pass
+        "approved"/"rejected" for a job_approval interrupt. Raises if the
+        graph is not currently paused for this session_id.
+        """
+        if self._job_workflow_graph is None:
+            raise RuntimeError(
+                "CVAgent was not constructed with a job_executor; "
+                "resume_job_workflow() requires one."
+            )
+        from langgraph.types import Command  # noqa: PLC0415
+
+        graph_config = {"configurable": {"thread_id": session_id}}
+        result: AgentState = self._job_workflow_graph.invoke(
+            Command(resume=resume_value), config=graph_config
+        )
         return result
 
     def _try_mark_session_error(

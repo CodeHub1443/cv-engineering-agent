@@ -319,3 +319,37 @@ class AgentState(TypedDict, total=False):
     calling the executor) for a recorded human rejection, a missing/malformed/
     explicit-`None` pin, an inconsistent decision, or a skill not found by
     discovery. Same serialization rationale as `requirements_analysis`."""
+
+    # ── Job execution (ADR-0013) ─────────────────────────────────────────────
+    pending_job: Optional[dict[str, Any]]
+    """What the caller is asking the graph to run as a long-running job, if
+    anything this run: `{"skill_id": str, "inputs": dict, "task": str | None,
+    "job_execution_pin": dict | None}`. None means this run does not touch
+    job execution at all.
+
+    `job_execution_pin` follows the same pin shape and capture/compare
+    discipline as `execution_pin` (ADR-0003 §10, ADR-0013 §3.2): captured
+    once by `_node_plan_job` from the live registry, never re-captured on a
+    later visit. Key MISSING = never pinned; explicit `None` = no binding at
+    capture; a dict = pin snapshot to compare at start_job time."""
+
+    job_approval_decision: Optional[str]
+    """"approved" | "rejected" | "not_required" | None (not yet decided).
+    Set only by the job_approval_gate node from the value an `interrupt()`
+    call actually receives on resume — never inferred, never defaulted to
+    "approved". Stays `None` for a missing/malformed pin. Never rewritten
+    after the gate: a recorded "rejected" is terminal. Analogous to
+    `approval_decision` for the synchronous skill execution path."""
+
+    active_job_handle: Optional[dict[str, Any]]
+    """`dataclasses.asdict()` of a `JobHandle` while the job is running; `None`
+    when the job has not started or has reached a terminal state. Set by the
+    `start_job` node on a successful `JobExecutor.start_job()` call; cleared
+    by `poll_or_collect_job` once the job reaches a terminal status."""
+
+    job_result: Optional[dict[str, Any]]
+    """`dataclasses.asdict()` of a `JobResult` when the job has reached a
+    terminal state (completed / failed / cancelled / host_mismatch / rejected).
+    Set by `start_job` for pre-flight failures (job never started) or by
+    `poll_or_collect_job` once the job exits. Same serialization rationale
+    as `execution_result`."""
