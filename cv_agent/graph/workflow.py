@@ -126,6 +126,7 @@ compiled with a checkpointer, keyed by `thread_id`.
 from __future__ import annotations
 
 import dataclasses
+import time
 from typing import Any, Literal, Optional
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -134,6 +135,9 @@ from langgraph.types import interrupt
 
 from cv_agent.execution.binding import ExecutionBindingRegistry, pin_is_well_formed
 from cv_agent.execution.executor import SkillExecutor
+from cv_agent.execution.host import HostRequirement
+from cv_agent.execution.jobs.executor import JobExecutor
+from cv_agent.execution.jobs.models import JobHandle, JobResult
 from cv_agent.execution.models import (
     ExecutionError,
     ExecutionEvidence,
@@ -1352,5 +1356,401 @@ def build_requirements_workflow_graph(
         "approval_gate", _route_after_approval, {"execute": "execute", END: END}
     )
     builder.add_edge("execute", END)
+
+    return builder.compile(checkpointer=checkpointer)
+
+
+# ---------------------------------------------------------------------------
+# Job workflow (ADR-0013 §5.5 / §5.6)
+# ---------------------------------------------------------------------------
+# A separate graph from build_requirements_workflow_graph (ADR-0003 §4).
+# Topology:
+#   START → initialize → plan_job → job_approval_gate → start_job
+#                                                     → END (rejected/unusable)
+#                                        ↓ (started)
+#                                   poll_or_collect_job → END
+#                                        ↓ (start failed)
+#                                        END
+
+# D-044 host class: Linux + NVIDIA GPU (ADR-0013 §2.1)
+_JOB_HOST_REQUIREMENT = HostRequirement(os="linux", gpu_vendor="nvidia")
+
+
+def _make_plan_job_node(execution_registry: ExecutionBindingRegistry):
+    def _node_plan_job(state: AgentState) -> dict[str, Any]:
+        pending = state.get("pending_job")
+        if pending is None:
+            return {
+                "status": "done",
+                "steps": _append_step(state, "plan_job", "no_pending_job"),
+            }
+
+        skill_id = pending.get("skill_id")
+        if not skill_id:
+            return {
+                "status": "done",
+                "steps": _append_step(state, "plan_job", "invalid_pending_job"),
+            }
+
+        # ADR-0003 §10.6: capture pin once at first observation, never re-pin.
+        if "job_execution_pin" not in pending:
+            pending = {
+                **pending,
+                "job_execution_pin": _capture_execution_pin(
+                    execution_registry, str(skill_id)
+                ),
+            }
+
+        return {
+            "pending_job": pending,
+            "steps": _append_step(
+                state, "plan_job", "job_execution_pinned", skill_id=skill_id
+            ),
+        }
+
+    return _node_plan_job
+
+
+def _make_job_approval_gate_node():
+    def _node_job_approval_gate(state: AgentState) -> dict[str, Any]:
+        pending = state.get("pending_job")
+        if pending is None:
+            return {
+                "job_approval_decision": "not_required",
+                "status": "done",
+                "steps": _append_step(state, "job_approval_gate", "no_pending_job"),
+            }
+
+        skill_id = pending.get("skill_id")
+        pin_state: Any = pending.get("job_execution_pin", _MISSING_PIN)
+
+        # Missing or malformed pin: no interrupt, decision stays None.
+        if pin_state is _MISSING_PIN or (
+            pin_state is not None
+            and not pin_is_well_formed(pin_state, skill_id=str(skill_id))
+        ):
+            return {
+                "steps": _append_step(
+                    state,
+                    "job_approval_gate",
+                    "job_execution_pin_unusable",
+                    skill_id=skill_id,
+                ),
+            }
+
+        # Explicit None: no binding at capture time.
+        if pin_state is None:
+            return {
+                "job_approval_decision": "not_required",
+                "steps": _append_step(
+                    state,
+                    "job_approval_gate",
+                    "job_approval_not_required",
+                    skill_id=skill_id,
+                ),
+            }
+
+        binding_pin = pin_state["binding"]
+        if binding_pin["approval_policy"] != "approval_required":
+            return {
+                "job_approval_decision": "not_required",
+                "steps": _append_step(
+                    state,
+                    "job_approval_gate",
+                    "job_approval_not_required",
+                    skill_id=skill_id,
+                ),
+            }
+
+        payload = {
+            "type": "job_approval",
+            "skill_id": skill_id,
+            "binding_id": binding_pin["binding_id"],
+            "runtime_id": binding_pin["runtime_id"],
+            "description": binding_pin["description"],
+            "task": pending.get("task"),
+            "inputs": pending.get("inputs", {}),
+        }
+        decision = interrupt(payload)
+        normalized: str = "approved" if decision == "approved" else "rejected"
+
+        return {
+            "job_approval_decision": normalized,
+            "pending_human_input": None,
+            "steps": _append_step(
+                state,
+                "job_approval_gate",
+                "job_approval_interrupt_resumed",
+                skill_id=skill_id,
+                decision=normalized,
+            ),
+        }
+
+    return _node_job_approval_gate
+
+
+def _route_after_job_approval(state: AgentState) -> str:
+    if state.get("pending_job") is not None:
+        return "start_job"
+    return END
+
+
+def _make_start_job_node(job_executor: JobExecutor, skill_inventory: SkillInventory):
+    def _node_start_job(state: AgentState) -> dict[str, Any]:
+        pending = state["pending_job"]
+        assert pending is not None  # _route_after_job_approval only routes here with a plan
+        skill_id = pending["skill_id"]
+        decision = state.get("job_approval_decision")
+        pin = pending.get("job_execution_pin")
+
+        refused: Optional[JobResult] = None
+        # ADR-0003 §10 ordered checks — rejection FIRST, then pin integrity.
+        if decision == "rejected":
+            refused = JobResult(
+                skill_id=skill_id,
+                job_id=None,
+                status="rejected",
+                evidence=_pin_evidence(pin),
+                error=ExecutionError(
+                    "approval_denied",
+                    "Job execution was rejected by the human at the approval gate.",
+                ),
+            )
+        elif "job_execution_pin" not in pending:
+            refused = JobResult(
+                skill_id=skill_id,
+                job_id=None,
+                status="rejected",
+                evidence=_pin_evidence(None),
+                error=ExecutionError(
+                    "binding_mismatch",
+                    "integrity check failed: job_execution_pin_missing",
+                ),
+            )
+        elif pin is None:
+            refused = JobResult(
+                skill_id=skill_id,
+                job_id=None,
+                status="not_submitted",
+                evidence=_pin_evidence(None),
+                error=ExecutionError(
+                    "no_binding",
+                    "No execution binding was registered when this job was planned; "
+                    "a binding registered afterwards was never approved.",
+                ),
+            )
+        elif not pin_is_well_formed(pin, skill_id=str(skill_id)):
+            refused = JobResult(
+                skill_id=skill_id,
+                job_id=None,
+                status="rejected",
+                evidence=_pin_evidence(pin),
+                error=ExecutionError(
+                    "binding_mismatch",
+                    "integrity check failed: job_execution_pin_malformed",
+                ),
+            )
+        elif decision != (
+            "approved"
+            if pin["binding"]["approval_policy"] == "approval_required"
+            else "not_required"
+        ):
+            # Defensive guard: unreachable through the gate in normal flow.
+            refused = JobResult(
+                skill_id=skill_id,
+                job_id=None,
+                status="rejected",
+                evidence=_pin_evidence(pin),
+                error=ExecutionError(
+                    "binding_mismatch",
+                    "integrity check failed: job_approval_decision_inconsistent",
+                ),
+            )
+
+        if refused is not None:
+            return {
+                "job_result": dataclasses.asdict(refused),
+                "status": "done",
+                "steps": _append_step(
+                    state,
+                    "start_job",
+                    "job_start_refused",
+                    skill_id=skill_id,
+                    result_status=refused.status,
+                ),
+            }
+
+        skill = skill_inventory.get(skill_id)
+        if skill is None:
+            not_found = JobResult(
+                skill_id=skill_id,
+                job_id=None,
+                status="not_submitted",
+                evidence=_pin_evidence(pin),
+                error=ExecutionError(
+                    "no_binding",
+                    f"'{skill_id}' was not found by skill discovery.",
+                ),
+            )
+            return {
+                "job_result": dataclasses.asdict(not_found),
+                "status": "done",
+                "steps": _append_step(
+                    state, "start_job", "job_start_refused",
+                    skill_id=skill_id, result_status=not_found.status,
+                ),
+            }
+
+        # Pass the exact approved job_execution_pin (ADR-0013 §5.6).
+        request = SkillExecutionRequest(
+            inputs=pending.get("inputs", {}),
+            task=pending.get("task"),
+            approved=decision == "approved",
+            expected_binding_pin=pin,
+        )
+        handle, result = job_executor.start_job(skill, request, _JOB_HOST_REQUIREMENT)
+
+        if handle is not None:
+            return {
+                "active_job_handle": dataclasses.asdict(handle),
+                "steps": _append_step(
+                    state,
+                    "start_job",
+                    "job_started",
+                    skill_id=skill_id,
+                    job_id=handle.job_id,
+                ),
+            }
+
+        return {
+            "job_result": dataclasses.asdict(result),
+            "status": "done",
+            "steps": _append_step(
+                state,
+                "start_job",
+                "job_start_failed",
+                skill_id=skill_id,
+                result_status=result.status,
+            ),
+        }
+
+    return _node_start_job
+
+
+def _route_after_start_job(state: AgentState) -> str:
+    if state.get("active_job_handle") is not None:
+        return "poll_or_collect_job"
+    return END
+
+
+def _make_poll_or_collect_job_node(job_executor: JobExecutor):
+    def _node_poll_or_collect_job(state: AgentState) -> dict[str, Any]:
+        handle_dict = state.get("active_job_handle")
+        if handle_dict is None:
+            return {
+                "status": "done",
+                "steps": _append_step(
+                    state, "poll_or_collect_job", "no_active_job_handle"
+                ),
+            }
+
+        handle = JobHandle(**handle_dict)
+        pending = state.get("pending_job") or {}
+        skill_id = pending.get("skill_id", "unknown")
+
+        # V1: poll in a loop until the job reaches a terminal state, then
+        # call collect_job() exactly once (ADR-0013 §5.3 V1 contract).
+        while True:
+            poll_status = job_executor.poll_job(handle)
+            if poll_status in ("completed", "failed", "cancelled"):
+                break
+            time.sleep(0.5)
+
+        outcome = job_executor.collect_job(handle)
+
+        terminal_status_map = {
+            "completed": "completed",
+            "failed": "failed",
+            "cancelled": "cancelled",
+        }
+        job_status = terminal_status_map.get(poll_status, "failed")
+
+        pin = pending.get("job_execution_pin")
+        result = JobResult(
+            skill_id=str(skill_id),
+            job_id=handle.job_id,
+            status=job_status,  # type: ignore[arg-type]
+            evidence=_pin_evidence(pin),
+            outcome=outcome,
+        )
+
+        return {
+            "active_job_handle": None,
+            "job_result": dataclasses.asdict(result),
+            "status": "done",
+            "steps": _append_step(
+                state,
+                "poll_or_collect_job",
+                "job_collected",
+                skill_id=skill_id,
+                job_id=handle.job_id,
+                status=job_status,
+            ),
+        }
+
+    return _node_poll_or_collect_job
+
+
+def build_job_workflow_graph(
+    *,
+    job_executor: JobExecutor,
+    skill_inventory: SkillInventory,
+    execution_registry: ExecutionBindingRegistry,
+    checkpointer: Optional[Any] = None,
+) -> Any:
+    """
+    Build and compile the job execution workflow graph (ADR-0013 §5.6).
+
+    Separate from `build_requirements_workflow_graph()` — see ADR-0003 §4.
+    Designed for a caller who supplies `pending_job` in the initial state
+    (analogous to `pending_execution` for the skill path). Applies the same
+    approval/pin integrity model as the skill workflow.
+
+    Topology:
+        START → initialize → plan_job → job_approval_gate →
+            (approved/not_required) start_job →
+                (started) poll_or_collect_job → END
+                (not started) END
+            (rejected/unusable) END
+    """
+    if checkpointer is None:
+        checkpointer = MemorySaver()
+
+    builder: StateGraph = StateGraph(AgentState)
+
+    builder.add_node("initialize", _node_initialize)
+    builder.add_node("plan_job", _make_plan_job_node(execution_registry))
+    builder.add_node("job_approval_gate", _make_job_approval_gate_node())
+    builder.add_node(
+        "start_job", _make_start_job_node(job_executor, skill_inventory)
+    )
+    builder.add_node(
+        "poll_or_collect_job", _make_poll_or_collect_job_node(job_executor)
+    )
+
+    builder.add_edge(START, "initialize")
+    builder.add_edge("initialize", "plan_job")
+    builder.add_edge("plan_job", "job_approval_gate")
+    builder.add_conditional_edges(
+        "job_approval_gate",
+        _route_after_job_approval,
+        {"start_job": "start_job", END: END},
+    )
+    builder.add_conditional_edges(
+        "start_job",
+        _route_after_start_job,
+        {"poll_or_collect_job": "poll_or_collect_job", END: END},
+    )
+    builder.add_edge("poll_or_collect_job", END)
 
     return builder.compile(checkpointer=checkpointer)

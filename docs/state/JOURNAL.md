@@ -1450,3 +1450,35 @@ status.
 **Learned:** The existing ADR-0003 §10 pin model extends cleanly to a long-running job because the pin's semantic is "has what would run not changed since approval was given?" — a question answered once, at `start()` time, not continuously. The synchronous/asynchronous distinction does not change *when* the approval decision is made (before the action starts) or *what* is being approved (the specific binding/runtime the human saw). Reading `executor.py`'s pre-flight check order before designing `JobExecutor`'s made the mapping straightforward — the same 9-step order (no binding → not verified → rejected policy → E1 rule → pin mismatch → not approved → no runtime → host mismatch → start) translates directly.
 
 **Left open:** No concrete `JobRuntime` implementation for the reference project yet — still requires per-skill verification per ADR-0009 §8. No `LinuxNvidiaHostVerifier` concrete implementation. No graph nodes (`plan_job`, `job_approval_gate`, `start_job`, `poll_or_collect`). No `AgentState` additions committed. No `ExperimentRecord` wiring from `JobResult`. Q3 (restart-survivable checkpointer) acknowledged as a gap for a job that outlives the current process — does not block the first baseline run. Q6/Q19 open beyond D-047. PR review/merge pending.
+
+---
+
+## 2026-09-28 — ADR-0013 workflow integration (feature/claude/adr-0013-workflow-integration)
+
+**Did:** Connected the generic Job boundary to the Agent workflow graph (ADR-0013 §5.5/§5.6).
+Added four `AgentState` fields (`pending_job`, `job_approval_decision`, `active_job_handle`,
+`job_result`). Added four graph node factories (`_make_plan_job_node`, `_make_job_approval_gate_node`,
+`_make_start_job_node`, `_make_poll_or_collect_job_node`) and `build_job_workflow_graph()` to
+`workflow.py`. Wired `CVAgent(job_executor=...)`, `start_job_workflow()`, `resume_job_workflow()`
+into `runtime/agent.py`. Added `tests/test_job_workflow.py` (29 tests). All 1048 tests pass;
+ruff and mypy clean.
+
+**Why:** ADR-0013 §5.5/§5.6 specified these exact shapes and required a separate implementation
+PR after the protocol stubs PR. The approval/pin integrity model (`_node_start_job` passes the
+exact captured `job_execution_pin`, E1 rule preserved, no direct runtime invocation from graph
+nodes) mirrors the synchronous `_node_execute` discipline (ADR-0003 §10) applied to
+long-running jobs.
+
+**Broke:** Nothing — 1019 pre-existing tests all pass; no modifications to existing workflow
+nodes, `SkillExecutor`, `ExecutionRuntime`, or any unrelated code path.
+
+**Learned:** `ApprovalPolicy` valid values are `"allowed"/"approval_required"/"rejected"` —
+`"not_required"` is not a valid value (it's what the *gate* writes to `approval_decision`, not
+a binding's own policy). `SkillInventory._loaded` must be set to `True` when injecting
+`_skills` directly in tests, otherwise `_ensure_loaded()` wipes the injection on first `get()`.
+
+**Left open:** No real CV skill registered yet (per-skill verification still required per
+ADR-0009 §8). First baseline run (Person Detection + Tracking, zero-shot) deferred to next
+PR. `ExperimentRecord` wiring from `JobResult` also deferred. Q10 (dataset storage backend)
+still blocks a durable baseline. Q3 (restart-survivable checkpointer for jobs outliving the
+current process) unresolved but does not block the first baseline.
