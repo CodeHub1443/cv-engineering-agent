@@ -4,31 +4,24 @@
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
 **Updated:** 2026-09-28 · **Phase:** 0 → 1 (partial) → 2 (partial) → 3 (partial) →
-4 (partial) → 5a (complete) → 5b (decisions recorded, no baseline execution) ·
+4 (partial) → 5a (complete) → 5b (decisions + ADR-0013 accepted, no baseline yet) ·
 **Health:** green
 
 ## Where we are
 
-`main` is at `e6cff6e` (PR #60: Phase 5a Dataset Core). Two docs-only PRs are open,
-not yet merged: **#62** (Q2/Q4/Q5, D-040..D-042) and this session's **#64** (Q24/Q25/Q10,
-the Job/Process Execution Boundary scope, a first-baseline cost/spend exception, and
-the research-acquisition mechanism — D-043..D-048), branched from #62's tip since it
-needs D-040. CI green on the merged commit; 950 tests as of `main`.
+`main` now contains Phase 0–5a complete plus all Phase 5b decision records (D-043..D-048,
+merged PR #62 + #64) and ADR-0013 has been moved from Proposed to **Accepted** with a
+full design on branch `feature/claude/adr-0013-job-execution-design` (PR pending).
 
-**Owner decisions recorded 2026-09-28 (issue #63, one new Proposed ADR):** Q24/D-043 —
-reference project is Person Detection + Tracking; the Agent must research/select the
-model, research/recommend the dataset, and propose metrics itself (never hardcoded).
-Q25/D-044 — confirms Linux+NVIDIA GPU host, controller/workload as separate processes;
-does not name a concrete machine and does not change D-040. Q10/D-045 — V1 dataset
-backend is the local filesystem, behind the already-generic `DatasetStore` protocol
-(ADR-0012 §9 appended, not rewritten). Job/Process Execution Boundary/D-046 — controlled
-local subprocess jobs, no Kubernetes/distributed/remote in V1; new **ADR-0013**
-(Proposed, scope only — no protocol design, no code). Q6/Q19/D-047 — the first V1
-baseline is exempt from a pre-execution cost estimate (approval itself still required);
-`docs/APPROVALS.md` gained a "Scoped exceptions" section. Research Acquisition/D-048 —
-V1 mechanism is web research via an ADR-0005 `ToolInvoker` feeding ADR-0006's Knowledge
-boundary, no MCP SDK (ADR-0005 §12 / ADR-0006 §10 appended). **No code changed this
-session** — decisions and documentation only.
+**ADR-0013 design decided (D-049, this session):** three open protocol-shape questions
+are answered: (1) `JobRuntime` is a distinct sibling protocol — not an extension of
+`ExecutionRuntime`; same `ExecutionBindingRegistry` for pin/binding, separate `job_runtimes`
+dict; (2) approval-integrity: existing ADR-0003 §10 pin model applies unchanged — pin
+captured at plan time, checked by `pin_mismatch()` at `start_job()` time, E1 rule
+preserved; (3) host verification: new `HostVerifier` protocol in `cv_agent.execution.host`,
+called by `JobExecutor.start_job()` before `runtime.start()`, mismatch → `host_mismatch`
+terminal status. `SkillExecutor`/`ExecutionRuntime`/all existing callers are UNCHANGED.
+No source code was modified this session — interface stubs and ADR only.
 
 **Implemented:** LLM gateway w/ one real provider (ADR-0002), skill discovery/resolution
 (ADR-0007), requirements analysis (ADR-0008), execution boundary + one real
@@ -37,40 +30,40 @@ session** — decisions and documentation only.
 interrupt kinds (ADR-0003/0010), project memory (ADR-0004), approval integrity
 (ADR-0003 §10), enforced CI.
 
-**Still NOT implemented:** a dataset backend (Q10 answered, module not built), any real
-`ToolInvoker`/MCP client or research acquisition, a durable `KnowledgeStore`, bindings
-for 83 other skills, the job/process execution boundary's actual protocol (ADR-0013 is
-Proposed, not Accepted), training/baseline execution, multi-provider routing, spend
-limits, a persistent checkpointer (Q3), real-skill CLI reachability (Q23), and wiring
-any new package into `CVAgent`.
+**Still NOT implemented:** `cv_agent.execution.jobs` subpackage (ADR-0013 Accepted,
+stubs not yet committed), `cv_agent.execution.host` module, `LinuxNvidiaHostVerifier`,
+a concrete `JobRuntime` for the reference project (ADR-0009 §8 per-skill verification
+still required), a dataset backend (Q10/D-045 answered, module not built), any real
+`ToolInvoker` for research acquisition (D-048), a durable `KnowledgeStore`, bindings
+for 83 other skills, training/baseline execution, multi-provider routing, spend limits,
+a persistent checkpointer (Q3), real-skill CLI reachability (Q23), `AgentState`
+`pending_job`/`job_approval_decision`/`active_job_handle`/`job_result` fields, graph
+nodes for job workflow, wiring new packages into `CVAgent`.
 
 ## In flight
 
 | Item | Issue | State |
 |---|---|---|
-| Merge PR #62 (Q2/Q4/Q5) | #61 | docs-only PR pending owner review |
-| Merge PR #64 (Q24/Q25/Q10/ADR-0013/Q6-Q19-exception/research mechanism) | #63 | docs-only PR pending owner review, stacked on #62 |
+| ADR-0013 full design + D-049 | #65 | PR open on branch `feature/claude/adr-0013-job-execution-design`; no code change |
 | `workflow` CLI real-skill reachability | #44 | tracked; needs owner decision (Q23) |
 
 ## Next 3 actions
 
-1. Owner merges #62, then #64 (in that order — #64 was branched from #62's tip).
-2. A follow-up architect session resolves ADR-0013 §5's open protocol-shape questions
-   (extend `ExecutionRuntime` vs. new protocol; approval-pin model for a long-running
-   job; host-verification placement) and moves it from Proposed toward Accepted.
-3. Once ADR-0013 is Accepted: implement the local-filesystem `DatasetStore` backend
-   (D-045), the research-acquisition `ToolInvoker` (D-048), and bind one real
-   `ExecutionRuntime` for the Person Detection + Tracking reference project — only then
-   can a first baseline run and write a real `ExperimentRecord`.
+1. Owner merges ADR-0013 design PR (docs/ADR only — no code change, CI green).
+2. Implement ADR-0013 protocol stubs: `cv_agent/execution/host.py`, `cv_agent/execution/jobs/`
+   subpackage (models, runtime Protocol, executor) — per-skill verification still needed
+   before any concrete runtime is considered working.
+3. Implement `LinuxNvidiaHostVerifier` + first `JobRuntime` for the Person Detection +
+   Tracking reference project (individually verified per ADR-0009 §8, same precedent as
+   D-014's `trt-perf-analysis`).
 
 ## Blockers
-- Nothing blocked on engineering — every open item needs owner review/merge or a
-  dedicated architect-mode design session (ADR-0013).
+
+- Nothing blocked on engineering — every next step follows from ADR-0013 (Accepted).
+- Q3 (restart-survivable checkpointer) remains open but does not block the first baseline.
 
 ## Do not start yet
 
-Implementing the job runner, the dataset backend module, the research tool, the
-evaluation subsystem, model selection, or any CV pipeline code; downloading models or
-datasets; a durable `KnowledgeStore`; autonomous training; a second LLM provider; cost
-estimation beyond D-047's narrow exception; merging the two graphs; wiring any new
-package into `CVAgent`/`LangGraph`; embeddings/vector search — `[P§34]`.
+Training, NAS, or optimization runs; cost estimation beyond D-047; a second LLM provider;
+merging the two graphs; embeddings/vector search; downloading models or datasets; a
+durable `KnowledgeStore`; multi-provider routing — `[P§34]`.
