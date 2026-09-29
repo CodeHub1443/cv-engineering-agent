@@ -3,42 +3,53 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-09-28 · **Phase:** 0 → 1 (partial) → 2 (partial) → 3 (partial) →
-4 (partial) → 5a (complete) → 5b (decisions + ADR-0013 complete + second real binding PR open) ·
+**Updated:** 2026-09-29 · **Phase:** 5c (pin contract + VRAM measurement complete) ·
 **Health:** green
 
 ## Where we are
 
-ADR-0013 is fully implemented and merged (PR #68, main). Second real CV skill binding open in PR:
-- `cv_agent/execution/jobs/` — `JobRuntime`, `JobExecutor`, `LinuxNvidiaJobRuntime` (merged)
-- `cv_agent/graph/workflow.py` — `build_job_workflow_graph()` + four graph nodes (merged)
-- `cv_agent/runtime/agent.py` — `CVAgent(job_executor=...)` (merged)
-- `cv_agent/execution/runtimes/deepstream_validate_pipeline.py` — second verified binding (this PR, open)
+ADR-0014 + real research (D-053) + baseline wiring (D-054) + YOLO inference binding (D-055)
++ pin contract fix (D-056) + VRAM measurement (D-057) all on
+`feature/claude/adr-0009-second-binding`. 1500 tests, 4 skipped. Ruff clean. Mypy clean.
 
-**Second binding (D-050):** `deepstream-generate-pipeline` skill's `scripts/validate_pipeline.py`
-bound to `LinuxNvidiaJobRuntime`. Verified by personal inspection (777 lines, stdlib-only,
-read-only validation). `approval_policy="allowed"`. `resolve_command(skill, pipeline_str)`
-builds the subprocess command. 28 new tests (1076 total), ruff + mypy clean.
+- `cv_agent/execution/host.py` — `HostProfile.vram_mb`, `_parse_vram_mb()`, `_measure_vram_mb()`,
+  real VRAM check in `verify()` (fail-closed, ADR-0013 §3.3)
+- `cv_agent/execution/jobs/runtimes/yolo_inference.py` — verified binding for `yolo-inference`
+- `scripts/run_baseline.py` — ready-to-run baseline script using `registry.pin()` (D-056 fix)
+- `cv_agent/graph/experiment_wiring.py` — `ExperimentContext`, `job_result_to_experiment_record()`
 
-## In flight
+## Baseline readiness
 
-| Item | Issue | State |
-|---|---|---|
-| Second real binding (deepstream-generate-pipeline) | — | PR open on `feature/claude/adr-0009-second-binding`; 1076/1076 tests pass |
-| `workflow` CLI real-skill reachability | #44 | tracked; needs owner decision (Q23) |
+`scripts/run_baseline.py` is architecture-complete and passes all pre-flight checks. **Requires
+Tanvir to execute manually** (approval gate is live — `approved=True` in the request, guarded by
+`expected_binding_pin`). Two remaining runtime blockers:
+
+1. **Video fixture missing:** `tests/fixtures/person_detection_sample.mp4` not committed. The
+   script will `sys.exit()` at the fixture check. Commit a short royalty-free clip to unblock.
+2. **CUDA driver:** RTX 3060 present (12288 MiB, driver 535.309.01, CUDA 12.2). Torch requires
+   CUDA 13.0+ for +cu130. GPU inference blocked; CPU fallback (`device=cpu`) works but won't
+   produce GPU latency data. Either upgrade driver or change `device=0` → `device=cpu` in the
+   script for a CPU baseline.
+
+## Manual run command (once fixture exists)
+
+```
+cd /home/dev/cv-engineering-agent && python3 scripts/run_baseline.py
+```
 
 ## Next 3 actions
 
-1. Owner merges second binding PR.
-2. Wire `ExperimentRecord` from `JobResult` + `CVAgent` dataset/experiment attrs (D-020 wiring pattern).
-3. Establish the first baseline run (person detection + tracking, zero-shot inference, `baseline_id="SELF"`).
+1. **Commit video fixture** to `tests/fixtures/person_detection_sample.mp4` OR change device to cpu.
+2. **Run** `python3 scripts/run_baseline.py` manually (approval gate live).
+3. **After successful baseline:** update JOURNAL/EXPERIMENTS, then open PR for this branch.
 
 ## Blockers
 
-- Q3 (restart-survivable checkpointer) remains open but does not block the first baseline.
+- Video fixture not committed (integration test unconditionally skipped; baseline script exits)
+- CUDA 12.2 vs torch +cu130 mismatch (GPU path blocked; CPU fallback available)
+- ANTHROPIC_API_KEY not set (LLM uses FakeLLMProvider; acceptable for D-053 research)
 
 ## Do not start yet
 
-Training, NAS, or optimization runs; cost estimation beyond D-047; a second LLM provider;
-merging the two graphs; embeddings/vector search; downloading models or datasets; a
-durable `KnowledgeStore`; multi-provider routing — `[P§34]`.
+Training, NAS, optimization, evaluation, TensorRT, DeepStream, AgentState wiring for model
+selection (requires ADR if shape changes), second LLM provider, embeddings/vector search `[P§34]`.

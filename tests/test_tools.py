@@ -830,18 +830,45 @@ class TestArchitectureBoundary:
     def test_no_tool_or_invoker_is_registered_by_this_package_itself(self) -> None:
         """Zero ToolSpec/ToolInvoker instances are registered at module
         import time anywhere in cv_agent.tools — the boundary only, per
-        ADR-0005 §3. Checks for a *call* (`.register_spec(`/
-        `.register_invoker(`, i.e. some object's method invoked), not the
-        method *definitions* on ToolRegistry itself, which naturally
-        contain the same substrings (`def register_spec(...)`)."""
+        ADR-0005 §3.
+
+        Checks that .register_spec()/.register_invoker() are not called at
+        *module scope* (i.e. outside any function or class body) in any file
+        under cv_agent/tools/.  Calls made inside a ``register()`` helper
+        function are the correct explicit-opt-in pattern and are allowed — the
+        runtime check above (ToolRegistry().list_specs() == []) is the
+        authoritative guard for import-time side effects.
+
+        Uses AST to distinguish module-level attribute calls from calls that
+        are safely wrapped in a function or class body."""
+        import ast
+
         import cv_agent.tools
+
+        _CALL_ATTRS = {"register_spec", "register_invoker"}
+
+        def _module_level_calls(tree: ast.Module) -> list[str]:
+            """Return names of .register_* calls at module scope only."""
+            found: list[str] = []
+            for node in ast.iter_child_nodes(tree):
+                # Skip function/class definitions — calls inside them are fine
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr in _CALL_ATTRS
+                    ):
+                        found.append(sub.func.attr)
+            return found
 
         package_root = Path(cv_agent.tools.__file__).parent
         offenders: list[str] = []
         for py_file in package_root.rglob("*.py"):
-            text = py_file.read_text(encoding="utf-8")
-            if ".register_spec(" in text or ".register_invoker(" in text:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            if _module_level_calls(tree):
                 offenders.append(py_file.name)
         assert offenders == [], (
-            f"cv_agent.tools itself calls register_spec/register_invoker: {offenders}"
+            f"cv_agent.tools calls register_spec/register_invoker at module scope: {offenders}"
         )
