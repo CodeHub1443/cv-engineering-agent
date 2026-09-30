@@ -3,41 +3,52 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-09-28 · **Phase:** 0 → 1 (partial) → 2 (partial) → 3 (partial) →
-4 (partial) → 5a (complete) → 5b (decisions + ADR-0013 accepted + job foundation + workflow integration PR open) ·
+**Updated:** 2026-09-30 · **Phase:** 5d — baseline diagnosis complete ·
 **Health:** green
 
 ## Where we are
 
-ADR-0013 is fully implemented through the workflow layer:
-- `cv_agent/execution/host.py` — `HostVerifier`, `LinuxNvidiaHostVerifier` (PR #67, merged)
-- `cv_agent/execution/jobs/` — `JobRuntime`, `JobExecutor`, `LinuxNvidiaJobRuntime` (PR #67, merged)
-- `cv_agent/graph/state.py` — `pending_job`, `job_approval_decision`, `active_job_handle`, `job_result` fields (this PR, open)
-- `cv_agent/graph/workflow.py` — `build_job_workflow_graph()` + four graph nodes (this PR, open)
-- `cv_agent/runtime/agent.py` — `CVAgent(job_executor=...)`, `start_job_workflow()`, `resume_job_workflow()` (this PR, open)
+Baseline diagnosis (D-063/D-064) complete. Three measurable failure modes identified
+from EXP-20260930-01 artifacts. Next experiment proposed (conf threshold sweep) but
+NOT yet authorized or executed. Branch `feature/claude/diagnosis-baseline` ready for PR.
 
-**Job workflow integration complete:** The graph can represent a CV job request through the full approval/pin integrity path. `_node_start_job` passes the exact approved `job_execution_pin` to `JobExecutor.start_job()`. E1 rule preserved. Host verification inside `JobExecutor`. No direct runtime invocation from graph nodes. `SkillExecutor`/`ExecutionRuntime`/existing workflow graph unchanged.
+NOTE: Branch `feature/claude/adr-0009-second-binding` (D-050–D-062, PR #69) is still
+open and not merged. The diagnosis branch targets main independently.
 
-## In flight
+## Key results
 
-| Item | Issue | State |
-|---|---|---|
-| ADR-0013 workflow integration | #67 (follow-on) | PR open on `feature/claude/adr-0013-workflow-integration`; 1048/1048 tests pass |
-| `workflow` CLI real-skill reachability | #44 | tracked; needs owner decision (Q23) |
+**EXP-20260930-01** — yolo11n, COCO val2017, RTX 3060, 5000 images:
+  precision=0.791, recall=0.661, mAP@0.5=0.635, mAP@0.5:0.95=0.459
+  FPS=99.9 e2e / 188.7 inf-only, VRAM peak=596 MiB
+
+**Diagnosis (EXP-20260930-01, from predictions.json + GT labels):**
+- Small objects 2.7× over-represented in completely-missed images (63% vs 24% baseline)
+- 17.5% of person predictions in near-threshold band (0.25–0.35)
+- High-density images (>5 persons): 677 images, 64% of all GT persons
+
+## Completed this session (2026-09-30)
+
+| D | Work |
+|---|---|
+| D-063 | ADR-0015 accepted — `cv_agent/diagnosis/` authorized |
+| D-064 | Baseline diagnosis: `DetectionEvidence`, `collect_detection_evidence()`, 33 tests, `scripts/run_diagnosis.py` |
+| Q27 | Opened: size-stratified mAP blocked by absent `instances_val2017.json` |
+| #70 | GitHub issue created for diagnosis milestone |
 
 ## Next 3 actions
 
-1. Owner merges workflow-integration PR.
-2. Register a real CV skill binding (individually verified per ADR-0009 §8 — same precedent as D-014's `trt-perf-analysis`).
-3. Establish the first baseline run (person detection + tracking, zero-shot inference, `ExperimentRecord` with `baseline_id="SELF"`).
+1. **Open PR** for `feature/claude/diagnosis-baseline` (D-063 → D-064)
+2. **After PR #69 merges**: follow-up merge of this branch
+3. **Next milestone (NOT yet authorized)**: conf threshold sweep experiment
+   (conf ∈ {0.10, 0.15, 0.25, 0.50}) — requires owner approval
 
 ## Blockers
 
-- Q10 (dataset storage backend) still open — blocks first real baseline.
-- Q3 (restart-survivable checkpointer) remains open but does not block the first baseline.
+- ANTHROPIC_API_KEY not set (FakeLLMProvider acceptable for current work)
+- PR #69 (adr-0009-second-binding) not yet merged — this branch from main is independent
+- Q27: size-stratified mAP blocked by absent instances_val2017.json (~250 MB)
 
 ## Do not start yet
 
-Training, NAS, or optimization runs; cost estimation beyond D-047; a second LLM provider;
-merging the two graphs; embeddings/vector search; downloading models or datasets; a
-durable `KnowledgeStore`; multi-provider routing — `[P§34]`.
+Conf threshold sweep (needs owner approval), training, NAS, optimization, TensorRT,
+DeepStream, second LLM provider, AgentState changes (requires ADR).
