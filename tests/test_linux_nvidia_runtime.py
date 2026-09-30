@@ -413,3 +413,97 @@ class TestRegistrationHelpers:
         rt = LinuxNvidiaJobRuntime()
         assert rt.runtime_id == RUNTIME_ID
         assert LinuxNvidiaJobRuntime.RUNTIME_ID == RUNTIME_ID
+
+
+# ---------------------------------------------------------------------------
+# Pipe-buffer deadlock regression (D-058)
+# ---------------------------------------------------------------------------
+
+class TestPipeBufferDeadlock:
+    """
+    Regression tests for the pipe-buffer deadlock fixed in D-058.
+
+    Root cause: LinuxNvidiaJobRuntime opened stdout=PIPE/stderr=PIPE but never
+    read them until collect(). For a subprocess writing > ~64 KiB (the default
+    Linux OS pipe buffer), the child blocked on write() and poll() reported
+    "running" forever. The real baseline (2862 frames × ~130 bytes/frame ≈ 372 KB)
+    deadlocked after ~471 frames.
+
+    Fix: drain threads started in start() continuously read from both pipes.
+    poll() now sees the process exit normally because the child is never blocked.
+
+    Each test generates output clearly above the 64 KiB threshold.
+    """
+
+    # 1000 lines × (120 chars + newline) = ~121 KB — well over 64 KiB.
+    _LARGE_STDOUT_CMD = [
+        "python3", "-c", "for i in range(1000): print(f'line-{i:04d}' + 'x' * 100)",
+    ]
+    # Same volume to stderr.
+    _LARGE_STDERR_CMD = [
+        "python3", "-c",
+        "import sys\n"
+        "for i in range(1000): sys.stderr.write(f'err-{i:04d}' + 'e' * 100 + '\\n')",
+    ]
+    # Both pipes simultaneously — harder to deadlock only one.
+    _LARGE_BOTH_CMD = [
+        "python3", "-c",
+        "import sys\n"
+        "for i in range(1000):\n"
+        "    sys.stdout.write(f'out-{i:04d}' + 'o' * 80 + '\\n')\n"
+        "    sys.stderr.write(f'err-{i:04d}' + 'e' * 80 + '\\n')\n",
+    ]
+
+    def test_large_stdout_completes(self) -> None:
+        """Subprocess writing > 64 KiB of stdout must reach terminal status."""
+        rt = LinuxNvidiaJobRuntime()
+        handle = rt.start(_skill(), _request(self._LARGE_STDOUT_CMD))
+        status = _poll_until_terminal(rt, handle, timeout_s=30.0)
+        assert status == "completed"
+
+    def test_large_stdout_first_and_last_line_captured(self) -> None:
+        """collect() returns ALL stdout, not just the first pipe-buffer's worth."""
+        rt = LinuxNvidiaJobRuntime()
+        handle = rt.start(_skill(), _request(self._LARGE_STDOUT_CMD))
+        status = _poll_until_terminal(rt, handle, timeout_s=30.0)
+        assert status == "completed"
+        outcome = rt.collect(handle)
+        assert outcome.stdout is not None
+        # Both the first and the last line must be present.
+        assert "line-0000" in outcome.stdout
+        assert "line-0999" in outcome.stdout
+
+    def test_large_stderr_completes(self) -> None:
+        """Subprocess writing > 64 KiB of stderr must also reach terminal status."""
+        rt = LinuxNvidiaJobRuntime()
+        handle = rt.start(_skill(), _request(self._LARGE_STDERR_CMD))
+        status = _poll_until_terminal(rt, handle, timeout_s=30.0)
+        assert status == "completed"
+        outcome = rt.collect(handle)
+        assert outcome.stderr is not None
+        assert "err-0000" in outcome.stderr
+        assert "err-0999" in outcome.stderr
+
+    def test_large_stdout_and_stderr_completes(self) -> None:
+        """Both pipes filled simultaneously must not deadlock."""
+        rt = LinuxNvidiaJobRuntime()
+        handle = rt.start(_skill(), _request(self._LARGE_BOTH_CMD))
+        status = _poll_until_terminal(rt, handle, timeout_s=30.0)
+        assert status == "completed"
+        outcome = rt.collect(handle)
+        assert outcome.stdout is not None
+        assert outcome.stderr is not None
+        assert "out-0000" in outcome.stdout
+        assert "out-0999" in outcome.stdout
+        assert "err-0000" in outcome.stderr
+        assert "err-0999" in outcome.stderr
+
+    def test_collect_after_large_output_is_idempotent(self) -> None:
+        """Idempotence is preserved with the drain-thread path."""
+        rt = LinuxNvidiaJobRuntime()
+        handle = rt.start(_skill(), _request(self._LARGE_STDOUT_CMD))
+        _poll_until_terminal(rt, handle, timeout_s=30.0)
+        outcome1 = rt.collect(handle)
+        outcome2 = rt.collect(handle)
+        assert outcome1 == outcome2
+        assert outcome1.stdout is not None

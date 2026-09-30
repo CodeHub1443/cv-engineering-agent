@@ -43,17 +43,10 @@ Output artifacts (from `<project>/<name>/`):
     (YOLO tracking output format — confirmed in SKILL.md examples)
 
 Known limitations (V1 — not defects):
-  - CUDA 12.2 driver is installed but torch builds require CUDA 13.0+;
-    `torch.cuda.is_available()` returns False in the Python 3.10 environment.
-    Inference runs on CPU. Real-time GPU performance (1.5 ms TRT from D-053
-    evidence) is not achievable until CUDA compatibility is resolved.
-  - The `yolo` CLI is Python 3.10, not the project's Python 3.13. Both are
-    on the same host; the CLI runs as a subprocess and does not affect the
-    Agent's Python environment.
-  - pipe buffer: for long videos, the subprocess may produce more output than
-    the OS pipe buffer holds before collect() reads it. V1 is safe for jobs
-    with bounded stdout (yolo track writes minimal stdout for progress only).
   - GPU profiling (VRAM, gpu_hours) is not available from subprocess alone.
+  - The `yolo` CLI is Python 3.10; the Agent uses a different interpreter.
+    Both share the same site-packages on this host; torch 2.5.1+cu121 with
+    CUDA available is confirmed in the yolo subprocess environment (D-058).
 
 What this binding does NOT claim:
   - It does not make any other skill executable — verified=True is for exactly
@@ -219,8 +212,8 @@ def build_binding(
             "Command is built by build_command() from request.inputs. "
             "Required inputs: source (video path), output_dir (str), run_name (str). "
             "Outputs: annotated video + per-frame tracking labels in output_dir/run_name/. "
-            "GPU inference requires CUDA 13.0+ driver (see V1 limitations). "
-            "See ADR-0013, D-053, D-055."
+            "GPU inference confirmed on RTX 3060 (torch 2.5.1+cu121, CUDA 12.1). "
+            "See ADR-0013, D-053, D-055, D-058."
         ),
         input_schema=(
             InputField(
@@ -290,8 +283,7 @@ def build_binding(
                 default="0",
                 description=(
                     "Compute device: '0' for GPU 0, 'cpu' for CPU. "
-                    "GPU requires CUDA-compatible driver (V1 limitation: "
-                    "current host has driver 12.2, torch needs 13.0+)."
+                    "GPU confirmed: RTX 3060, torch 2.5.1+cu121, CUDA 12.1."
                 ),
             ),
             InputField(

@@ -1731,3 +1731,172 @@ that the VRAM fix was correctly enforcing fail-closed behavior on the test fixtu
 **Left open:** Committed video fixture for integration tests. CUDA 12.2 → 13.0 driver for GPU
 inference. `scripts/run_baseline.py` is ready to run; requires Tanvir to execute manually (approval
 gate is live). See exact command in the session report.
+
+---
+
+## 2026-09-29 — CUDA baseline blocker resolved (no environment change needed)
+
+**What changed:** Diagnosed the CUDA environment discrepancy reported in STATUS.md ("torch
+requires CUDA 13.0+ for +cu130"). Found the claim was stale. The real installed torch is
+`2.5.1+cu121` (CUDA 12.1 build), not `+cu130`. The CUDA 12.1 build is forward-compatible with
+the installed NVIDIA driver 535.309.01 / CUDA 12.2 runtime.
+
+**Evidence gathered:**
+- `/usr/bin/python3` (yolo shebang) → Python 3.10.12, same site-packages as miniconda python3
+- `torch.__version__` = `2.5.1+cu121`; `torch.version.cuda` = `12.1`
+- `torch.cuda.is_available()` = `True`
+- `torch.cuda.get_device_name(0)` = `NVIDIA GeForce RTX 3060`
+- Tensor on device `cuda` computes correctly
+- `yolo checks` output: `CUDA:0 (NVIDIA GeForce RTX 3060, 12042MiB)`
+
+**No package was changed.** No driver upgrade was needed. The previous "+cu130" wording in
+STATUS.md was a documentation error from an earlier session that conflated two separate
+environment investigations.
+
+**Test results:** 1500 passed, 4 skipped (same as D-057 commit). Ruff clean. Mypy clean (74
+source files, 0 errors).
+
+**What is still open:** ANTHROPIC_API_KEY not set (FakeLLMProvider acceptable for current work).
+`scripts/run_baseline.py` is unblocked and ready for Tanvir to run manually.
+
+---
+
+## 2026-09-29 — D-058: pipe-buffer deadlock fix in LinuxNvidiaJobRuntime
+
+**What happened:** First real baseline (scripts/run_baseline.py) ran for 41.5 minutes on
+a 114-second video and hung. Post-mortem found the baseline process had exited; 471 label
+files and an output .avi were produced (i.e., the job ran but later froze the parent).
+
+**Root cause (confirmed):** OS pipe-buffer deadlock. `LinuxNvidiaJobRuntime.start()` opens
+`stdout=PIPE, stderr=PIPE` but neither pipe was read until `collect()`. `collect()` is
+called only after `poll()` returns a terminal status. For `yolo track` on 2862 frames:
+~130 bytes/frame × 2862 frames ≈ 372 KB of stdout. The default Linux pipe buffer is 64 KiB.
+After ~503 frames (~64 KB), the subprocess blocked on `write()`. `poll()` then saw "still
+running" forever. The polling loop in `run_baseline.py` spun indefinitely. Evidence: 471
+label files = 471 frames processed ≈ 61 KB stdout = just below 64 KiB. The `linux_nvidia.py`
+V1-limitations docstring already described this exact failure mode; it was incorrectly
+classified as "safe for bounded output" without measuring yolo track's actual output volume.
+
+**Fix:** Two daemon threads (`_drain_to_list`) are started in `start()` immediately after
+`subprocess.Popen()`. They continuously read lines from stdout and stderr and append to
+per-job accumulator lists. This prevents the child from ever blocking on `write()`.
+`collect()` joins the threads (they finish quickly once the process is terminal), reads the
+accumulators, and calls `process.wait()` to guarantee `returncode` is populated. The
+`process.communicate(timeout=30.0)` call is removed — it was the original (broken) drain
+that only ran after `poll()` returned terminal, which it never did.
+
+**Files changed:**
+- `cv_agent/execution/jobs/runtimes/linux_nvidia.py` — drain threads in `start()` / join in
+  `collect()`; updated docstring (V1 pipe-buffer limitation removed as it is now fixed).
+- `cv_agent/execution/jobs/runtimes/yolo_inference.py` — removed stale CUDA/pipe docstring
+  limitations; updated device and binding description to reflect confirmed GPU availability.
+- `tests/test_linux_nvidia_runtime.py` — 5 new regression tests (`TestPipeBufferDeadlock`):
+  large stdout completes, first+last line captured, large stderr completes, both pipes
+  simultaneously, idempotent collect after large output.
+
+**Test results:** 36/36 in test_linux_nvidia_runtime.py passed. Full suite pending.
+
+---
+
+## 2026-09-29 — D-059: first real baseline complete (EXP-20260929-01)
+
+**What changed:** Fixed `open_ledger(DB_PATH)` → `open_ledger(db_path=DB_PATH)` in
+`scripts/run_baseline.py`. `open_ledger()` uses `*` to enforce keyword-only arguments;
+the positional call raised `TypeError: takes 0 positional arguments but 1 was given`.
+
+**Baseline result (EXP-20260929-01):**
+- model: yolo11n (yolo11n.pt · 2.6M params · 6.5 GFLOPs · AGPL-3.0)
+- device: GPU:0 NVIDIA GeForce RTX 3060 · torch 2.5.1+cu121 · CUDA 12.1
+- video: person_detection_sample.mp4 · 640×360 H.264 25fps 114.5s 2862 frames
+- outcome: completed · exit 0
+- wall_time: 60.1s · inference: 8.8ms/frame · 2601/2862 frames with detections (91%)
+- ledger: written and verified in .cv_agent/experiments.sqlite
+- artifacts: .cv_agent/baselines/baseline-yolo11n-person-track-20260929-2/
+
+**Why -2 suffix:** the prior `open_ledger` bug run completed YOLO successfully (exit 0)
+but failed at ledger write — that run's output directory was named the base name. When the
+fixed run executed, YOLO auto-incremented to -2. The base-name directory was deleted; only
+the ledger-linked -2 directory is retained.
+
+**What is still open:** val_metrics (mAP/recall) require a labelled dataset — none yet;
+VRAM/gpu_hours not profiled (V1 LinuxNvidiaJobRuntime limitation). Branch ready for PR.
+
+---
+
+## 2026-09-30 — D-060/D-061: evaluation binding + COCO val2017 dataset selection
+
+**What changed:**
+- `cv_agent/execution/jobs/runtimes/yolo_eval.py` — fourth real execution binding
+  (ADR-0009 §8) for the `yolo-eval` skill using `yolo val`. `build_command()` builds
+  the subprocess command. `parse_metrics(stdout)` extracts precision, recall, mAP@0.5,
+  mAP@0.5:0.95, and speed metrics from YOLO val stdout by regex (ANSI-stripped).
+  36 new tests. Ruff + mypy clean. (D-060)
+- `tests/test_yolo_eval_binding.py` — 36 tests for build_command, parse_metrics,
+  expected_artifact_paths, build_binding, register_binding.
+- `scripts/run_evaluation.py` — evaluation runner analogous to run_baseline.py. Runs
+  yolo val on COCO val2017 via JobExecutor. VRAM polling thread. Produces EXP-20260930-01
+  with val_metrics, fps, latency, memory populated from real measurements.
+- `docs/state/DECISIONS.md` — appended D-060, D-061.
+- `docs/state/OPEN_QUESTIONS.md` — added Q26 (benchmark DatasetManifest without pHash).
+
+**Dataset selection (D-061):**
+- COCO val2017 chosen: 5000 images, truly held-out from yolo11n's training domain
+  (trained on COCO train2017). coco128 rejected (val=train images → biased metrics).
+  Full coco download (20.3 GB) rejected (disk: 24 GB free). Manual download:
+  coco2017labels.zip (46 MB, complete), val2017.zip (778 MB, in progress at session time).
+  Labels extracted to /home/dev/Documents/data_cleaner/datasets/coco/labels/val2017/.
+  run_evaluation.py generates a local coco-person-val.yaml at runtime.
+
+**DatasetManifest deferred (Q26):** The near-duplicate leakage check requires
+perceptual_hash for every item. For 5000 images this requires loading them all —
+a separate operation. DatasetManifest creation deferred; dataset referenced as string
+"coco-val2017-5k" in ExperimentRecord. Q26 opened.
+
+**Broke / dead ends:**
+- Initial background curl downloads (using `&` in Bash) completed immediately because
+  the script exited; the child processes were orphaned. Fix: run curl without `&` and
+  rely on Bash tool's run_in_background=true for actual background behavior.
+- coco2017labels.zip from GitHub has time-limited redirect URLs (1-hour JWT). The first
+  download attempt partially completed (21 MB). Running curl -L again fetched a fresh
+  redirect and completed fully (46 MB = 48,639,045 bytes).
+
+**Test results:** 1541 passed, 4 skipped (full suite). EXP-20260930-01 pending val2017
+image extraction and actual run.
+
+---
+
+### 2026-09-30 — D-062: evaluation milestone complete (EXP-20260930-01)
+
+**What changed:** val2017.zip (815,585,330 bytes, 5000 images) download completed.
+Extracted to `/home/dev/Documents/data_cleaner/datasets/coco/images/val2017/`.
+`scripts/run_evaluation.py` run through full JobExecutor approval pipeline.
+
+**Two bugs fixed before successful run:**
+1. `_generate_coco_val_yaml()` omitted `train:` key — ultralytics `check_det_dataset`
+   requires both `train:` and `val:` even for val-only runs. Added `train: val2017.txt`.
+2. f-string format spec `{fps_e2e:.1f if fps_e2e else 'N/A'}` is invalid Python
+   (conditional in format spec position). Fixed to nested f-string:
+   `{f'{fps_e2e:.1f}' if fps_e2e is not None else 'N/A'}`.
+
+**Results (EXP-20260930-01):**
+- model: yolo11n.pt (2.6M params, 6.5 GFLOPs)
+- dataset: COCO val2017, 5000 images, classes=[0], conf=0.25, imgsz=640, batch=1
+- precision=0.791, recall=0.661, mAP@0.5=0.635, **mAP@0.5:0.95=0.459**
+- FPS: 99.9 end-to-end (50.0s wall / 5000 images), 188.7 inference-only (1000/5.3ms)
+- latency: 6.4ms e2e (0.4 pre + 5.3 inf + 0.7 post)
+- VRAM peak: 596 MiB; baseline: 360 MiB; delta: 236 MiB
+- exit 0; all success criteria cleared (mAP>0.30, FPS>20)
+
+**Note on metrics:** "all" and "person" rows show identical values because
+`classes=[0]` filters evaluation to only person class, so all=person in the
+val output. `faster-coco-eval` secondary check was skipped (requires
+`instances_val2017.json`); primary box P/R/mAP from ultralytics internal eval
+are valid.
+
+**mAP vs Ultralytics benchmark:** Published yolo11n COCO mAP@0.5:0.95 = 0.395
+(all 80 classes). Our result 0.459 is for person class only; person class
+typically has higher mAP than the 80-class average, so no anomaly.
+
+**EXP-20260930-01 written to `.cv_agent/experiments.sqlite` and verified.**
+
+**Branch status:** all files committed and ready for PR.

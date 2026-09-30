@@ -11,10 +11,12 @@ Why this runtime is verified (ADR-0009 §8 discipline applied to JobRuntime):
   `subprocess.Popen`. No shell interpretation, no hard-coded tool names,
   no knowledge of what the command does. The runtime is generic; the
   *binding* (one per CV skill) is what names the specific tool.
-- stdout/stderr capture: both are captured via `subprocess.PIPE`. The
-  process writes into OS pipe buffers while running; `collect()` reads
-  them in full after the process is terminal — no output is lost for
-  moderate-output jobs (see V1 limitation below).
+- stdout/stderr capture: both are captured via `subprocess.PIPE`. Two
+  daemon threads (_drain_to_list) are started in start() and run for the
+  subprocess lifetime, continuously reading from the pipes. This prevents
+  the OS pipe-buffer deadlock that occurs when a subprocess writes more
+  than ~64 KiB without a reader (e.g. verbose per-frame YOLO output).
+  collect() joins the drain threads and returns the accumulated content.
 - Exit code: exit 0 → `success=True`; any non-zero → `success=False`.
   Negative return codes (signal-killed) are treated as failure unless the
   job was explicitly cancelled, in which case `error_message="cancelled"`.
@@ -27,14 +29,11 @@ Why this runtime is verified (ADR-0009 §8 discipline applied to JobRuntime):
   does not exit on SIGTERM within `cancel_sigkill_timeout_s` seconds,
   `poll()` sends SIGKILL. The protocol specifies cancel() does not wait;
   the caller must poll() until "cancelled" or "failed".
-- Idempotent collect: first call reads the pipes and caches the result;
+- Idempotent collect: first call joins drain threads and caches the result;
   subsequent calls return the cached `JobOutcome` directly.
 
 V1 limitations (not defects — documented per CLAUDE.md §1):
 - No GPU profiling: peak_vram_mb, gpu_hours, avg_power_watts are always None.
-- Pipe buffer: if the subprocess writes more than the OS pipe buffer (typically
-  64 KiB / 1 MiB depending on kernel config) without the runtime reading,
-  the process will block. V1 is safe for jobs with bounded output.
 - No process group: only the direct subprocess PID receives SIGTERM/SIGKILL.
   Child processes spawned by the job are not tracked.
 - wall_time_seconds is measured from start() to collect(), not process exit.
@@ -62,6 +61,7 @@ from __future__ import annotations
 
 import signal
 import subprocess
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -106,6 +106,10 @@ class LinuxNvidiaJobRuntime:
         self._cancel_times: dict[str, float] = {}
         self._cancelled_jobs: set[str] = set()
         self._outcomes: dict[str, JobOutcome] = {}
+        # Drain threads and accumulators — prevent OS pipe-buffer deadlock.
+        self._drain_threads: dict[str, list[threading.Thread]] = {}
+        self._stdout_accum: dict[str, list[str]] = {}
+        self._stderr_accum: dict[str, list[str]] = {}
 
     # ------------------------------------------------------------------
     # JobRuntime protocol
@@ -141,6 +145,31 @@ class LinuxNvidiaJobRuntime:
 
         self._processes[job_id] = process
         self._start_times[job_id] = time.monotonic()
+
+        # Start drain threads immediately to prevent OS pipe-buffer deadlock.
+        # A subprocess writing more than ~64 KiB without a reader will block on
+        # write(), causing poll() to report "running" forever. The drain threads
+        # run for the subprocess's full lifetime and accumulate output so
+        # collect() can return it after the process exits.
+        stdout_accum: list[str] = []
+        stderr_accum: list[str] = []
+        self._stdout_accum[job_id] = stdout_accum
+        self._stderr_accum[job_id] = stderr_accum
+        t_out = threading.Thread(
+            target=_drain_to_list,
+            args=(process.stdout, stdout_accum),
+            daemon=True,
+            name=f"drain-stdout-{job_id[:8]}",
+        )
+        t_err = threading.Thread(
+            target=_drain_to_list,
+            args=(process.stderr, stderr_accum),
+            daemon=True,
+            name=f"drain-stderr-{job_id[:8]}",
+        )
+        t_out.start()
+        t_err.start()
+        self._drain_threads[job_id] = [t_out, t_err]
 
         return JobHandle(
             job_id=job_id,
@@ -224,13 +253,21 @@ class LinuxNvidiaJobRuntime:
 
         wall_time = time.monotonic() - self._start_times.get(handle.job_id, 0.0)
 
+        # Join drain threads — they should finish quickly because the process is
+        # terminal (poll() confirmed this before collect() was called per V1 contract).
+        for t in self._drain_threads.get(handle.job_id, []):
+            t.join(timeout=10.0)
+
+        # Ensure returncode is populated (process.wait() is idempotent).
         try:
-            # V1 contract: process is already terminal, so communicate() returns
-            # immediately after draining the pipe buffers.
-            stdout, stderr = process.communicate(timeout=30.0)
+            process.wait(timeout=5.0)
         except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate()
+            pass
+
+        stdout_raw = "".join(self._stdout_accum.get(handle.job_id, []))
+        stderr_raw = "".join(self._stderr_accum.get(handle.job_id, []))
+        stdout: str | None = stdout_raw or None
+        stderr: str | None = stderr_raw or None
 
         returncode = process.returncode
         cancelled = handle.job_id in self._cancelled_jobs
@@ -244,8 +281,8 @@ class LinuxNvidiaJobRuntime:
             outcome = JobOutcome(
                 success=False,
                 exit_code=returncode,
-                stdout=stdout or None,
-                stderr=stderr or None,
+                stdout=stdout,
+                stderr=stderr,
                 error_message="cancelled",
                 resources=resources,
             )
@@ -253,8 +290,8 @@ class LinuxNvidiaJobRuntime:
             outcome = JobOutcome(
                 success=(returncode == 0),
                 exit_code=returncode,
-                stdout=stdout or None,
-                stderr=stderr or None,
+                stdout=stdout,
+                stderr=stderr,
                 resources=resources,
             )
 
@@ -280,6 +317,26 @@ class LinuxNvidiaJobRuntime:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _drain_to_list(pipe: Any, accum: list[str]) -> None:
+    """
+    Read all lines from a subprocess pipe into accum.
+
+    Runs as a daemon thread started in LinuxNvidiaJobRuntime.start(). Exits
+    when the pipe is closed (subprocess exited or was killed). Never raises —
+    OSError (broken pipe) and ValueError (I/O on closed file) are swallowed.
+
+    Why line-based: yolo track (and typical CV CLI tools) write full
+    newline-terminated lines. Line iteration is both correct and efficient
+    for this workload. If a future tool writes without newlines, use
+    chunk-based reads (pipe.read(4096)) instead.
+    """
+    try:
+        for line in pipe:
+            accum.append(line)
+    except (OSError, ValueError):
+        pass
+
 
 def _extract_command(inputs: dict[str, Any]) -> list[str]:
     command = inputs.get("command")

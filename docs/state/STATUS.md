@@ -3,53 +3,52 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-09-29 · **Phase:** 5c (pin contract + VRAM measurement complete) ·
+**Updated:** 2026-09-30 · **Phase:** 5c — evaluation milestone COMPLETE ·
 **Health:** green
 
 ## Where we are
 
-ADR-0014 + real research (D-053) + baseline wiring (D-054) + YOLO inference binding (D-055)
-+ pin contract fix (D-056) + VRAM measurement (D-057) all on
-`feature/claude/adr-0009-second-binding`. 1500 tests, 4 skipped. Ruff clean. Mypy clean.
+D-043 evaluation milestone complete. yolo11n evaluated on COCO val2017 (5000 images,
+truly held-out). EXP-20260930-01 written to ledger. Branch
+`feature/claude/adr-0009-second-binding` ready for PR.
 
-- `cv_agent/execution/host.py` — `HostProfile.vram_mb`, `_parse_vram_mb()`, `_measure_vram_mb()`,
-  real VRAM check in `verify()` (fail-closed, ADR-0013 §3.3)
-- `cv_agent/execution/jobs/runtimes/yolo_inference.py` — verified binding for `yolo-inference`
-- `scripts/run_baseline.py` — ready-to-run baseline script using `registry.pin()` (D-056 fix)
-- `cv_agent/graph/experiment_wiring.py` — `ExperimentContext`, `job_result_to_experiment_record()`
+**EXP-20260929-01** — baseline (SELF): yolo11n + ByteTrack, RTX 3060, 2862 frames,
+8.8ms inference/frame, 91% detection rate, val_metrics=NOT MEASURED (video-only baseline).
 
-## Baseline readiness
+**EXP-20260930-01** — evaluation: yolo11n on COCO val2017, RTX 3060, 5000 images,
+mAP@0.5:0.95=**0.459**, precision=0.791, recall=0.661, mAP@0.5=0.635,
+FPS=99.9 e2e / 188.7 inf-only, VRAM peak=596 MiB.
 
-`scripts/run_baseline.py` is architecture-complete and passes all pre-flight checks. **Requires
-Tanvir to execute manually** (approval gate is live — `approved=True` in the request, guarded by
-`expected_binding_pin`). Two remaining runtime blockers:
+1541 tests, 4 skipped. Ruff clean. Mypy clean. All new files linted.
 
-1. **Video fixture missing:** `tests/fixtures/person_detection_sample.mp4` not committed. The
-   script will `sys.exit()` at the fixture check. Commit a short royalty-free clip to unblock.
-2. **CUDA driver:** RTX 3060 present (12288 MiB, driver 535.309.01, CUDA 12.2). Torch requires
-   CUDA 13.0+ for +cu130. GPU inference blocked; CPU fallback (`device=cpu`) works but won't
-   produce GPU latency data. Either upgrade driver or change `device=0` → `device=cpu` in the
-   script for a CPU baseline.
+## Completed this session (2026-09-30)
 
-## Manual run command (once fixture exists)
+| D | Work |
+|---|---|
+| D-060 | `cv_agent/execution/jobs/runtimes/yolo_eval.py` — yolo-eval binding, `parse_metrics()` |
+| D-061 | COCO val2017 selected as evaluation dataset; images downloaded + extracted |
+| D-062 | EXP-20260930-01 — real mAP/FPS/VRAM metrics produced and written to ledger |
+| Q26 | Opened: how to register standard benchmark datasets in DatasetManifest without pHash |
 
-```
-cd /home/dev/cv-engineering-agent && python3 scripts/run_baseline.py
-```
+## Completed prior session (2026-09-29)
+
+| D | Fix |
+|---|---|
+| D-058 | Pipe-buffer deadlock in `LinuxNvidiaJobRuntime` — drain threads in `start()` |
+| D-059 | `open_ledger(DB_PATH)` → `open_ledger(db_path=DB_PATH)` + first real baseline |
 
 ## Next 3 actions
 
-1. **Commit video fixture** to `tests/fixtures/person_detection_sample.mp4` OR change device to cpu.
-2. **Run** `python3 scripts/run_baseline.py` manually (approval gate live).
-3. **After successful baseline:** update JOURNAL/EXPERIMENTS, then open PR for this branch.
+1. **Open PR** for `feature/claude/adr-0009-second-binding` (D-052 → D-062 inclusive)
+2. **After merge:** close issue(s) for ADR-0009 second binding and D-043 eval milestone
+3. **Next milestone:** tracking metrics (MOT metrics) require a labelled MOT dataset — open separate issue
 
 ## Blockers
 
-- Video fixture not committed (integration test unconditionally skipped; baseline script exits)
-- CUDA 12.2 vs torch +cu130 mismatch (GPU path blocked; CPU fallback available)
-- ANTHROPIC_API_KEY not set (LLM uses FakeLLMProvider; acceptable for D-053 research)
+- ANTHROPIC_API_KEY not set (FakeLLMProvider acceptable for current work)
+- faster-coco-eval secondary check skipped (instances_val2017.json not downloaded); primary metrics are valid
 
 ## Do not start yet
 
-Training, NAS, optimization, evaluation, TensorRT, DeepStream, AgentState wiring for model
+Training, NAS, optimization, TensorRT, DeepStream, AgentState wiring for model
 selection (requires ADR if shape changes), second LLM provider, embeddings/vector search `[P§34]`.

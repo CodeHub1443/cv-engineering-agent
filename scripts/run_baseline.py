@@ -260,7 +260,7 @@ print(f"  notes (500)   : {record.notes[:500]}")
 print(f"\n=== 9. ExperimentLedger ===")
 from cv_agent.experiments.store import open_ledger
 
-with open_ledger(DB_PATH) as ledger:
+with open_ledger(db_path=DB_PATH) as ledger:
     ledger.record_experiment(record)
     retrieved = ledger.get_experiment("EXP-20260929-01")
     assert retrieved is not None
