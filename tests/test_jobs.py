@@ -30,6 +30,7 @@ from cv_agent.execution.host import (
     HostProfile,
     HostRequirement,
     LinuxNvidiaHostVerifier,
+    _parse_vram_mb,
 )
 from cv_agent.execution.jobs.executor import JobExecutor
 from cv_agent.execution.jobs.models import JobHandle, JobOutcome, JobResourceMetadata
@@ -230,6 +231,147 @@ class TestLinuxNvidiaHostVerifier:
         ok, reason = verifier.verify(HostRequirement(os="linux"))
         assert ok is False
         assert "detection" in reason.lower() or "crashed" in reason.lower()
+
+
+# ---------------------------------------------------------------------------
+# VRAM measurement: _parse_vram_mb + LinuxNvidiaHostVerifier.verify() (D-056)
+# ---------------------------------------------------------------------------
+
+class TestVRAMMeasurement:
+    """
+    Focused tests for VRAM detection and host requirement checking.
+
+    All tests inject HostProfile directly — no real nvidia-smi subprocess.
+    Tests for _parse_vram_mb() exercise the parser in isolation.
+    Tests for LinuxNvidiaHostVerifier.verify() exercise the comparison logic.
+    """
+
+    # ── _parse_vram_mb parser ──────────────────────────────────────────────
+
+    def test_parse_valid_integer(self) -> None:
+        assert _parse_vram_mb("12288") == 12288
+
+    def test_parse_with_leading_trailing_whitespace(self) -> None:
+        assert _parse_vram_mb("  12288  ") == 12288
+
+    def test_parse_empty_string_returns_none(self) -> None:
+        assert _parse_vram_mb("") is None
+
+    def test_parse_whitespace_only_returns_none(self) -> None:
+        assert _parse_vram_mb("   ") is None
+
+    def test_parse_not_available_returns_none(self) -> None:
+        """nvidia-smi outputs [N/A] when field is unavailable."""
+        assert _parse_vram_mb("[N/A]") is None
+
+    def test_parse_nonnumeric_text_returns_none(self) -> None:
+        assert _parse_vram_mb("N/A") is None
+
+    def test_parse_float_string_returns_none(self) -> None:
+        """nvidia-smi with nounits emits integers; floats are unexpected/malformed."""
+        assert _parse_vram_mb("12288.0") is None
+
+    def test_parse_zero_returns_none(self) -> None:
+        """Zero VRAM is not a valid measurement."""
+        assert _parse_vram_mb("0") is None
+
+    def test_parse_negative_returns_none(self) -> None:
+        assert _parse_vram_mb("-1") is None
+
+    def test_parse_one_returns_one(self) -> None:
+        """Boundary: 1 MiB is a positive integer and should be parsed."""
+        assert _parse_vram_mb("1") == 1
+
+    def test_parse_large_value(self) -> None:
+        """80 GB GPU (80 * 1024 MiB)."""
+        assert _parse_vram_mb("81920") == 81920
+
+    # ── verify(): sufficient VRAM ──────────────────────────────────────────
+
+    def test_sufficient_vram_passes(self) -> None:
+        profile = HostProfile(
+            os="linux", gpu_available=True, gpu_vendor="nvidia",
+            driver_version="535.309.01", vram_mb=12288,
+        )
+        verifier = LinuxNvidiaHostVerifier(profile=profile)
+        ok, reason = verifier.verify(HostRequirement(os="linux", min_vram_mb=2048))
+        assert ok is True
+        assert reason == ""
+
+    def test_exact_vram_boundary_passes(self) -> None:
+        """Exactly meeting the requirement (>=) should pass."""
+        profile = HostProfile(
+            os="linux", gpu_available=True, gpu_vendor="nvidia",
+            driver_version="535.309.01", vram_mb=2048,
+        )
+        verifier = LinuxNvidiaHostVerifier(profile=profile)
+        ok, _ = verifier.verify(HostRequirement(os="linux", min_vram_mb=2048))
+        assert ok is True
+
+    # ── verify(): insufficient VRAM ───────────────────────────────────────
+
+    def test_insufficient_vram_fails(self) -> None:
+        profile = HostProfile(
+            os="linux", gpu_available=True, gpu_vendor="nvidia",
+            driver_version="535.309.01", vram_mb=1024,
+        )
+        verifier = LinuxNvidiaHostVerifier(profile=profile)
+        ok, reason = verifier.verify(HostRequirement(os="linux", min_vram_mb=2048))
+        assert ok is False
+        assert "1024" in reason
+        assert "2048" in reason
+
+    def test_vram_one_below_requirement_fails(self) -> None:
+        """2047 < 2048 — strict less-than check."""
+        profile = HostProfile(
+            os="linux", gpu_available=True, gpu_vendor="nvidia",
+            driver_version="535.309.01", vram_mb=2047,
+        )
+        verifier = LinuxNvidiaHostVerifier(profile=profile)
+        ok, reason = verifier.verify(HostRequirement(os="linux", min_vram_mb=2048))
+        assert ok is False
+        assert "2047" in reason
+
+    # ── verify(): VRAM unmeasured (fail closed) ───────────────────────────
+
+    def test_vram_unmeasured_fails_closed(self) -> None:
+        """
+        gpu_available=True but vram_mb=None: the measurement failed or was
+        not performed. Must reject, not pass — fail closed per ADR-0013 §3.3.
+        """
+        profile = HostProfile(
+            os="linux", gpu_available=True, gpu_vendor="nvidia",
+            driver_version="535.309.01", vram_mb=None,
+        )
+        verifier = LinuxNvidiaHostVerifier(profile=profile)
+        ok, reason = verifier.verify(HostRequirement(os="linux", min_vram_mb=2048))
+        assert ok is False
+        assert "could not be measured" in reason or "fail closed" in reason.lower()
+
+    # ── verify(): no GPU present (existing behaviour preserved) ──────────
+
+    def test_no_gpu_with_vram_requirement_fails(self) -> None:
+        """Existing test: gpu_available=False + min_vram_mb → fail."""
+        profile = HostProfile(
+            os="linux", gpu_available=False, gpu_vendor=None,
+            driver_version=None, vram_mb=None,
+        )
+        verifier = LinuxNvidiaHostVerifier(profile=profile)
+        ok, reason = verifier.verify(HostRequirement(os="linux", min_vram_mb=2048))
+        assert ok is False
+        assert "no GPU" in reason or "gpu" in reason.lower()
+
+    # ── verify(): min_vram_mb=None means no VRAM requirement ─────────────
+
+    def test_no_vram_requirement_passes_even_with_unknown_vram(self) -> None:
+        """min_vram_mb=None means any host passes the VRAM gate."""
+        profile = HostProfile(
+            os="linux", gpu_available=True, gpu_vendor="nvidia",
+            driver_version="535.309.01", vram_mb=None,
+        )
+        verifier = LinuxNvidiaHostVerifier(profile=profile)
+        ok, _ = verifier.verify(HostRequirement(os="linux", gpu_vendor="nvidia"))
+        assert ok is True
 
 
 # ---------------------------------------------------------------------------

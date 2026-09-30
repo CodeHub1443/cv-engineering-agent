@@ -1482,3 +1482,421 @@ ADR-0009 §8). First baseline run (Person Detection + Tracking, zero-shot) defer
 PR. `ExperimentRecord` wiring from `JobResult` also deferred. Q10 (dataset storage backend)
 still blocks a durable baseline. Q3 (restart-survivable checkpointer for jobs outliving the
 current process) unresolved but does not block the first baseline.
+
+## 2026-09-28 — Second real CV skill binding: deepstream-generate-pipeline (feature/claude/adr-0009-second-binding)
+
+**What changed:** Added `cv_agent/execution/runtimes/deepstream_validate_pipeline.py` — the second
+verified `ExecutionBinding` (ADR-0009 §8, D-050). Binding uses `LinuxNvidiaJobRuntime` (job path,
+ADR-0013) rather than the synchronous `ExecutionRuntime` path used by `trt-perf-analysis`.
+
+**Skill selected:** `deepstream-generate-pipeline` → `scripts/validate_pipeline.py`. Selected by:
+1. Enumerating all 62 installed skills under `~/.claude/skills/`.
+2. Filtering to those with executable scripts and clear CLI contracts.
+3. Reading all 777 lines of `validate_pipeline.py` for ADR-0009 §8 inspection.
+4. Confirming the CLI contract empirically: exit 0 + JSON `{valid:true}` for valid pipelines,
+   exit 1 + JSON `{valid:false, errors:[...]}` for invalid ones.
+
+**Why this skill:** Read-only DeepStream pipeline validation — genuine CV engineering operation,
+Python stdlib only, no GPU required, deterministic, `gst-inspect-1.0` and `gst-launch-1.0`
+present and functional on this machine. Fits APPROVALS.md "Read-only research, retrieval,
+analysis → ✅ free" → `approval_policy="allowed"`.
+
+**Key design decisions:**
+- `resolve_command(skill, pipeline_str) → list[str]` derives script path from `Skill.location`
+  (never hard-coded), same discipline as `TrtPerfAnalysisRuntime._build_argv()`.
+- 28 new tests cover skill discovery, binding metadata, command resolution, registry wiring,
+  approval/pin/host verification, and real subprocess execution (valid + invalid pipelines).
+- All 6 real-subprocess tests run against the installed skill (not skipped — skill is present).
+
+**Tests:** 1076/1076 pass. Ruff clean. Mypy clean.
+
+**Left open:** First baseline run (person detection + tracking, zero-shot) still deferred.
+`ExperimentRecord` wiring from `JobResult` not yet done. Q3 (restart-survivable checkpointer)
+unresolved but does not block.
+
+## 2026-09-28 — Model Selection milestone: ADR-0014 + cv_agent.model_selection (feature/claude/adr-0009-second-binding)
+
+**What changed:**
+- New ADR-0014 (Model Selection) — reasoning-layer module for converting KnowledgeItems into
+  structured candidate comparisons and justified selection proposals.
+- New package `cv_agent/model_selection/`:
+  - `models.py`: `EvidenceReference`, `ModelCandidate`, `ConflictNote`, `CandidateComparison`,
+    `SelectionRecommendation` — all fail-closed, frozen dataclasses. `is_proposal` on
+    `SelectionRecommendation` is invariant True (enforced by `__post_init__`).
+  - `selector.py`: `build_candidate()`, `compare_candidates()`, `select_candidate()` — pure,
+    dependency-injected functions. Uses LLM only in `select_candidate()` to synthesize a
+    rationale from evidence already in the comparison (never invents benchmarks).
+- 55 new tests in `tests/test_model_selection.py`:
+  - EvidenceReference construction and from_knowledge_item()
+  - ModelCandidate validation (empty evidence rejected; benchmark subset enforced)
+  - CandidateComparison (empty candidates rejected)
+  - SelectionRecommendation (is_proposal invariant; candidate_id in comparison)
+  - build_candidate(), compare_candidates(), select_candidate() including all fail-closed paths
+  - Reference task: person detection + tracking with YOLO-v8, RT-DETR, NVIDIA-TAO candidates
+  - Architecture boundary test (no forbidden imports)
+
+**Why now:** D-043 resolved Q24 (reference task = person detection + tracking, NVIDIA GPU).
+Research path is complete (ADR-0005/0006 web_research + KnowledgeStore). Model selection is
+the next capability gated on that path. No existing ADR covered this responsibility; ADR-0014
+was written first per CLAUDE.md §5.
+
+**Key design decisions:**
+- No scoring or ranking system (task instruction; none authorized by any spec).
+- `is_proposal` invariant — enforced at construction, never setter-accessible.
+- Fail-closed on LLM output: unknown candidate_id → `confidence="insufficient_evidence"`;
+  unparseable JSON → same. The selector never fabricates a candidate.
+- `cv_agent.model_selection` imports only `cv_agent.knowledge.models` and `cv_agent.llm.base`
+  (structural test enforces no imports from execution/skills/graph/tools).
+- Research gaps inferred deterministically from missing benchmark_evidence or empty
+  compatibility_constraints — no LLM involvement in gap detection.
+
+**Tests:** 1284 passed, 4 skipped (55 new). Ruff clean. Mypy clean (71 source files).
+
+**What was NOT done (by design):**
+- No model download, no inference, no training, no baseline run.
+- No YOLO binding, no DeepStream binding, no Model Optimizer invocation.
+- No real web research performed (all tests use synthetic KnowledgeItems and FakeLLMProvider).
+- No AgentState/workflow change (model selection is a proposal; wiring to AgentState is a
+  future ADR if needed).
+- The `SelectionRecommendation` is NOT an execution authorization of any kind.
+
+**Left open:** Wiring model selection into the workflow graph (new ADR required if AgentState
+changes). Performing the actual web research calls to gather real evidence for the reference
+task. First baseline run still deferred (Q3, Q6/Q19 still open).
+
+## 2026-09-28 — Real web research + evidence-backed model selection (feature/claude/adr-0009-second-binding)
+
+**Did:** Created `cv_agent/model_selection/reference_task_research.py` with 17 real
+KnowledgeItems across 5 evidence groups (YOLOv8, YOLO11, RT-DETR, PeopleNet, ByteTrack)
+sourced from pages fetched during the session (Ultralytics docs, arXiv:2304.08069,
+arXiv:2110.06864, NGC catalog, NVIDIA docs, GitHub). Built 3 ModelCandidates
+(`yolo11n`, `rtdetr-r50`, `nvidia-peoplenet`) from real evidence, ran deterministic
+comparison with 2 ConflictNotes and 1 research gap (PeopleNet), ran `select_candidate()`
+via evidence-synthesizing FakeLLMProvider → SelectionRecommendation(yolo11n, medium,
+is_proposal=True). 42 new integration tests; 1326 total. Ruff clean, mypy clean (72 files).
+Decision D-053 recorded.
+
+**Why:** CLAUDE.md §6 implementation loop — the model selection milestone requires real
+evidence, not synthetic stubs, before claiming the research path is complete. `[P§16]`,
+`[P§17]`, `[P§29.3]`.
+
+**Broke:** (1) Test `test_peoplenet_missing_benchmark_documented_not_fabricated` failed —
+checked for "JavaScript"/"static HTML"/"not confirmed" but actual claim used "dynamically"
+and "not extracted" → fixed by adding those keywords to the check. (2) Ruff F401 on unused
+`datetime`/`timezone` import in `reference_task_research.py` → removed. (3) Duplicate
+`from __future__ import annotations` introduced during fix → removed. (4) Unused imports
+in test file removed.
+
+**Learned:** NGC catalog pages render benchmark metric tables via JavaScript; static
+`urllib` GET only gets the table structure, not values. Must document this as a research
+gap rather than inventing numbers or failing silently. Hardware benchmarks from different
+GPU tiers (A100 TRT vs T4 FPS) are not directly comparable even for the same metric —
+must record as an explicit ConflictNote so the LLM rationale step cannot elide the caveat.
+FakeLLMProvider with a hand-crafted JSON response is a valid substitute for the real LLM
+step when ANTHROPIC_API_KEY is not set, provided the JSON is constructed from real evidence
+only (no invented benchmark numbers or uncited claims).
+
+**Left open:** Wiring model selection into AgentState/workflow (requires ADR if shape
+changes); first baseline ExperimentRecord run; real LLM claim extraction (needs
+ANTHROPIC_API_KEY); durable KnowledgeStore backend.
+
+## 2026-09-28 — Baseline wiring: JobResult → ExperimentRecord (feature/claude/adr-0009-second-binding)
+
+**Did:** Created `cv_agent/graph/experiment_wiring.py` with `ExperimentContext` (frozen
+dataclass of caller-supplied fields JobResult cannot provide) and
+`job_result_to_experiment_record()` (maps a terminal `JobResult` + context →
+`ExperimentRecord`). Status mapping: completed→completed, failed/host_mismatch→failed,
+cancelled/rejected→cancelled. Resource fields (wall_time, gpu_hours, vram, ram, power)
+mapped from `JobOutcome.resources` where actually measured — never fabricated. Artifact
+paths, exit code, stdout/stderr preview (200 chars) stored in `notes`. Failure analysis
+built from `ExecutionError` and `JobOutcome.error_message`. 64 new tests. 1390 total.
+Ruff clean. Mypy clean (73 source files). Decision D-054 recorded.
+
+**Why:** ADR-0013 §9 explicitly names this mapping as "a later, separate implementation PR";
+ADR-0011 §8 names it as the first revisit trigger. Architecture already authorized — no new
+ADR required.
+
+**Broke:** Test `test_fallback_to_now_when_completed_at_missing` initially used `_FAKE_NOW`
+= "2026-09-28T09:00:00" while `_STARTED_AT` = "2026-09-28T10:00:00", making completed_at
+< created_at. Fixed by using a `late_now` after `_STARTED_AT`.
+
+**Learned:** `ExperimentRecord.__post_init__` enforces `completed_at >= created_at` — any
+fallback timestamp for `completed_at` must be at least as late as the `created_at` timestamp.
+Using `_now_iso` as a fallback only works if `_now_iso >= evidence.started_at`.
+
+**Left open:** Wiring `job_result_to_experiment_record()` into the `poll_or_collect_job`
+graph node (requires an AgentState update if the node writes ledger entries); first actual
+baseline execution (requires real `JobRuntime` for person detection + tracking);
+real ANTHROPIC_API_KEY for LLM claim extraction.
+
+---
+
+## 2026-09-28 — First real Person Detection + Tracking inference binding (feature/claude/adr-0009-second-binding)
+
+**Did:** Created `cv_agent/execution/jobs/runtimes/yolo_inference.py` — a verified YOLO11n
+person detection + ByteTrack tracking binding for `LinuxNvidiaJobRuntime`. Provides
+`build_command(inputs)` (constructs the `yolo track` CLI invocation; key=value format confirmed
+via `yolo cfg`), `expected_artifact_paths(inputs)` (computes `<output_dir>/<run_name>/` and
+`labels/` paths before the job runs), `build_binding()` (returns `ExecutionBinding` with
+`verified=True`, `approval_policy="approval_required"`), and `register_binding(registry)` (explicit
+opt-in registration, never automatic). Skill: `yolo-inference`; binding:
+`yolo11n-person-track-linux-job-v1`; runtime: `linux-nvidia-job-runtime-v1` (delegates
+subprocess execution to `LinuxNvidiaJobRuntime`). ADR-0009 §8 module docstring records full
+inspection evidence: CLI at `/home/dev/.local/bin/yolo` v8.4.138, model at
+`.cv_agent/models/yolo11n.pt` confirmed as YOLO11n (100 layers, 2,616,248 params, 6.5 GFLOPs),
+key=value CLI contract verified empirically, exit 0/non-zero semantics confirmed. 80 new tests
+(1470 total), 2 skipped (integration tests skip when no committed fixture). Ruff clean. Mypy clean.
+Decision D-055 recorded.
+
+**Why:** ADR-0009 §8 revisit trigger — second REAL binding was D-050; this is the third. The
+reference task (D-043, Person Detection + Tracking) requires an executable binding; YOLO11n is the
+D-053 SelectionRecommendation (confirmed, not assumed). Binding is necessary before the first
+baseline execution. No ADR change required — same ADR-0009 framework as the first two bindings.
+
+**STOP condition reported (Task 3 requirement):** The repository has NO committed video fixture.
+The integration tests `TestRealInference::test_real_inference_cpu` and
+`TestRealInference::test_invalid_source_nonzero_exit` are unconditionally skipped in CI. External
+videos (`/home/dev/Videos/model_optimization/tests/day7.mkv`, 158MB; `/home/dev/Downloads/
+military-clips/military_day1.mp4`, 2MB) exist on this host but are NOT repository assets.
+**Required before a real inference integration test can run:** commit a short (~5s), royalty-free
+video fixture to `tests/fixtures/person_detection_sample.mp4`. The binding module is correct and
+complete; only the fixture is missing.
+
+**GPU/CUDA blocker:** RTX 3060 physically present (nvidia-smi: driver 535.309.01, CUDA 12.2).
+`LinuxNvidiaHostVerifier` passes (uses nvidia-smi). But torch +cu130 requires CUDA 13.0 driver;
+`torch.cuda.is_available()` returns False. Real GPU inference is NOT executable. The `device=cpu`
+fallback would work (yolo11n is fast on CPU) but would not produce the GPU latency figures from
+D-053 evidence. This blocker does not affect the binding code — it is a runtime environment
+constraint.
+
+**Broke:** Nothing — three architecture boundary tests initially checked the full source file text
+and falsely failed because the docstring mentions "LinuxNvidiaJobRuntime" and "JobExecutor" in prose.
+Fixed by narrowing the tests to import-statement lines only.
+
+**Learned:** ADR-0009 §8 boundary check "no import of the class, only the RUNTIME_ID constant" must
+be verified on import lines specifically, not the full source text (docstrings legitimately name the
+class). Test `test_no_import_linux_nvidia_job_runtime_class` should filter by lines starting with
+`import` or `from`.
+
+**Left open:** Committed video fixture for integration test. CUDA 12.2 → 13.0 driver upgrade for
+GPU inference. First real baseline execution (approval-gated, requires explicit owner approval per
+ADR-0013 §3.2). Wiring `yolo_inference.register_binding()` into agent bootstrap.
+
+## 2026-09-29 — Pin contract fix + VRAM measurement + validation clean (feature/claude/adr-0009-second-binding)
+
+**Did:**
+- **D-056 — Pin contract fix:** Discovered `scripts/run_baseline.py` called `binding.pin()` instead
+  of `registry.pin(skill_id)`. `binding.pin()` returns a binding-level snapshot
+  `{skill_id, binding_id, …}` which fails `_pin_shape_ok()` (expects outer key
+  `{"binding", "runtime_generation"}`), causing `JobExecutor.start_job()` to reject with
+  `binding_mismatch / execution_pin_malformed`. Fixed runner to use `registry.pin(SKILL_ID)`.
+  Added `TestApprovalPinIntegrity` regression class (3 tests): one confirms `binding.pin()` alone
+  fails `pin_is_well_formed()`, one reproduces the D-056 rejection, one proves the full
+  registry-pin path starts the job through `_FakeJobRuntime`.
+- **D-057 — Real VRAM measurement:** `LinuxNvidiaHostVerifier.verify()` had a stub that always
+  failed with "VRAM measurement is not yet implemented" when `min_vram_mb` was set. Implemented
+  `_parse_vram_mb(raw_line)` (parses bare integer from nvidia-smi CSV output; None for
+  empty/non-numeric/zero/negative) and `_measure_vram_mb()` (runs
+  `nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits`; None on any failure).
+  Added `vram_mb: int | None = None` to `HostProfile`. Updated `_detect_host_profile()` to call
+  `_measure_vram_mb()` when NVIDIA GPU detected. Updated `verify()` to compare
+  `profile.vram_mb` vs `requirement.min_vram_mb` with fail-closed semantics
+  (None → host_mismatch per ADR-0013 §3.3). 18 new `TestVRAMMeasurement` tests added.
+- **Fix E402/test regression from VRAM change:** `TestApprovalPinIntegrity._nvidia_profile()`
+  returned `HostProfile(vram_mb=None)` (written before `vram_mb` existed); the new VRAM check
+  correctly rejected it for `min_vram_mb=2048`. Fixed by adding `vram_mb=12288` to the fixture.
+  Mid-file imports added with `TestApprovalPinIntegrity` (E402) moved to the top of
+  `test_yolo_inference_binding.py`. `scripts/run_baseline.py` F541/E402 fixed with file-level
+  `# ruff: noqa: E402, F541` (appropriate for a sequential runner script, not a package).
+- Final validation: 1500 passed, 4 skipped, 0 failed; ruff clean; mypy clean (74 source files).
+
+**Why:** ADR-0013 §3.3 fail-closed requirement — VRAM unmeasured must not silently pass.
+ADR-0003 §10.4 execution pin contract — full pin structure must come from `registry.pin()`.
+Both were blocking the first real baseline execution (`scripts/run_baseline.py`).
+
+**Broke:** Nothing beyond the transient test failure described above (which was itself evidence
+that the VRAM fix was correctly enforcing fail-closed behavior on the test fixture).
+
+**Learned:**
+- The fail-closed VRAM check immediately caught a pre-existing test fixture gap —
+  `_nvidia_profile()` without `vram_mb` would silently pass the old stub, but correctly fails
+  the new real check. Fail-closed is self-verifying.
+- `binding.pin()` vs `registry.pin()` is a subtle contract boundary. ADR-0003 §10.4 documents
+  the full execution pin shape; `pin_is_well_formed()` is the authoritative guard. Any script
+  or test that builds an `expected_binding_pin` must use `registry.pin()`, not `binding.pin()`.
+- `# ruff: noqa: E402, F541` at the file level is the right suppression for a sequential
+  runner script where interspersed imports and print headers are intentional architecture, not
+  a code smell.
+
+**Left open:** Committed video fixture for integration tests. CUDA 12.2 → 13.0 driver for GPU
+inference. `scripts/run_baseline.py` is ready to run; requires Tanvir to execute manually (approval
+gate is live). See exact command in the session report.
+
+---
+
+## 2026-09-29 — CUDA baseline blocker resolved (no environment change needed)
+
+**What changed:** Diagnosed the CUDA environment discrepancy reported in STATUS.md ("torch
+requires CUDA 13.0+ for +cu130"). Found the claim was stale. The real installed torch is
+`2.5.1+cu121` (CUDA 12.1 build), not `+cu130`. The CUDA 12.1 build is forward-compatible with
+the installed NVIDIA driver 535.309.01 / CUDA 12.2 runtime.
+
+**Evidence gathered:**
+- `/usr/bin/python3` (yolo shebang) → Python 3.10.12, same site-packages as miniconda python3
+- `torch.__version__` = `2.5.1+cu121`; `torch.version.cuda` = `12.1`
+- `torch.cuda.is_available()` = `True`
+- `torch.cuda.get_device_name(0)` = `NVIDIA GeForce RTX 3060`
+- Tensor on device `cuda` computes correctly
+- `yolo checks` output: `CUDA:0 (NVIDIA GeForce RTX 3060, 12042MiB)`
+
+**No package was changed.** No driver upgrade was needed. The previous "+cu130" wording in
+STATUS.md was a documentation error from an earlier session that conflated two separate
+environment investigations.
+
+**Test results:** 1500 passed, 4 skipped (same as D-057 commit). Ruff clean. Mypy clean (74
+source files, 0 errors).
+
+**What is still open:** ANTHROPIC_API_KEY not set (FakeLLMProvider acceptable for current work).
+`scripts/run_baseline.py` is unblocked and ready for Tanvir to run manually.
+
+---
+
+## 2026-09-29 — D-058: pipe-buffer deadlock fix in LinuxNvidiaJobRuntime
+
+**What happened:** First real baseline (scripts/run_baseline.py) ran for 41.5 minutes on
+a 114-second video and hung. Post-mortem found the baseline process had exited; 471 label
+files and an output .avi were produced (i.e., the job ran but later froze the parent).
+
+**Root cause (confirmed):** OS pipe-buffer deadlock. `LinuxNvidiaJobRuntime.start()` opens
+`stdout=PIPE, stderr=PIPE` but neither pipe was read until `collect()`. `collect()` is
+called only after `poll()` returns a terminal status. For `yolo track` on 2862 frames:
+~130 bytes/frame × 2862 frames ≈ 372 KB of stdout. The default Linux pipe buffer is 64 KiB.
+After ~503 frames (~64 KB), the subprocess blocked on `write()`. `poll()` then saw "still
+running" forever. The polling loop in `run_baseline.py` spun indefinitely. Evidence: 471
+label files = 471 frames processed ≈ 61 KB stdout = just below 64 KiB. The `linux_nvidia.py`
+V1-limitations docstring already described this exact failure mode; it was incorrectly
+classified as "safe for bounded output" without measuring yolo track's actual output volume.
+
+**Fix:** Two daemon threads (`_drain_to_list`) are started in `start()` immediately after
+`subprocess.Popen()`. They continuously read lines from stdout and stderr and append to
+per-job accumulator lists. This prevents the child from ever blocking on `write()`.
+`collect()` joins the threads (they finish quickly once the process is terminal), reads the
+accumulators, and calls `process.wait()` to guarantee `returncode` is populated. The
+`process.communicate(timeout=30.0)` call is removed — it was the original (broken) drain
+that only ran after `poll()` returned terminal, which it never did.
+
+**Files changed:**
+- `cv_agent/execution/jobs/runtimes/linux_nvidia.py` — drain threads in `start()` / join in
+  `collect()`; updated docstring (V1 pipe-buffer limitation removed as it is now fixed).
+- `cv_agent/execution/jobs/runtimes/yolo_inference.py` — removed stale CUDA/pipe docstring
+  limitations; updated device and binding description to reflect confirmed GPU availability.
+- `tests/test_linux_nvidia_runtime.py` — 5 new regression tests (`TestPipeBufferDeadlock`):
+  large stdout completes, first+last line captured, large stderr completes, both pipes
+  simultaneously, idempotent collect after large output.
+
+**Test results:** 36/36 in test_linux_nvidia_runtime.py passed. Full suite pending.
+
+---
+
+## 2026-09-29 — D-059: first real baseline complete (EXP-20260929-01)
+
+**What changed:** Fixed `open_ledger(DB_PATH)` → `open_ledger(db_path=DB_PATH)` in
+`scripts/run_baseline.py`. `open_ledger()` uses `*` to enforce keyword-only arguments;
+the positional call raised `TypeError: takes 0 positional arguments but 1 was given`.
+
+**Baseline result (EXP-20260929-01):**
+- model: yolo11n (yolo11n.pt · 2.6M params · 6.5 GFLOPs · AGPL-3.0)
+- device: GPU:0 NVIDIA GeForce RTX 3060 · torch 2.5.1+cu121 · CUDA 12.1
+- video: person_detection_sample.mp4 · 640×360 H.264 25fps 114.5s 2862 frames
+- outcome: completed · exit 0
+- wall_time: 60.1s · inference: 8.8ms/frame · 2601/2862 frames with detections (91%)
+- ledger: written and verified in .cv_agent/experiments.sqlite
+- artifacts: .cv_agent/baselines/baseline-yolo11n-person-track-20260929-2/
+
+**Why -2 suffix:** the prior `open_ledger` bug run completed YOLO successfully (exit 0)
+but failed at ledger write — that run's output directory was named the base name. When the
+fixed run executed, YOLO auto-incremented to -2. The base-name directory was deleted; only
+the ledger-linked -2 directory is retained.
+
+**What is still open:** val_metrics (mAP/recall) require a labelled dataset — none yet;
+VRAM/gpu_hours not profiled (V1 LinuxNvidiaJobRuntime limitation). Branch ready for PR.
+
+---
+
+## 2026-09-30 — D-060/D-061: evaluation binding + COCO val2017 dataset selection
+
+**What changed:**
+- `cv_agent/execution/jobs/runtimes/yolo_eval.py` — fourth real execution binding
+  (ADR-0009 §8) for the `yolo-eval` skill using `yolo val`. `build_command()` builds
+  the subprocess command. `parse_metrics(stdout)` extracts precision, recall, mAP@0.5,
+  mAP@0.5:0.95, and speed metrics from YOLO val stdout by regex (ANSI-stripped).
+  36 new tests. Ruff + mypy clean. (D-060)
+- `tests/test_yolo_eval_binding.py` — 36 tests for build_command, parse_metrics,
+  expected_artifact_paths, build_binding, register_binding.
+- `scripts/run_evaluation.py` — evaluation runner analogous to run_baseline.py. Runs
+  yolo val on COCO val2017 via JobExecutor. VRAM polling thread. Produces EXP-20260930-01
+  with val_metrics, fps, latency, memory populated from real measurements.
+- `docs/state/DECISIONS.md` — appended D-060, D-061.
+- `docs/state/OPEN_QUESTIONS.md` — added Q26 (benchmark DatasetManifest without pHash).
+
+**Dataset selection (D-061):**
+- COCO val2017 chosen: 5000 images, truly held-out from yolo11n's training domain
+  (trained on COCO train2017). coco128 rejected (val=train images → biased metrics).
+  Full coco download (20.3 GB) rejected (disk: 24 GB free). Manual download:
+  coco2017labels.zip (46 MB, complete), val2017.zip (778 MB, in progress at session time).
+  Labels extracted to /home/dev/Documents/data_cleaner/datasets/coco/labels/val2017/.
+  run_evaluation.py generates a local coco-person-val.yaml at runtime.
+
+**DatasetManifest deferred (Q26):** The near-duplicate leakage check requires
+perceptual_hash for every item. For 5000 images this requires loading them all —
+a separate operation. DatasetManifest creation deferred; dataset referenced as string
+"coco-val2017-5k" in ExperimentRecord. Q26 opened.
+
+**Broke / dead ends:**
+- Initial background curl downloads (using `&` in Bash) completed immediately because
+  the script exited; the child processes were orphaned. Fix: run curl without `&` and
+  rely on Bash tool's run_in_background=true for actual background behavior.
+- coco2017labels.zip from GitHub has time-limited redirect URLs (1-hour JWT). The first
+  download attempt partially completed (21 MB). Running curl -L again fetched a fresh
+  redirect and completed fully (46 MB = 48,639,045 bytes).
+
+**Test results:** 1541 passed, 4 skipped (full suite). EXP-20260930-01 pending val2017
+image extraction and actual run.
+
+---
+
+### 2026-09-30 — D-062: evaluation milestone complete (EXP-20260930-01)
+
+**What changed:** val2017.zip (815,585,330 bytes, 5000 images) download completed.
+Extracted to `/home/dev/Documents/data_cleaner/datasets/coco/images/val2017/`.
+`scripts/run_evaluation.py` run through full JobExecutor approval pipeline.
+
+**Two bugs fixed before successful run:**
+1. `_generate_coco_val_yaml()` omitted `train:` key — ultralytics `check_det_dataset`
+   requires both `train:` and `val:` even for val-only runs. Added `train: val2017.txt`.
+2. f-string format spec `{fps_e2e:.1f if fps_e2e else 'N/A'}` is invalid Python
+   (conditional in format spec position). Fixed to nested f-string:
+   `{f'{fps_e2e:.1f}' if fps_e2e is not None else 'N/A'}`.
+
+**Results (EXP-20260930-01):**
+- model: yolo11n.pt (2.6M params, 6.5 GFLOPs)
+- dataset: COCO val2017, 5000 images, classes=[0], conf=0.25, imgsz=640, batch=1
+- precision=0.791, recall=0.661, mAP@0.5=0.635, **mAP@0.5:0.95=0.459**
+- FPS: 99.9 end-to-end (50.0s wall / 5000 images), 188.7 inference-only (1000/5.3ms)
+- latency: 6.4ms e2e (0.4 pre + 5.3 inf + 0.7 post)
+- VRAM peak: 596 MiB; baseline: 360 MiB; delta: 236 MiB
+- exit 0; all success criteria cleared (mAP>0.30, FPS>20)
+
+**Note on metrics:** "all" and "person" rows show identical values because
+`classes=[0]` filters evaluation to only person class, so all=person in the
+val output. `faster-coco-eval` secondary check was skipped (requires
+`instances_val2017.json`); primary box P/R/mAP from ultralytics internal eval
+are valid.
+
+**mAP vs Ultralytics benchmark:** Published yolo11n COCO mAP@0.5:0.95 = 0.395
+(all 80 classes). Our result 0.459 is for person class only; person class
+typically has higher mAP than the 80-class average, so no anomaly.
+
+**EXP-20260930-01 written to `.cv_agent/experiments.sqlite` and verified.**
+
+**Branch status:** all files committed and ready for PR.
