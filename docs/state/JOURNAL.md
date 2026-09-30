@@ -1482,3 +1482,41 @@ ADR-0009 §8). First baseline run (Person Detection + Tracking, zero-shot) defer
 PR. `ExperimentRecord` wiring from `JobResult` also deferred. Q10 (dataset storage backend)
 still blocks a durable baseline. Q3 (restart-survivable checkpointer for jobs outliving the
 current process) unresolved but does not block the first baseline.
+
+---
+
+### 2026-09-30 — D-063/D-064: baseline diagnosis (ADR-0015)
+
+**What changed:** New `cv_agent/diagnosis/` module (ADR-0015) — `DetectionEvidence`
+frozen dataclass + `collect_detection_evidence()` pure function. 33 tests passing.
+`scripts/run_diagnosis.py` runs the analysis on EXP-20260930-01 artifacts.
+
+**Diagnosis run against real data (EXP-20260930-01 artifacts):**
+- 9,297 person predictions; 10,777 GT persons (COCO val2017)
+- 161 completely-missed images (GT persons but zero predictions)
+- 344 GT persons in missed images (3.2% of all GT)
+
+**Three measurable evidence findings:**
+1. **Small objects 2.7× over-represented in fully-missed images**: 63% of GT
+   persons in completely-missed images are small (normalized area < 0.0025),
+   vs 24% in the overall dataset. Primary failure mode hypothesis: small person
+   recall deficit at imgsz=640.
+2. **Near-threshold confidence density**: 17.5% of person predictions (1,623/9,297)
+   fall in the 0.25–0.35 confidence band. A conf threshold reduction would
+   directly expose these detections and likely recover nearby sub-threshold FNs.
+3. **High-density images dominate GT**: 677 images with >5 persons contain 64%
+   of all GT person annotations. Crowd performance is critical to improving recall.
+
+**What was NOT measured (documented as limitations in ADR-0015 §5):**
+- Size-stratified mAP (requires instances_val2017.json, ~250 MB) → Q27
+- Per-prediction IoU distribution (requires image dimensions)
+- Crowd/occlusion breakdown (requires iscrowd flags)
+
+**Proposed next experiment (not yet authorized):** conf threshold sweep at
+conf ∈ {0.10, 0.15, 0.25, 0.50} — evidence-backed, requires owner approval.
+
+**Architecture notes:**
+- ADR-0015 boundary: diagnosis module is separate from knowledge, experiments,
+  execution, and model selection. It reads artifacts; it does not store them.
+- Q27 opened.
+- Branch: `feature/claude/diagnosis-baseline` from main.

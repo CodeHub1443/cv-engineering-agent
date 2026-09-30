@@ -318,3 +318,14 @@ at ask time), not merely a `skill_id`; a terminal recovery failure clears
 documented as LangGraph behavior, not classified answers. No CLI `--skill` override was built
 (not chosen). Caller-supplied `pending_execution` and `python -m cv_agent execute` are
 untouched.
+
+**Q27.** **Size-stratified mAP (small/medium/large)**: Per-size-category mAP requires
+the COCO API (`pycocotools`) and `instances_val2017.json` (the official COCO annotation
+file, ~250 MB, not yet downloaded). Without it, the diagnosis module can measure GT bbox
+SIZE DISTRIBUTION but cannot report separate mAP values for small/medium/large objects.
+Options: (a) download `instances_val2017.json` and run `faster-coco-eval` (already
+attempted; skipped because file absent); (b) implement a custom IoU-based TP/FP/FN
+breakdown per size bucket from predictions.json + GT labels + image dimensions (requires
+loading image headers for all 5000 images, feasible with PIL); (c) accept the gap and
+proceed to the conf-threshold sweep experiment which does not require size-stratified mAP.
+**Current status:** gap documented in ADR-0015 §5. Q27 unresolved. Opened D-064.
