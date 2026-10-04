@@ -2191,3 +2191,19 @@ No row was written. `EXP-20261004-04` is not present.
 
 **Not done (gated):** ADR-0018 acceptance (owner). The rerun, which needs a fresh owner approval reference and an
 idle GPU (ADR-0018 §6). The approval record for the rerun is not written, because no reference exists yet.
+
+## 2026-10-04 — ADR-0018 accepted by the owner (D-075); rerun gated
+
+**Owner decision:** ADR-0018 accepted as reviewed (the FP32 640 control: contaminated-run ineligibility,
+GPU-process provenance, writer eligibility, quarantine, id and approval rules, rerun gate). Recorded in D-075.
+D-074 is not rewritten.
+
+**Changed in this stage:** ADR-0018 status line changed from Proposed to Accepted, and two stale "pending"
+sentences were updated (status line, verification note). STATUS.md updated. D-075 and this entry appended.
+No code changed. ADR-0016, ADR-0017, the nine ledger records and the quarantine archive are unchanged.
+
+**Still open (owner gates for the rerun):** (1) a fresh owner approval reference, which the agent has not chosen or
+invented; (2) an idle GPU. At the last check the other project's process (pid 312380) was still on the device.
+
+**Not done:** no GPU job, no ledger write, no approval record for a rerun, `EXP-20261004-04` unallocated, Q30 and
+D-069 OPEN, nothing pushed or merged.

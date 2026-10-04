@@ -1,6 +1,6 @@
 # ADR-0018: FP32 control for the image-size series (precision as the only variable)
 
-- **Status:** Proposed. Implementation is committed on the branch under issue #74. **Not accepted.** Acceptance is the owner's decision and needs a fresh approval reference before any GPU run (§3.8).
+- **Status:** Accepted (2026-10-04, owner acceptance; recorded in D-075 and JOURNAL). Implemented on the branch under issue #74 (commits `d0aea40` and `9170e39`). Acceptance approves the design only. It does **not** approve any GPU run: each run needs a fresh owner approval reference (§3.8) and an idle GPU (§6).
 - **Date:** 2026-10-04
 - **Layer:** experiments (provenance and recording, ADR-0016, ADR-0017)
 - **Canon:** `[P§25]` (reproducibility metadata), `[P§29.2]` (baseline discipline), `[P§29.3]` (no claim without a quantitative comparison), `[P§29.5]` (metadata completeness)
@@ -88,4 +88,4 @@ After the run: the writer runs in dry-run mode first. The record is written only
 
 - `tests/test_evaluation_records.py` (102 tests) covers: a clean start snapshot; a foreign process at start, during polling, and at end; a missing, unreadable or empty snapshot; a flag that disagrees with the snapshots, or is missing; the wrapper refusing a busy GPU and an unreadable process list before any run; the run's own process not counted as foreign; parsing of empty, clean and unreadable output; the FP32 argv and run name; refusal of FP32 at sizes other than 640; the FP16 path unchanged.
 - The tests use a fake `nvidia-smi`. No GPU run is part of the test suite.
-- ADR acceptance is pending the owner's review. The status line says so.
+- ADR-0018 was accepted by the owner on 2026-10-04 (see the status line). Acceptance does not approve a GPU run.

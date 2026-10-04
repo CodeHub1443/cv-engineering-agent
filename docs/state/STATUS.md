@@ -25,29 +25,29 @@ Committed on the branch. **Not pushed, not merged.**
   empty), at every VRAM poll (own pid excluded), and at end, recorded in run.json. The wrapper refuses an
   unreadable or busy start. The writer rejects any run with a missing, unreadable or foreign snapshot,
   or a mismatched `foreign_process_seen`. The 1-second polling limit is documented.
-- **ADR-0018:** Proposed, linked to #74. Not accepted.
+- **ADR-0018:** Accepted by the owner on 2026-10-04 (D-075), linked to #74. Acceptance approves the design only.
 
 **Interpretation:** unchanged from EXP-20261004-01 (descriptive only). No winner, no threshold.
 
 ## Open (owner)
 
-1. **ADR-0018 acceptance.** Owner decision. Requires issue #74 linkage (done) and review of the implementation.
-2. **Fresh approval reference** for the clean FP32 640 rerun. Not supplied; the agent does not invent one.
+1. **Fresh approval reference** for the clean FP32 640 rerun. Not supplied; the agent does not invent one.
+   This is one of the two owner gates. The other is an idle GPU, which is an observed condition, not a decision.
 3. **D-069** (measurement-only scope for the next series) — answered for this control only; stays OPEN generally.
 4. **Q30** — precision floor / operating point — "not yet", stays OPEN.
 5. **Q31**, **Q27** — unchanged, OPEN.
 
 ## Blockers
 
-- **Rerun blocked** until items 1 and 2 above are supplied and the gate in ADR-0018 §6 holds.
+- **Rerun blocked** until a fresh approval reference is supplied and the GPU is idle. The rest of the gate in ADR-0018 §6 must also hold.
 - **GPU busy:** another project's training job (`models/7_train_single_task.py --task lung`, pid 308159)
   was on the device at the last check. The agent does not stop or control it. The rerun waits for an idle GPU.
 
 ## Next actions (in order)
 
-1. Owner: review ADR-0018 and supply a fresh approval reference, or ask for changes.
-2. Agent: when the owner supplies both, re-run the gate in ADR-0018 §6 (clean tree, empty GPU process list,
-   no concurrent workload), write the approval record to JOURNAL, then run the FP32 640 control.
+1. Owner: supply a fresh approval reference when ready to run.
+2. Agent: when the reference is supplied and the GPU is idle, re-run the gate in ADR-0018 §6 (clean tree, empty GPU
+   process list, no concurrent workload), write the approval record to JOURNAL, then run the FP32 640 control.
 3. Agent: after the run, dry-run the writer; write `EXP-20261004-04` only if the run is eligible.
 
 ## Do not start yet
