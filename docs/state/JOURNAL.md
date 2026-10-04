@@ -2222,3 +2222,25 @@ exemption. ADR-0018 gets §3.16 and a changed gate item 6. D-076 is appended.
 **Accepted cost:** the exempt node's GPU use is not measured or corrected for. It is inside the device-wide VRAM value.
 
 **No GPU job, no ledger write, no approval reference chosen.** The approval reference for the rerun is still required from the owner.
+
+## 2026-10-04 — Approval record for the FP32 640 rerun (documented AFTER execution)
+
+**Procedural deviation, recorded transparently.** The approval record required by ADR-0018 §6 item 5 and by
+`docs/APPROVALS.md` was **not written to JOURNAL before the run**. The run was launched without it. This entry
+documents the approval after execution. It does not claim that the gate was satisfied before the run. ADR-0018
+is not changed. No new approval reference was created.
+
+| Field | Value |
+|---|---|
+| approval_id | `EXP-20261004-FP32-640-RERUN-OWNER-20261004` (supplied by the owner in the approval message) |
+| timestamp of approval | the approval message of 2026-10-04; its exact time was not recorded in the session |
+| timestamp of execution | started `2026-10-04T17:18:30.563932+00:00`, ended `2026-10-04T17:19:31.621467+00:00` (run.json); wall 61.058 s |
+| requester | Claude Code agent session (Claude Sonnet 5), at the owner's direction |
+| action | execute the controlled FP32 640 control: YOLO11n, COCO val2017 persons, imgsz 640, conf 0.001, batch 1, GPU 0, `quantize` unset (FP32), measurement only (D-069) |
+| estimate presented | none before the run. Post-hoc estimate from the contaminated attempt on the same protocol: about 2.5 min wall time, under 0.05 GPU-hours (derived) |
+| approver | the owner (Tanvir), by the approval message quoted above |
+| scope | one run, `EXP-20261004-04` (clean rerun); commit `74a3cc2`; NoMachine exemption per ADR-0018 §3.16 |
+| exp_id | `EXP-20261004-04`, baseline `EXP-20261004-01` |
+
+**Documentation order.** The GPU run was executed on the existing approval reference. This approval record was
+written afterward. It is not evidence that the approval record existed before the run.
