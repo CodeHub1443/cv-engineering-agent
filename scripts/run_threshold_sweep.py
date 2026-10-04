@@ -57,6 +57,11 @@ if TYPE_CHECKING:
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(REPO_ROOT))
 
+# Repository state (.cv_agent/: ledger, models, outputs) lives in the MAIN checkout, so a run
+# from a worktree reads the same ledger and weights (ADR-0016 §3). Never cwd-relative.
+from cv_agent.experiments.provenance import repository_state_root  # noqa: E402
+STATE_ROOT = repository_state_root()
+
 # ── Dataset / model configuration ─────────────────────────────────────────
 
 DATASETS_DIR = Path("/home/dev/Documents/data_cleaner/datasets")
@@ -64,10 +69,10 @@ COCO_ROOT = DATASETS_DIR / "coco"
 VAL_IMAGES_DIR = COCO_ROOT / "images" / "val2017"
 VAL_LABELS_DIR = COCO_ROOT / "labels" / "val2017"
 
-MODEL_PATH = REPO_ROOT / ".cv_agent" / "models" / "yolo11n.pt"
-OUTPUT_ROOT = REPO_ROOT / ".cv_agent" / "evaluations"
+MODEL_PATH = STATE_ROOT / "models" / "yolo11n.pt"
+OUTPUT_ROOT = STATE_ROOT / "evaluations"
 YAML_PATH = OUTPUT_ROOT / "coco-person-val.yaml"
-DB_PATH = REPO_ROOT / ".cv_agent" / "experiments.sqlite"
+DB_PATH = STATE_ROOT / "experiments.sqlite"
 YOLO_EXECUTABLE = "/home/dev/.local/bin/yolo"
 
 BASELINE_EXP_ID = "EXP-20260930-01"  # never modify this record
@@ -490,6 +495,7 @@ def _run_one(
 
     context = ExperimentContext(
         exp_id=cfg.exp_id,
+        commit=commit,
         baseline_id=BASELINE_EXP_ID,
         dataset_version="coco-val2017-5k",
         hypothesis=_hypothesis(cfg.conf),
@@ -555,6 +561,19 @@ def _execute_mode() -> None:
     print()
     print("  Owner approved via --execute flag (D-065, issue #72).")
 
+    # Provenance first: evidence from an uncommitted tree is refused before any GPU job starts.
+    from cv_agent.experiments.provenance import (  # noqa: PLC0415
+        ProvenanceError,
+        require_clean_worktree,
+    )
+
+    print("\n=== 0a. Provenance ===")
+    try:
+        run_commit = require_clean_worktree(REPO_ROOT)
+    except ProvenanceError as exc:
+        raise SystemExit(f"REFUSED: {exc}") from exc
+    print(f"  commit          : {run_commit}")
+
     print("\n=== 0. Preflight ===")
     _preflight()
 
@@ -593,10 +612,9 @@ def _execute_mode() -> None:
 
     configs = _build_sweep_configs()
     created_at = datetime.now(timezone.utc).isoformat()
-    commit = _current_commit()
 
     for cfg in configs:
-        _run_one(cfg, created_at, commit, executor, registry, skill)
+        _run_one(cfg, created_at, run_commit, executor, registry, skill)
 
     print("\n" + "=" * 60)
     print("SWEEP COMPLETE")

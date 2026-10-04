@@ -153,7 +153,113 @@ The table below is a condensed rollup view for scanning; full row records live i
 | `artifacts` | `.cv_agent/evaluations/eval-yolo11n-coco-val2017-20260930-2/` · `predictions.json` · `eval-yolo11n-coco-val2017-20260930-2.csv` (YOLO run outputs) · `.cv_agent/experiments.sqlite` |
 | `decision` | D-043 evaluation milestone complete. yolo11n person detection confirmed viable on COCO val2017 (mAP@0.5:0.95=0.459, FPS=99.9 on RTX 3060). Baseline EXP-20260929-01 now has a labelled accuracy companion. |
 | `notes` | yolo val command: `yolo val model=yolo11n.pt data=coco-person-val.yaml classes=[0] conf=0.25 imgsz=640 batch=1 device=0`. "all" and "person" rows in yolo val output have identical metrics because classes=[0] filters evaluation to only person class. YAML required `train:` key (added, pointing to val2017.txt) to pass ultralytics check_det_dataset. Run directory auto-incremented to -2 because first attempt (missing train: key) created the base directory before failing. |
-| EXP-20261001-01 | At conf=0.10, does lowering threshold recover missed TPs (recall↑, mAP≈stable) vs adding noise (FP↑, mAP↓)? | EXP-20260930-01 | yolo11n (yolo11n.pt, 2.6M params, 6.5 GFLOPs) | coco-val2017-5k | FP16 (torch+cu121) | RTX 3060 12GB | **proposed** | — | — | — | — | — | — | awaiting owner approval to execute |
-| EXP-20261001-02 | At conf=0.15, same hypothesis as above | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **proposed** | — | — | — | — | — | — | awaiting owner approval |
-| EXP-20261001-03 | At conf=0.25 (control — same as EXP-20260930-01), confirm reproducibility of baseline result | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **proposed** | — | — | — | — | — | — | awaiting owner approval |
-| EXP-20261001-04 | At conf=0.50, does raising threshold improve precision at cost of recall? | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **proposed** | — | — | — | — | — | — | awaiting owner approval |
+| EXP-20261001-01 | conf=0.10 — does lowering threshold recover missed persons? | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.495** ⚠ conf-truncated, see [sweep result](#sweep-result--exp-20261001-0104-completed-2026-10-02) | 0.651 (ultralytics, max-F1 point) · **0.773 at conf=0.10** (fixed-threshold matcher, P=0.541) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 695 MiB peak | N/A | — | fixed-threshold recall +10.3 pts, precision −23.5 pts; mAP rise is a protocol artifact, not a finding |
+| EXP-20261001-02 | conf=0.15 — same question | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.483** ⚠ conf-truncated | 0.651 (ultralytics) · 0.733 at conf=0.15 (fixed-threshold matcher, P=0.642) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 668 MiB peak | N/A | — | as above; intermediate point on the same trade-off curve |
+| EXP-20261001-03 | conf=0.25 — control, reproduce baseline | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.459** (identical to baseline) | 0.661 (identical to baseline) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 615 MiB peak | N/A | — | **baseline reproduced exactly** (P, R, mAP50, mAP50-95 all equal); harness deterministic at this config |
+| EXP-20261001-04 | conf=0.50 — does raising threshold trade recall for precision? | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.390** ⚠ conf-truncated | 0.521 (ultralytics) · 0.521 at conf=0.50 (fixed-threshold matcher, P=0.927) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 614 MiB peak | N/A | — | yes, trade-off confirmed: precision 0.927 at recall 0.521; small-object recall falls to 0.104 |
+| EXP-20261004-01 | (PROPOSED, not run; measurement-only, no pass/fail criteria) imgsz 640→960→1280 at the Q28 protocol (conf=0.001): report threshold-free AP@0.5 by size, mAP, and reference P/R | 640 control at conf=0.001 (new; not EXP-20261001-03) | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **proposed** | — | — | — | — | — | — | awaiting owner approval and §10 prerequisites — see [proposal](../experiments/EXP-20261004-01-proposal.md); not yet in SQLite |
+
+### Sweep result — EXP-20261001-01..04 (completed 2026-10-02)
+
+Ledger values (`.cv_agent/experiments.sqlite`, read-only). "Fixed-threshold" columns come
+from `scripts/run_fixed_threshold_strata.py` on each run's saved `predictions.json`:
+IoU ≥ 0.5, greedy score-ordered matching, predictions with score ≥ threshold only. This
+is not the COCO evaluator.
+
+| run | conf | ultralytics P | ultralytics R | mAP@.5 | mAP@.5:.95 | fixed P | fixed R | fixed small R | fixed dense R |
+|---|---|---|---|---|---|---|---|---|---|
+| EXP-20260930-01 (baseline) | 0.25 | 0.791 | 0.661 | 0.635 | 0.459 | 0.776 | 0.670 | 0.268 | 0.606 |
+| EXP-20261001-01 | 0.10 | 0.809 | 0.651 | 0.709 | 0.495 | 0.541 | **0.773** | **0.430** | 0.734 |
+| EXP-20261001-02 | 0.15 | 0.809 | 0.651 | 0.685 | 0.483 | 0.642 | 0.733 | 0.364 | 0.685 |
+| EXP-20261001-03 | 0.25 (control) | 0.791 | 0.661 | 0.635 | 0.459 | 0.776 | 0.670 | 0.268 | 0.606 |
+| EXP-20261001-04 | 0.50 | 0.927 | 0.521 | 0.514 | 0.390 | 0.927 | 0.521 | 0.104 | 0.423 |
+
+**Findings (measured):**
+
+1. **Control reproduces the baseline exactly** (EXP-20261001-03 = EXP-20260930-01 on all
+   four ultralytics metrics). The harness is deterministic at this configuration.
+2. **Recall at a fixed threshold does improve with lower conf.** Fixed-threshold recall
+   goes 0.670 (conf=0.25) → 0.773 (conf=0.10), a +10.3-point gain, paid for by precision
+   0.776 → 0.541. The earlier statement "recall does not improve over the baseline" is
+   **only true at ultralytics' reported operating point**, not at a fixed threshold (see
+   finding 4). It should not be cited as the threshold result.
+3. **The mAP@.5:.95 ranking is a measurement artifact, not evidence that conf=0.10 is
+   optimal.** The binding runs `yolo val` at `conf=0.25` (`DEFAULT_CONF` in
+   `yolo_eval.py`). Ultralytics' validation default is `conf=0.001`. Verified on the saved
+   files: the baseline's lowest person score is exactly 0.2500 with zero predictions below
+   it; the conf=0.10 run contains 6,100 person predictions below 0.25. The PR curve is built
+   from what survives the threshold, so mAP rises monotonically as conf falls
+   (0.390 → 0.459 → 0.483 → 0.495). 0.495 is the best of the four tested points, not an
+   optimum. Under the standard protocol the true mAP is unmeasured, and **the baseline's
+   0.459 understates it.** Do not compare 0.459 with published yolo11n numbers.
+4. **Ultralytics P and R are not values at the `conf` threshold.** `ap_per_class` reports
+   the max-F1 point of each curve (`ultralytics/utils/metrics.py`). This explains why
+   ultralytics recall at conf=0.10 (0.651) looks lower than at conf=0.25 (0.661), when the
+   fixed-threshold recall rises. The fixed-threshold columns are the right comparison.
+5. **Threshold alone is not an adequate recall fix.** Conf=0.10 lifts small-object recall
+   only from 0.268 to 0.430, so 57% of small persons are still missed, and it costs 23.5
+   points of precision. Whether any point on this curve is acceptable depends on a
+   precision floor that the project has not defined (OPEN_QUESTIONS Q30).
+6. **Conf=0.50 confirms the expected trade-off:** precision 0.927 at recall 0.521, and
+   small-object recall 0.104.
+
+**Evaluation protocol (Q28, accepted 2026-10-04, D-067):**
+
+- **mAP is reported at `conf=0.001`** (standard ultralytics validation threshold). The
+  `yolo_eval` binding default is now `0.001`.
+- **Fixed-threshold precision and recall are a separate measurement**, produced by
+  `scripts/run_fixed_threshold_strata.py`, and are labelled as such. They are never reported as mAP.
+- **Threshold-free AP per size stratum** (`stratum_ap50`, same script) is computed from the
+  full curve. It is valid only for files whose lowest score is ≤ 0.002 (the script flags others as TRUNCATED).
+- **The operating point is not chosen.** Q30 is open. Nothing here sets a precision floor or a
+  reported threshold.
+- **Legacy values:** all mAP values at `conf=0.25` (EXP-20260930-01 and the sweep rows) are
+  truncated-protocol values. They are not comparable with Q28-protocol mAP.
+- **Script defaults:** `scripts/run_evaluation.py` (the mAP run) now configures `conf=0.001`. The
+  historical EXP-20260930-01 row is unchanged, and a rerun would be refused as terminal anyway.
+  `scripts/run_baseline.py` (tracking) keeps `conf=0.25`, an operating point (Q30 open).
+
+**Corrections to earlier wording (2026-10-04):**
+
+- **Ultralytics P and R are max-F1 values, not values at the `conf` threshold.** The "recall
+  0.661" in EXP-20260930-01, and the 0.651 and 0.521 in the sweep rows, are the max-F1 point
+  of each curve. They are not recall at conf=0.25 or at any other threshold. The fixed-threshold
+  recall at conf=0.25 is **0.670** (IoU-matched analysis). Any statement that "recall does not
+  change with conf" based on the ultralytics columns is wrong.
+- **"Recall does not improve over the baseline" is withdrawn** for fixed-threshold recall. It
+  holds only at ultralytics' max-F1 point. At a fixed threshold, recall rises from 0.670 to 0.773
+  when conf goes 0.25 → 0.10, at a precision cost (see finding 2).
+- **The diagnosis derived TP/FP/FN from the reported P/R** (ADR-0015 §5, limitation 1, on PR #71's
+  branch). Those reported values are max-F1 points, so the derived counts are not counts at
+  the conf=0.25 operating point. The IoU-matched analysis supersedes them for fixed-threshold
+  statements. An erratum is drafted in ADR-0015 on PR #71's branch (uncommitted).
+- **Crowding:** the earlier "crowd-related failure pattern" is withdrawn. ADR-0015's
+  "677 high-density images contain 64% of GT persons" is a prevalence statistic, not a failure
+  rate. The measured dense/sparse gap is explained by size composition (proposal §1).
+- **Strongest current failure mode:** small persons, which are 52.5% of misses from 23.7% of GT
+  (recall 0.268 at conf=0.25; 0.430 at conf=0.10).
+- **"conf=0.10 gives the highest mAP"** is true only of the four legacy points tested. It is not
+  a Q28-protocol result, and it is not an optimum.
+
+**Validity status (`[P§25]` rules):**
+
+- `commit_sha` is **NULL on all six ledger rows**, including the baseline. Rule 4 requires
+  a commit SHA, so these rows cannot yet be reproduced from record. The sweep execute path
+  does not pass `commit` into `job_result_to_experiment_record`. Corrections go in new rows
+  (Rule 1); the existing rows are not edited.
+- `dataset_version = coco-val2017-5k` is a name, not a registered `DatasetManifest` (Q26).
+- The baseline row's `baseline_id` is `EXP-20260929-01` (a video-tracking run with no
+  metrics), not `SELF`. Rule 2 wants the accuracy baseline to name itself. Q29.
+- The `commit` field in the baseline's rollup entry names a branch, not a SHA.
+- (Historical, as of 2026-10-04 before recovery; restored to the main checkout's `.cv_agent/` the same day, see LEDGER-RECOVERY.md §4a.) The ledger file had been in the Trash (`~/.local/share/Trash/files/cv-engineering-agent/.cv_agent/`),
+  not in the repository. Its contents were read without modification.
+- The `predictions.json` artifacts and the baseline eval directory are in the same Trash
+  location.
+- FPS (108.6 vs 99.9 for an identical workload) is run-to-run wall-clock variance, not a
+  speed effect. Use inference-only latency (5.3 ms in every run) for speed comparisons.
+- Only one model and one dataset. IoU 0.5 only. Matching is approximate (see above).
+- **Inferred, not recorded, commits** (never written to `commit_sha`; see
+  [LEDGER-RECOVERY.md](../experiments/LEDGER-RECOVERY.md) §5.2): EXP-20261001-01..04 ≈ `1531344`
+  (most likely; the execute-time working tree is unknown). EXP-20260930-01 ≈ `8f29618`, but its
+  code was **uncommitted at run time**: the `yolo_eval` binding first appears in `8f29618`, committed
+  five minutes after the run. No single commit reproduces the baseline exactly.

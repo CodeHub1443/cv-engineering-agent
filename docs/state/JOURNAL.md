@@ -1900,3 +1900,133 @@ typically has higher mAP than the 80-class average, so no anomaly.
 **EXP-20260930-01 written to `.cv_agent/experiments.sqlite` and verified.**
 
 **Branch status:** all files committed and ready for PR.
+
+## 2026-10-04 — Sweep read against the ledger; small-object proposal (branch `docs/claude/sweep-results-next-proposal`)
+
+**Did:** Verified EXP-20261001-01..04 in the SQLite ledger (read-only; the file is in the
+Trash, not the repo). Documented the results in EXPERIMENTS.md, drafted
+`docs/experiments/EXP-20261004-01-proposal.md`, added Q28–Q30 and D-066. Added
+`scripts/run_fixed_threshold_strata.py`, a stdlib-only, read-only analysis that computes
+IoU≥0.5 recall at a fixed threshold, stratified by ADR-0015 size and density bins. Added 18
+tests (`tests/test_fixed_threshold_strata.py`). No GPU run, no ledger write, no baseline
+mutation (EXP-20260930-01 unchanged).
+
+**Broke / corrected, from the brief:**
+- "Recall does not improve over baseline" is true only at ultralytics' max-F1 operating
+  point. At a fixed conf=0.25 → 0.10, recall goes 0.670 → 0.773 (precision 0.776 → 0.541).
+- "conf=0.10 gives the highest mAP" is a truncation artifact. The binding runs val at
+  conf=0.25, and the baseline's lowest person score is exactly 0.25. The true mAP at the
+  standard conf=0.001 is unmeasured.
+- "Crowd-related failure pattern" is not supported. Within size bins, dense and sparse recall
+  nearly match. The dense/sparse gap is size composition. ADR-0015's crowd evidence is
+  prevalence, not a failure rate.
+- Sweep rows have `commit_sha` NULL. The baseline's `commit` field names a branch, not a
+  SHA. The DB and eval artifacts are in the Trash.
+
+**Learned:** the ultralytics val P/R are the max-F1 point of each curve, so they cannot
+answer "what happens at threshold t". Fixed-threshold recall needs the saved predictions
+and an IoU match. Recall deficits concentrate in small persons (52.5% of misses from 23.7%
+of GT), so the next experiment targets resolution (inference-only), not a threshold, a model
+swap or crowding. Full numbers in EXPERIMENTS.md and the proposal.
+
+**Not done:** no commit or push (not requested). Full pytest run is unresolved at the time of
+writing (see STATUS). Sweep, baseline and diagnosis code live on unmerged branches (#69, #71,
+`feature/claude/conf-threshold-sweep`); `main` does not have them.
+
+**Follow-up (same day):** full suite on the worktree: 1590 passed, 4 skipped, 4 failed. The
+4 failures are real-skill tests (`'1.2' == '1.0'`). They also fail on the untouched
+`1531344` (4 failed, 29 passed in the affected files), so they predate this change. `ruff check`
+and `mypy cv_agent` are clean; the new script and test pass `mypy` too.
+
+## 2026-10-04 — Q28 accepted; protocol and diagnosis corrected; Q29 investigated (branch `docs/claude/sweep-results-next-proposal`)
+
+**Did:**
+- **Q28 accepted (D-067).** `yolo_eval` default `conf` 0.25 → 0.001, with a test. The inference
+  binding's 0.25 is unchanged (operating point; Q30). Protocol written into `docs/EVALUATION.md`.
+- **Threshold-free AP.** `stratum_ap50` added to `scripts/run_fixed_threshold_strata.py`: AP@0.5 per
+  size stratum from the full curve, with a TRUNCATED flag for files without scores down to ~0.001.
+  Five new AP tests, plus one binding-default test (60 across the two test files).
+- **Q30 kept OPEN.** EXP-20261004-01 success criteria rewritten to be threshold-free. The precision
+  floor (0.726) is removed. The +0.05 and ≤0.02 magnitudes are labelled provisional, not derived.
+- **Corrections:** EXPERIMENTS.md (max-F1 vs fixed-threshold; crowding; legacy mAP). ADR-0015 erratum
+  drafted, uncommitted, in worktree `docs/claude/adr-0015-erratum` (PR #71 branch).
+- **Q29 investigated, not executed.** Findings and recovery proposal in `docs/experiments/LEDGER-RECOVERY.md`.
+- Exact manual E1 command written in the proposal (§11). Not run.
+
+**Q29 findings:**
+- The whole repo directory was moved to Trash at 2026-10-04 15:53:12. A new one was created at
+  15:53:54. The repo's code does not delete directories. `.cv_agent/` is gitignored (D-015), so it
+  did not survive the replacement. Who moved it is not determinable from the repo.
+- The Trash ledger is intact: `integrity_check ok`, 6 rows, sha256 `d7ff167e…4c19`. Its sibling
+  artifacts (`models/yolo11n.pt`, `evaluations/`, `baselines/`) are also in Trash.
+- All six `commit_sha` values are NULL. Confirmed in code: prepare-mode wrote the SHA, then the
+  execute-mode upsert (`ON CONFLICT DO UPDATE`, all columns) overwrote it with NULL.
+- The baseline ran from **uncommitted** code. The `yolo_eval` binding first appears in `8f29618`,
+  committed five minutes after the run (created 14:05 +06, committed 14:10 +06). Recorded as an inference only.
+- Default ledger path is cwd-relative, so a run from a worktree silently creates an empty ledger.
+
+**Recommendation:** back up the Trash copy first (copy, not move; verify sha256 and integrity), then
+restore by copy to the main checkout's `.cv_agent/`, only after owner approval. Keep the DB gitignored
+(option B). Decide separately whether to add committed per-run JSON snapshots (option C). Do not commit
+the DB, and do not regenerate the rows. Implement R1 (refuse dirty tree), R2 (pass commit), R3
+(COALESCE in the upsert), and a test for each.
+
+**Learned:** a directory replacement drops gitignored state. The persistence design needs a backup, not
+just a gitignore. The upsert pattern silently destroys provenance on the second write.
+
+**Broke / not done:** no DB restore, no commit, no push, no merge, no GPU run. Tests: 1596 passed,
+4 skipped, 4 failed (the same pre-existing real-skill failures). `ruff check` clean; `mypy cv_agent` clean.
+
+## 2026-10-04 — Provenance enforced; evaluation protocol verified; ADR-0015 erratum applied; EXP-20261004-01 made measurement-only
+
+**Did:**
+- **Ledger, verified read-only.** Trash copy: sha256 `d7ff167e…4c19` (matches), `integrity_check ok`, six
+  records. Recovery command written in LEDGER-RECOVERY.md §4a. Part 1 (copy and verify) dry-run in
+  scratch: all checksums OK, six records. Nothing restored, moved, or overwritten.
+- **Provenance (ADR-0016, proposed).** `cv_agent/experiments/provenance.py`. The three evidence scripts
+  (`run_threshold_sweep.py` execute mode, `run_evaluation.py`, `run_baseline.py`) refuse a dirty worktree
+  before any GPU job, and pass the verified SHA into `ExperimentContext.commit`. Previously the sweep
+  execute path never passed a commit (the context lacked the field).
+- **Upsert fix.** `commit_sha` is write-once against NULL (`COALESCE`). Test fails on the pre-fix code.
+- **Protocol.** `run_evaluation.py` (mAP) now `conf=0.001`. `run_baseline.py` keeps 0.25 (tracking
+  operating point). Inference binding default 0.25 unchanged (test pins it). EVALUATION.md marks legacy values.
+- **ADR-0015 erratum corrected.** `run_diagnosis.py` no longer derives TP/FP/FN from max-F1 P/R. Its
+  crowd line and "next experiment" text are corrected. `recall_gap` renamed to `fully_missed_gt_fraction`
+  (models.py and tests). The erratum now says 0.459 is a lower bound (truncation can only understate AP),
+  and that Q27 stays open.
+- **EXP-20261004-01 made measurement-only** (D-069). The +0.05 / ≤0.02 / 0.726 criteria are withdrawn as
+  unsupported planning values. The owner must decide any criterion before a run that drives a decision.
+
+**Broke / learned:**
+- The sweep's execute path was missing the commit field, and the upsert erased it. Both are fixed now.
+- Four real-skill failures, root-caused against the installed skill (`~/.agents/skills/trt-perf-analysis`):
+  - Three tests assert `schema_version == "1.0"`. The installed skill emits and declares `"1.2"`
+    (`scripts/trt_perf/data.py:1548`; its schema has `const "1.2"`).
+  - One test (`test_recovery_interrupt…`) supplies only a layers file to `--data`. The installed skill
+    now requires a layers file plus a profile file, and exits 2 with
+    "--data expects one layer-info path and one profile JSON path" (reproduced directly).
+  These are stale test expectations against a newer skill, not repository defects. Left failing on purpose.
+- The four real-skill tests are not in the repository's own code path. The repository's execution runtime
+  records stderr on failure, but this test's `error` field is None, so the failure text is not visible through the result.
+
+**Validation (final):** sweep worktree 1608 passed, 4 skipped, 4 failed (the four known real-skill tests,
+same assertions). `ruff check .` clean. `mypy cv_agent` clean (76 files), and mypy clean on new files.
+Diagnosis worktree: 33 passed, ruff clean.
+
+**Not done:** no commit, push, or merge. No GPU run. No model change. No training. No TensorRT/DeepStream.
+Q29 restore not executed (awaiting approval). Q30 OPEN.
+
+## 2026-10-04 — Owner approvals executed: Q29 recovery, ADR-0016, ledger path, skill tests (feature/claude/experiment-provenance-recovery)
+
+**Did:**
+- **Q29 recovery executed** (LEDGER-RECOVERY.md §4a). Part 1: copy, sha256, integrity_check, six records verified. Part 2: restored into `/home/dev/cv-engineering-agent/.cv_agent/` (ledger, `models/yolo11n.pt`, `evaluations/`). Restored ledger sha256 `d7ff167e…4c19`, identical to the Trash copy, which was not modified. `.cv_agent/` is gitignored (`/.cv_agent/`). Six records read back through the repo's ledger class; tests run afterwards left the checksum unchanged.
+- **Ledger path fixed.** `default_db_path()` no longer uses `Path.cwd()`. It resolves via `repository_state_root()` (`git rev-parse --git-common-dir`, anchored at the package), so every worktree maps to the main checkout's `.cv_agent/`. `open_ledger()` refuses a missing default ledger unless `create=True`. Scripts' `MODEL_PATH`, `OUTPUT_ROOT` and `DB_PATH` use the same state root. Tests: `tests/test_ledger_path.py` (7).
+- **Provenance (ADR-0016 accepted).** A non-`proposed` ExperimentRecord without a valid 40-hex `commit_sha` is rejected at write. The existing write-once COALESCE stays. Fixtures and tests updated to carry a test SHA; the one test that wrote a completed record with NULL now asserts the refusal.
+- **Stale real-skill tests fixed against the installed contract.** Investigation: the installed skill (`~/.agents/skills/trt-perf-analysis`) declares `schema_version` const `"1.2"` and requires a layers + profile pair for folder and `--data` input. The repo's tests asserted `"1.0"` and supplied layers only. Fix: `tests/trt_skill_contract.py` reads the declared version from the installed skill's schema, and writes a profile fixture matching the skill's validation rules. Assertions were not weakened or skipped. The fake `"1.0"` payload in a unit test is not a real-skill contract and is unchanged. The versioning ownership question is recorded as **Q31**.
+- **Decisions:** D-070 (approvals). D-069 (EXP-20261004-01 measurement-only), Q30, Q27 remain OPEN.
+
+**Validation:** full pytest **1620 passed, 4 skipped, 0 failed** (the four real-skill tests now pass). `ruff check .` clean. `mypy cv_agent` clean (76 files), and mypy clean on new files.
+
+**Learned:** the earlier "four repository failures" were test expectations against a newer installed skill, plus one fixture missing its profile. The default ledger path was a silent-empty-ledger hazard in every worktree.
+
+**Not done:** no push, no merge, no EXP-20261004-01 run. A record-writing script for the experiment does not exist yet, so its prediction files would not yet be ledger evidence (proposal §10).

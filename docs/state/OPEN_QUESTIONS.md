@@ -334,3 +334,41 @@ at ask time), not merely a `skill_id`; a terminal recovery failure clears
 documented as LangGraph behavior, not classified answers. No CLI `--skill` override was built
 (not chosen). Caller-supplied `pending_execution` and `python -m cv_agent execute` are
 untouched.
+
+~~**Q28. (2026-10-04) Which mAP protocol is canonical for `yolo val` evaluations?** The
+`yolo_eval` binding defaults to `conf=0.25` (`DEFAULT_CONF`). Ultralytics' validation
+default is `conf=0.001`. At 0.25 the PR curve is truncated, so the reported mAP@.5:.95
+(0.459 baseline) understates the detector's mAP, and sweep rankings by mAP are artifacts
+(EXPERIMENTS.md, sweep result). Options: (a) `conf=0.001` for all mAP reporting, with the
+operating threshold reported separately as fixed-threshold P/R (recommended); (b) keep
+0.25 and label the metric "truncated mAP". Changing the default changes the binding, so it
+needs an owner decision. Blocks: EXP-20261004-01 Stage 0. Owner: Tanvir.~~ — **Answered
+2026-10-04 (owner decision, D-067): option (a), accepted.** `yolo_eval` default is now
+`conf=0.001` (with a test). Fixed-threshold P/R is a separate measurement, never reported as
+mAP. The inference binding's 0.25 default is unchanged (operating point; see Q30).
+
+**Q29. (2026-10-04) Where is the canonical experiment ledger, and how do we fix the row
+gaps? — ANSWERED 2026-10-04 (owner approval).** Recovery executed from the Trash copy by copy with
+checksum and SQLite integrity verification (LEDGER-RECOVERY.md §4a, Part 1 and Part 2). The Trash
+copy is untouched. The database stays gitignored under the D-015 SQLite convention, with no per-run
+JSON snapshots. Provenance and write rules are implemented (ADR-0016). The default ledger path is
+fixed to the repository's state root (no cwd-relative creation). Historical rows keep NULL
+`commit_sha`. No SHA was fabricated.
+
+**Q30. (2026-10-04) What precision floor, or operating point, does the person-detection
+target require? — OPEN. OWNER INPUT REQUIRED before any production operating point is
+defined.** Fixed-threshold recall rises 0.670→0.773 at conf=0.10, but precision falls
+0.776→0.541. No precision floor, operating point, or pass/fail threshold on precision or
+fixed-threshold recall has been set by any document. EXP-20261004-01 defines **no** pass/fail criteria
+for this reason, and it reports threshold-free small-object AP50 from the full curve. Reported
+fixed-threshold P/R at conf 0.25 is reference-only. Related: Q24 (reference project), Q25 (target hardware).
+Owner: Tanvir.
+
+**Q31. (2026-10-04) Should the repository pin the trt-perf-analysis skill version and output
+schema, or track the installed skill?** Current behaviour: the real-skill tests read the installed
+skill's declared `schema_version` and its layers + profile input contract (`tests/trt_skill_contract.py`).
+A skill upgrade therefore fails visibly in tests and is not silently pinned. Pinning "1.2" in the
+repository would fail on any machine with a different installed skill, and the skill's own schema
+is the authority. This is a genuine ownership decision between repository and skill, and it is
+not guessed here. **Until decided:** track the installed skill; do not hard-code a version. Owner:
+Tanvir, or the skill owner.

@@ -19,6 +19,32 @@ A model at **99% mAP** that yields **2 FPS** on the target when the application 
 
 **Detection** — Precision · Recall · F1 · mAP@0.5 · mAP@0.5:0.95 · IoU · AP per class.
 
+### Detection protocol (accepted 2026-10-04, Q28 / D-067)
+
+Three measurements are kept separate. Never mix them in one number.
+
+1. **Standard mAP** (mAP@0.5 and mAP@0.5:0.95). Computed at **`conf=0.001`**. This is the
+   ultralytics validation threshold, so the PR curve is not truncated. Only these values
+   are comparable across runs and with published numbers.
+2. **Threshold-free AP per size stratum** (AP@0.5 for small, medium and large persons).
+   Computed from the full curve (`conf=0.001`). Used for comparisons that target a size class.
+3. **Fixed-threshold precision and recall.** Computed at a named threshold, with IoU ≥ 0.5 matching.
+   Reported only as a labelled operating-point measurement. The ultralytics P and R
+   summary values are **not** this measurement: they are the max-F1 point of the curve.
+
+A run whose predictions do not include scores down to about 0.001 is **not valid** for
+measurement 1 or 2. The operating threshold for reporting is **not defined here**; it is an
+open owner decision (OPEN_QUESTIONS Q30).
+
+**Legacy values.** mAP values computed at `conf=0.25` (EXP-20260930-01 and the sweep rows
+EXP-20261001-01..04) are **legacy, truncated-protocol values**. They are lower bounds on the
+Q28-protocol mAP for the same predictions, and they are not comparable with standard numbers.
+The `scripts/run_fixed_threshold_strata.py` output flags any predictions file that is not full-curve.
+
+**Inference operating-point default.** `yolo_inference` keeps `conf=0.25` as its default. That is
+an operating-point default, not a mAP protocol value, and it is unchanged because Q30 is open.
+The tracking baseline (`scripts/run_baseline.py`) runs at the same 0.25 for the same reason.
+
 **Classification** — accuracy · precision · recall · F1 · confusion matrix · ROC-AUC ·
 PR-AUC.
 

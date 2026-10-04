@@ -44,6 +44,7 @@ from typing import Any
 import pytest
 
 import cv_agent.execution.runtimes.trt_perf_analysis as trt_perf_analysis
+from tests.trt_skill_contract import installed_schema_version, write_profile_fixture
 from cv_agent.__main__ import _authorize_and_execute, _cmd_execute, _confirm_approval, _parse_input_kv
 from cv_agent.execution.binding import ExecutionBinding, ExecutionBindingRegistry, InputField
 from cv_agent.execution.models import RuntimeOutcome
@@ -622,6 +623,8 @@ class TestExecuteCLIRealSkill:
             },
         ]
         (folder / "layers_smoke.json").write_text(json.dumps(layers), encoding="utf-8")
+        # The installed skill requires the layers + profile pair (tests/trt_skill_contract.py).
+        write_profile_fixture(folder, folder / "layers_smoke.json", "smoke")
 
     @requires_real_skill
     def test_real_successful_execution_end_to_end(self, tmp_path: Path) -> None:
@@ -638,7 +641,7 @@ class TestExecuteCLIRealSkill:
 
         result_start = result.stdout.index("Result:") + len("Result:")
         output = json.loads(result.stdout[result_start:])
-        assert output["schema_version"] == "1.0"
+        assert output["schema_version"] == installed_schema_version()
         assert output["validation"]["status"] == "passed"
         assert output["results"][0]["layer_count"] == 3
 

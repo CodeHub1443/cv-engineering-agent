@@ -43,6 +43,7 @@ from cv_agent.execution.runtimes.trt_perf_analysis import (
 from cv_agent.skills.local import LocalSkillSource
 from cv_agent.skills.models import Skill
 from tests.test_workflow import _without_pin
+from tests.trt_skill_contract import installed_schema_version, write_profile_fixture
 
 
 def _fixture_skill(location: str) -> Skill:
@@ -112,6 +113,8 @@ def _write_valid_layers_fixture(folder: Path, label: str = "test") -> None:
         },
     ]
     (folder / f"layers_{label}.json").write_text(json.dumps(layers), encoding="utf-8")
+    # Folder mode needs the layers + profile pair the installed skill requires.
+    write_profile_fixture(folder, folder / f"layers_{label}.json", label)
 
 
 class TestArgvContract:
@@ -473,7 +476,7 @@ class TestRealInvocation:
         assert result.status == "completed"
         assert result.ok is True
         assert result.output is not None
-        assert result.output["schema_version"] == "1.0"
+        assert result.output["schema_version"] == installed_schema_version()
         assert result.output["validation"]["status"] == "passed"
         assert result.output["results"][0]["layer_count"] == 3
         assert result.evidence.binding_id == BINDING_ID
@@ -608,7 +611,7 @@ class TestRealPlanningAndRecovery:
         execution_result = result["execution_result"]
         assert execution_result is not None
         assert execution_result["status"] == "completed"
-        assert execution_result["output"]["schema_version"] == "1.0"
+        assert execution_result["output"]["schema_version"] == installed_schema_version()
 
     def test_recovery_interrupt_asks_for_the_group_and_supplying_data_alone_recovers(
         self, tmp_path: Path
@@ -626,6 +629,8 @@ class TestRealPlanningAndRecovery:
 
         _write_valid_layers_fixture(tmp_path, label="recovery")
         layers_path = tmp_path / "layers_recovery.json"
+        # The installed skill takes --data as a layers + profile pair (see trt_skill_contract).
+        profile_path = write_profile_fixture(tmp_path, layers_path, "recovery")
         agent = CVAgent(AgentConfig(workspace_root=tmp_path))
         register(agent.execution_bindings)
 
@@ -642,7 +647,7 @@ class TestRealPlanningAndRecovery:
         ]
 
         resumed = agent.resume_workflow(
-            "q20-recovery", {"data": [[str(layers_path)]]}
+            "q20-recovery", {"data": [[str(layers_path), str(profile_path)]]}
         )
 
         assert "__interrupt__" not in resumed
@@ -652,14 +657,14 @@ class TestRealPlanningAndRecovery:
         assert recovery["terminal"] is False
         assert _without_pin(resumed["pending_execution"]) == {
             "skill_id": DEFAULT_SKILL_ID,
-            "inputs": {"data": [[str(layers_path)]]},
+            "inputs": {"data": [[str(layers_path), str(profile_path)]]},
             "task": _TRT_PERF_WORKFLOW_REQUEST,
         }
         assert resumed["status"] == "done"
         execution_result = resumed["execution_result"]
         assert execution_result is not None
         assert execution_result["status"] == "completed"
-        assert execution_result["output"]["schema_version"] == "1.0"
+        assert execution_result["output"]["schema_version"] == installed_schema_version()
 
     def test_pre_supplying_both_path_and_data_together_is_rejected_before_execution(
         self, tmp_path: Path
