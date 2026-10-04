@@ -2244,3 +2244,21 @@ is not changed. No new approval reference was created.
 
 **Documentation order.** The GPU run was executed on the existing approval reference. This approval record was
 written afterward. It is not evidence that the approval record existed before the run.
+
+## 2026-10-04 — Ledger write: EXP-20261004-04 (FP32 640 control, clean rerun)
+
+**Written:** `EXP-20261004-04`, baseline `EXP-20261004-01`, status completed, commit `74a3cc2403788c7a1745b101371127fffa5bf3ea`,
+approval `EXP-20261004-FP32-640-RERUN-OWNER-20261004`. Written by `scripts/record_evaluation_runs.py --fp32-control`
+(non-dry-run), after the reviewed dry run. The approval record above was documented after execution, and the write was
+after that documentation. The approval record is not evidence that the gate was satisfied before the GPU run.
+
+**Ledger:** 9 records before the write, 10 after. Exactly one row was added. The six historical records and the three
+EXP-20261004 series records are unchanged (per-row hash comparison). Integrity check: ok. SHA-256 before
+`0d910b01e9c2eb706243db35a62b948e83974f7ea9250a94fe0fd233ae88cfc1`, after `9251eb0cc628b0be0ffaa137b6649b201b4ab26da8eede6d9c49da1fc8fef8fa`.
+
+**Persisted fields** match the reviewed dry run: FPS 81.89, gpu_hours 0.01696, mAP@0.5 0.750, mAP@0.5:0.95 0.518,
+AP@0.5 small/medium/large 0.3547 / 0.726 / 0.941, FP32 precision label, memory VRAM 858 MiB (device-wide, shared
+with the exempt NoMachine node, see ADR-0018 §3.16) and RAM 1939.9 MiB.
+
+**Not done:** no GPU job, no further ledger write, ADR-0018 not modified, measured run artifacts not modified,
+no push, no merge. STATUS.md and EXPERIMENTS.md were not updated in this commit (owner scope: JOURNAL only).
