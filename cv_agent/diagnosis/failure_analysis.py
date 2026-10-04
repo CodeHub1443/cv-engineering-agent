@@ -766,12 +766,12 @@ def render_report(analyses: dict[str, FailureAnalysis], *, primary: str) -> str:
         f"({small.gt / p.gt_total:.1%}).",
         "- Fully missed rate by box-area bin (share of that bin's GT): "
         + ", ".join(
-            f"{name} {st.fully_missed / st.gt:.1%} ({st.fully_missed}/{st.gt})"
+            f"{name} {(st.fully_missed / st.gt if st.gt else 0.0):.1%} ({st.fully_missed}/{st.gt})"
             for name, st in p.size_strata.items()
         )
         + ". By density: "
         + ", ".join(
-            f"{name} {st.fully_missed / st.gt:.1%} ({st.fully_missed}/{st.gt})"
+            f"{name} {(st.fully_missed / st.gt if st.gt else 0.0):.1%} ({st.fully_missed}/{st.gt})"
             for name, st in p.density_strata.items()
         )
         + ".",
