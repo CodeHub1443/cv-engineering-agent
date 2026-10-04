@@ -2107,3 +2107,9 @@ Q29 restore not executed (awaiting approval). Q30 OPEN.
 **Not changed:** the six historical ledger records; Q30, Q31, Q27 and D-069 (all OPEN); the EXP-20261004-01 measurement protocol; the code.
 
 **Not done:** no GPU run, no writer run against real artifacts, no push, no merge. The only remaining owner action before execution is the approval reference for EXP-20261004-01.
+
+## 2026-10-04 — Verifier fixes for the EXP-20261004-01 dry-run defects (no GPU, no ledger write)
+
+**Did:** Two defects found in the dry-run against the three completed runs were fixed in the verifier. (1) The dataset counts now come from the table row named `all`, selected by name. The verifier never uses the last row, and it requires exactly one `all` row. (2) Prediction boxes are accepted when finite and non-negative, so zero-width and zero-height boxes from ultralytics' clipped low-score detections pass. Negative, non-finite and structurally malformed boxes still fail. Regression tests use the observed table shape (an `all` row followed by a `person` row) and the observed zero-area boxes, and they show that invalid geometry is still refused. ADR-0017 §7 count and rule description corrected.
+
+**Not done:** No GPU run. No ledger write. The three `8f9baaa` runs are not reused as records: their commit is no longer HEAD, so they remain commit-bound to `8f9baaa`. Their directories and logs were not modified. No push, no merge. Q30, Q31, Q27 and D-069 unchanged.

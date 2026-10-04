@@ -195,8 +195,8 @@ def _check_predictions_shape(path: Path, problems: list[str]) -> None:
             not isinstance(bbox, list)
             or len(bbox) != 4
             or not all(_finite(v) for v in bbox)
-            or bbox[2] <= 0
-            or bbox[3] <= 0
+            or bbox[2] < 0
+            or bbox[3] < 0
         ):
             problems.append(f"predictions.json item {index} has a malformed bbox")
             return
@@ -299,10 +299,12 @@ def verify_run(
     text = val_log.read_text(encoding="utf-8", errors="replace")
     if "Traceback (most recent call last)" in text:
         problems.append("val.log contains a Traceback")
-    rows = list(_SUMMARY_ROW.finditer(text))
-    row = rows[-1] if rows else None
+    # The COCO aggregate row is the one named "all". The row named "person" is a per-class row that
+    # ultralytics also prints; it is never used for the dataset counts (it reports 2693 images here).
+    aggregate = [m for m in _SUMMARY_ROW.finditer(text) if m.group(1) == "all"]
+    row = aggregate[0] if len(aggregate) == 1 else None
     if row is None:
-        problems.append("val.log has no class summary row (all/person)")
+        problems.append(f"val.log must contain exactly one 'all' aggregate row (found {len(aggregate)})")
         map50 = map50_95 = float("nan")
         images = instances = -1
     else:

@@ -289,7 +289,19 @@ def test_truncated_predictions_are_refused(tmp_path: Path) -> None:
             "non-finite or out-of-range score",
         ),
         (
-            '[{"image_id": 1, "file_name": "a.jpg", "category_id": 1, "bbox": [0,0,0,4], "score": 0.5}]',
+            '[{"image_id": 1, "file_name": "a.jpg", "category_id": 1, "bbox": [0,0,-1,4], "score": 0.5}]',
+            "malformed bbox",
+        ),
+        (
+            '[{"image_id": 1, "file_name": "a.jpg", "category_id": 1, "bbox": [0,0,4,-2], "score": 0.5}]',
+            "malformed bbox",
+        ),
+        (
+            '[{"image_id": 1, "file_name": "a.jpg", "category_id": 1, "bbox": [NaN,0,4,4], "score": 0.5}]',
+            "malformed bbox",
+        ),
+        (
+            '[{"image_id": 1, "file_name": "a.jpg", "category_id": 1, "bbox": [0,0,4], "score": 0.5}]',
             "malformed bbox",
         ),
     ],
@@ -334,7 +346,7 @@ def test_weights_changed_since_the_run_are_refused(tmp_path: Path) -> None:
 
 def test_val_log_without_summary_row_is_refused(tmp_path: Path) -> None:
     run_dir, coco = make_run(tmp_path, val_log=VAL_LOG.replace("                   all", "                   xxx"))
-    assert "no class summary row" in _problems(run_dir, coco)
+    assert "'all' aggregate row" in _problems(run_dir, coco)
 
 
 def test_val_log_without_speed_line_is_refused(tmp_path: Path) -> None:
@@ -586,3 +598,98 @@ def test_vram_sampler_reports_none_when_no_sample_succeeds(monkeypatch) -> None:
     sampler = wrapper.VramSampler(interval=0.001)
     sampler.start()
     assert sampler.stop() is None
+
+
+# ── Verifier fixes (EXP-20261004-01 review): aggregate row and zero-area boxes ─────
+
+# The exact summary-table shape ultralytics printed for the completed runs: an 'all' aggregate row
+# (5000 images, 10777 instances) followed by a per-class 'person' row (2693 images, same instances).
+REAL_TABLE_LOG = """Ultralytics 8.4.138 Python-3.10.12 torch-2.5.1+cu121 CUDA:0 (NVIDIA GeForce RTX 3060, 12042MiB)
+YOLO11n summary (fused): 100 layers, 2,616,248 parameters, 0 gradients, 6.5 GFLOPs
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95)
+                   all          2          2      0.811       0.65       0.75      0.517
+                person          1          2      0.811       0.65       0.75      0.517
+Speed: 0.4ms preprocess, 5.7ms inference, 0.0ms loss, 0.7ms postprocess per image
+"""
+
+# Zero-area boxes observed in the real predictions files: a clipped box with w or h exactly 0.0,
+# at very low scores, next to ordinary boxes. These are legitimate validator output.
+REAL_ZERO_AREA_PREDICTIONS = [
+    {"image_id": 1, "file_name": f"{STEM_A}.jpg", "category_id": 1, "bbox": [48, 48, 4, 4], "score": 0.9},
+    {"image_id": 1, "file_name": f"{STEM_A}.jpg", "category_id": 1, "bbox": [0, 0, 4, 4], "score": 0.001},
+    {"image_id": 2, "file_name": f"{STEM_B}.jpg", "category_id": 55, "bbox": [185.5, 425.0, 324.5, 0.0], "score": 0.00306},
+    {"image_id": 2, "file_name": f"{STEM_B}.jpg", "category_id": 60, "bbox": [0.0, 129.704, 0.0, 17.693], "score": 0.00315},
+    {"image_id": 2, "file_name": f"{STEM_B}.jpg", "category_id": 1, "bbox": [25, 25, 50, 50], "score": 0.8},
+]
+
+
+def test_aggregate_row_is_selected_by_name_not_by_position(tmp_path: Path) -> None:
+    # 'all' is first and 'person' last. The old code took the last row (2693 images) and refused.
+    run_dir, coco = make_run(tmp_path, val_log=REAL_TABLE_LOG)
+    run = _verify(run_dir, coco)
+    assert run.images == 2 and run.gt_persons == 2
+    assert run.map50 == pytest.approx(0.75) and run.map50_95 == pytest.approx(0.517)
+
+
+def test_person_row_after_all_row_does_not_change_the_counts(tmp_path: Path) -> None:
+    # A person row with a different image count must not be the basis for the dataset check.
+    run_dir, coco = make_run(tmp_path, val_log=REAL_TABLE_LOG.replace("person          1", "person       2693"))
+    assert _verify(run_dir, coco).images == 2
+
+
+def test_wrong_all_row_counts_are_still_refused(tmp_path: Path) -> None:
+    # The aggregate itself must report the dataset: 'all' with 3 images is refused even though the
+    # person row is fine.
+    run_dir, coco = make_run(tmp_path, val_log=REAL_TABLE_LOG.replace("all          2", "all          3"))
+    assert "dataset expects 2/2" in _problems(run_dir, coco)
+
+
+def test_log_with_only_a_person_row_is_refused(tmp_path: Path) -> None:
+    only_person = "\n".join(line for line in REAL_TABLE_LOG.splitlines() if "all" not in line.split())
+    run_dir, coco = make_run(tmp_path, val_log=only_person)
+    assert "exactly one 'all' aggregate row (found 0)" in _problems(run_dir, coco)
+
+
+def test_log_with_two_all_rows_is_refused(tmp_path: Path) -> None:
+    doubled = REAL_TABLE_LOG.replace("person          1", "all          2")
+    run_dir, coco = make_run(tmp_path, val_log=doubled)
+    assert "exactly one 'all' aggregate row (found 2)" in _problems(run_dir, coco)
+
+
+def test_real_zero_area_boxes_are_accepted_end_to_end(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, val_log=REAL_TABLE_LOG, predictions=json.dumps(REAL_ZERO_AREA_PREDICTIONS))
+    run = _verify(run_dir, coco)
+    record = build_record(run, exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
+    assert record.status == "completed"
+
+
+@pytest.mark.parametrize(
+    "bbox",
+    [[0.0, 0.0, 0.0, 0.0], [5.0, 5.0, 0.0, 3.2], [5.0, 5.0, 2.0, 0.0]],
+)
+def test_zero_width_height_and_zero_area_boxes_are_accepted(tmp_path: Path, bbox) -> None:
+    preds = [dict(p) for p in _predictions()] + [
+        {"image_id": 1, "file_name": f"{STEM_A}.jpg", "category_id": 1, "bbox": bbox, "score": 0.002}
+    ]
+    run_dir, coco = make_run(tmp_path, predictions=json.dumps(preds))
+    assert _verify(run_dir, coco).gt_persons == 2
+
+
+@pytest.mark.parametrize(
+    "bbox",
+    [
+        [0.0, 0.0, -0.5, 4.0],  # negative width
+        [0.0, 0.0, 4.0, -0.5],  # negative height
+        [0.0, 0.0, float("nan"), 4.0],  # non-finite
+        [0.0, 0.0, float("inf"), 4.0],  # non-finite
+        [0.0, 0.0, 4.0],  # wrong length
+        [0.0, 0.0, "4", 4.0],  # wrong type
+        [None, 0.0, 4.0, 4.0],  # wrong type
+    ],
+)
+def test_invalid_geometry_is_still_refused(tmp_path: Path, bbox) -> None:
+    preds = [dict(p) for p in _predictions()] + [
+        {"image_id": 1, "file_name": f"{STEM_A}.jpg", "category_id": 1, "bbox": bbox, "score": 0.002}
+    ]
+    run_dir, coco = make_run(tmp_path, predictions=json.dumps(preds))
+    assert "malformed bbox" in _problems(run_dir, coco)
