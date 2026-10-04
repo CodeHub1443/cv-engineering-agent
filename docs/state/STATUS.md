@@ -3,45 +3,43 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-10-04 · **Phase:** 5d — ADR-0017 accepted (D-073); owner-review blocking changes implemented;
-**no GPU run; recording writer not run against real artifacts** · **Health:** green on repository
-tests; amber on experiment readiness
+**Updated:** 2026-10-04 · **Phase:** 5d — EXP-20261004-01 series completed and persisted
+(measurement only); documentation reconciled · **Health:** green on repository tests; open
+decisions remain (see below)
 
 ## Where we are
 
 Branch `feature/claude/experiment-provenance-recovery` (worktree `/home/dev/cv-engineering-agent-sweep`).
 Committed on the branch. **Not pushed, not merged.**
 
-**Done (six blocking changes from the ADR-0017 review):**
-1. `quantize=16` replaces the deprecated `half=True` in the measured wrapper. `run.json` records the
-   exact requested-precision label.
-2. Historical precision corrected in EXPERIMENTS.md: EXP-20260930-01 and the sweep rows ran FP32, so
-   EXP-20261004-01 is FP16-requested and NOT like-for-like. Historical rows are unedited.
-3. `--approval-ref` is mandatory at GPU-run time, recorded in `run.json`, and the writer requires all
-   three runs to carry the same reference.
-4. Peak VRAM (nvidia-smi polling) and peak RAM (`getrusage`, Linux KiB to MiB) are required. `gpu_hours`
-   is derived from wall time and labelled as derived.
-5. ADR-0017 §4a states the operator-run exception to the ADR-0013/ADR-0009 JobExecutor path, limited to
-   this series.
-6. ADR-0017 §3.2 states that verification is all-or-nothing and ledger writes are sequential, not transactional.
+**Done:**
+- **EXP-20261004-01 series persisted** (measurement only; no pass/fail decision):
+  - `EXP-20261004-01` (imgsz 640, baseline SELF), `EXP-20261004-02` (960), `EXP-20261004-03` (1280, both baseline `EXP-20261004-01`).
+  - YOLO11n / COCO val2017 / GPU 0 / batch 1 / conf 0.001 / `quantize=16` (FP16 requested, not measured).
+  - Approval `EXP-20261004-01-OWNER-20261004`; commit `ab686f3`.
+  - mAP@0.5:0.95 = 0.517 / 0.532 / 0.489.
+  - Details and exact values: EXPERIMENTS.md, "EXP-20261004-01 series — completed".
+- **Attempt-1 evidence archived**, not ledgered: `/home/dev/cv-engineering-evidence/EXP-20261004-01/attempt1-commit-8f9baaa/`. 45/45 checksums OK, read-only.
+- **Ledger:** nine records. The six historical records are unchanged.
+- **ADR-0017:** Accepted (D-073).
 
-**Validation:** full pytest 1713 passed, 4 skipped, 0 failed (before a final typing-only fix; the
-record tests and mypy re-checked after it). `ruff check .` clean. `mypy cv_agent` clean (81 files).
+**Interpretation (descriptive only):** 960 has the highest mAP@0.5:0.95 of the three; 1280 is lower.
+Small-object AP rises with size (0.356 → 0.459 → 0.483). Medium AP is non-monotonic. Large AP falls
+monotonically. Throughput falls with size. **No production winner is declared, and no success threshold
+is set.**
 
-## Next (owner)
+## Open (owner)
 
-1. ~~Accept ADR-0017~~ **Done 2026-10-04 (D-073):** ADR-0017 is Accepted.
-2. **Approve the GPU run** for EXP-20261004-01 and supply the approval id as `--approval-ref`. This is the only remaining owner action before execution.
-3. Dry-run the writer on the three real run directories before writing anything.
+1. **D-069** — whether any AP change should drive a decision. Still OPEN.
+2. **Q30** — operating point and precision target. Still OPEN. Needed before any production choice.
+3. **Q31** — repository versus skill ownership of the trt-perf-analysis contract. Still OPEN.
+4. **Q27** — official size-stratified mAP needs `instances_val2017.json`. Still OPEN.
 
 ## Blockers
 
-- The recording writer has only been tested on synthetic runs. The first real run is the first end-to-end check.
-- Historical records keep their original precision labels; the correction lives in EXPERIMENTS.md only.
-- Q30, Q31, Q27 and D-069 remain OPEN. None blocks the measurement.
+None for the repository. Any production or optimization decision waits on Q30 and D-069.
 
 ## Do not start yet
 
-EXP-20261004-01 execution before the owner's approval reference (ADR-0017 is accepted). Training. Model swaps (Q25).
-NMS or crowd experiments. Any precision floor, recall target, or operating point (Q30). TensorRT,
-DeepStream, Model Optimizer. Pushing or merging this branch without owner review.
+New GPU experiments without an owner approval reference. Training. Model swaps (Q25). NMS or crowd
+experiments. TensorRT, DeepStream, Model Optimizer. Pushing or merging this branch without owner review.

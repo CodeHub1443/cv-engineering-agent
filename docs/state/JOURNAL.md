@@ -2113,3 +2113,25 @@ Q29 restore not executed (awaiting approval). Q30 OPEN.
 **Did:** Two defects found in the dry-run against the three completed runs were fixed in the verifier. (1) The dataset counts now come from the table row named `all`, selected by name. The verifier never uses the last row, and it requires exactly one `all` row. (2) Prediction boxes are accepted when finite and non-negative, so zero-width and zero-height boxes from ultralytics' clipped low-score detections pass. Negative, non-finite and structurally malformed boxes still fail. Regression tests use the observed table shape (an `all` row followed by a `person` row) and the observed zero-area boxes, and they show that invalid geometry is still refused. ADR-0017 §7 count and rule description corrected.
 
 **Not done:** No GPU run. No ledger write. The three `8f9baaa` runs are not reused as records: their commit is no longer HEAD, so they remain commit-bound to `8f9baaa`. Their directories and logs were not modified. No push, no merge. Q30, Q31, Q27 and D-069 unchanged.
+
+## 2026-10-04 — EXP-20261004-01 series completed and persisted; documentation reconciled (measurement only)
+
+**Did:** Ran the three measured `yolo val` evaluations (imgsz 640, 960, 1280) under approval
+`EXP-20261004-01-OWNER-20261004`, from commit `ab686f3`, with the protocol unchanged. All exited 0. Ran the
+recording writer in dry-run mode, which verified all three runs, then ran it without `--dry-run`. It persisted
+`EXP-20261004-01` (640, baseline SELF), `EXP-20261004-02` (960) and `EXP-20261004-03` (1280), with baseline
+`EXP-20261004-01`. The ledger went from six records to nine. Its SHA256 changed from
+`d7ff167e…` to `0d910b01…`. Verified: all six historical rows unchanged column-by-column; the three new
+records match the reviewed dry-run field by field; integrity check ok.
+
+**Recorded:** EXPERIMENTS.md gets the three rollup rows (replacing the proposed row) and a section with the
+exact ledger values, a descriptive reading and the three separate populations. STATUS is rewritten. D-069
+and Q30, Q31, Q27 stay OPEN.
+
+**Interpretation (descriptive, no decision):** mAP@0.5:0.95 is 0.517 / 0.532 / 0.489, so 960 is highest and
+1280 is lower. Small-object AP rises 0.356 → 0.459 → 0.483. Medium AP is non-monotonic
+(0.726 → 0.765 → 0.748). Large AP falls monotonically (0.941 → 0.928 → 0.874). Throughput falls with size.
+No production winner, no success threshold, no optimization decision.
+
+**Not done:** no GPU run beyond the three approved measurements; no further writes to the ledger; attempt-1
+archive not modified; no push, no merge.

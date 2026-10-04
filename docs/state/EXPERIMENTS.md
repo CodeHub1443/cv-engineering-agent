@@ -157,7 +157,73 @@ The table below is a condensed rollup view for scanning; full row records live i
 | EXP-20261001-02 | conf=0.15 — same question | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.483** ⚠ conf-truncated | 0.651 (ultralytics) · 0.733 at conf=0.15 (fixed-threshold matcher, P=0.642) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 668 MiB peak | N/A | — | as above; intermediate point on the same trade-off curve |
 | EXP-20261001-03 | conf=0.25 — control, reproduce baseline | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.459** (identical to baseline) | 0.661 (identical to baseline) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 615 MiB peak | N/A | — | **baseline reproduced exactly** (P, R, mAP50, mAP50-95 all equal); harness deterministic at this config |
 | EXP-20261001-04 | conf=0.50 — does raising threshold trade recall for precision? | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.390** ⚠ conf-truncated | 0.521 (ultralytics) · 0.521 at conf=0.50 (fixed-threshold matcher, P=0.927) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 614 MiB peak | N/A | — | yes, trade-off confirmed: precision 0.927 at recall 0.521; small-object recall falls to 0.104 |
-| EXP-20261004-01 | (PROPOSED, not run; measurement-only, no pass/fail criteria) imgsz 640→960→1280 at the Q28 protocol (conf=0.001): report threshold-free AP@0.5 by size, mAP, and reference P/R | 640 control at conf=0.001 (new; not EXP-20261001-03) | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **proposed** | — | — | — | — | — | — | awaiting owner approval and §10 prerequisites — see [proposal](../experiments/EXP-20261004-01-proposal.md); not yet in SQLite |
+| EXP-20261004-01 | Measurement only (no pass/fail, D-069): imgsz 640, control of the series, Q28 protocol conf=0.001 | SELF | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 requested (quantize=16); NOT like-for-like with FP32 history | RTX 3060 12GB | **0.517** | ref. only, P 0.777 / R 0.670 @0.25 | 84.0 | 6.9 e2e / 5.8 inf | 748 MiB peak / 2190 MiB RAM | N/A | 0.0165 (derived) | measured; no decision |
+| EXP-20261004-02 | Measurement only (no pass/fail, D-069): imgsz 960 | EXP-20261004-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 requested (quantize=16); NOT like-for-like with FP32 history | RTX 3060 12GB | **0.532** | ref. only, P 0.727 / R 0.733 @0.25 | 78.6 | 7.6 e2e / 6.1 inf | 797 MiB peak / 2267 MiB RAM | N/A | 0.0177 (derived) | measured; no decision |
+| EXP-20261004-03 | Measurement only (no pass/fail, D-069): imgsz 1280 | EXP-20261004-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 requested (quantize=16); NOT like-for-like with FP32 history | RTX 3060 12GB | **0.489** | ref. only, P 0.661 / R 0.741 @0.25 | 71.6 | 8.5 e2e / 6.4 inf | 772 MiB peak / 2357 MiB RAM | N/A | 0.0194 (derived) | measured; no decision |
+
+### EXP-20261004-01 series — completed, measurement only (2026-10-04)
+
+**Status: completed and persisted. Measurement only. There is NO pass/fail criterion, no decision, and no
+production winner.** The series answers "how do these metrics change with image size?" and nothing more
+(proposal §2, D-069). Q30 (operating point), Q31 (skill versioning) and Q27 (official size-stratified mAP)
+remain OPEN.
+
+- **Protocol (identical across the three, only imgsz varies):** YOLO11n, COCO val2017 persons (5000 images,
+  10777 GT persons), GPU 0 (RTX 3060 12GB, driver 535.309.01), batch 1, conf 0.001 (Q28, full PR curve),
+  `quantize=16` requested (ultralytics does not log actual inference precision).
+- **Commit:** `ab686f3` for all three. **Approval reference:** `EXP-20261004-01-OWNER-20261004` for all three.
+- **Ledger:** three records, `EXP-20261004-01` (640, baseline `SELF`), `EXP-20261004-02` (960, baseline
+  `EXP-20261004-01`), `EXP-20261004-03` (1280, baseline `EXP-20261004-01`). Status `completed`.
+
+Measured values, exactly as persisted in the ledger (full precision):
+
+| ID | imgsz | mAP@0.5 | mAP@0.5:0.95 | AP@0.5 small | AP@0.5 medium | AP@0.5 large |
+|---|---|---|---|---|---|---|
+| EXP-20261004-01 | 640 | 0.75 | 0.517 | 0.3556127289636236 | 0.7258519584743843 | 0.9410025862808117 |
+| EXP-20261004-02 | 960 | 0.779 | 0.532 | 0.4589332098392696 | 0.7653011604353135 | 0.9279873500830851 |
+| EXP-20261004-03 | 1280 | 0.75 | 0.489 | 0.4828370936880764 | 0.7474949410527787 | 0.8736214232519381 |
+
+System metrics, as recorded (memory in MiB; `gpu_hours` is derived from wall time, not a separate meter):
+
+| ID | FPS (e2e) | latency e2e / inference (ms) | VRAM peak | RAM peak | gpu_hours (derived) | power | train_time | flops |
+|---|---|---|---|---|---|---|---|---|
+| EXP-20261004-01 | 84.0039649871474 | 6.9 / 5.8 | 748.0 | 2190.2 | 0.01653361111111111 | not measured | not measured | not recorded |
+| EXP-20261004-02 | 78.59040254004181 | 7.6 / 6.1 | 797.0 | 2266.5 | 0.0176725 | not measured | not measured | not recorded |
+| EXP-20261004-03 | 71.55839880926824 | 8.5 / 6.4 | 772.0 | 2356.6 | 0.01940916666666667 | not measured | not measured | not recorded |
+
+Fixed-threshold P/R at conf 0.25 are **reference only** (`fixed_thr@0.25/*`). They are not mAP, not an
+operating point, and not part of any decision. Recorded values: precision 0.7768 / 0.7273 / 0.6607;
+recall 0.6701 / 0.7329 / 0.7412; recall on small persons 0.2700 / 0.4232 / 0.4937.
+
+**Descriptive reading (no decision drawn):**
+
+- mAP@0.5:0.95 is 0.517 at 640, 0.532 at 960, and 0.489 at 1280. It rises, then falls. 960 is the highest
+  of the three on this metric. This is a measured difference, not a winner: the series has one model, one
+  dataset, one run per size, and no uncertainty estimate.
+- AP@0.5 for small persons rises with image size: 0.356 → 0.459 → 0.483. The gain from 960 to 1280 is smaller.
+- AP@0.5 for medium persons is non-monotonic: 0.726 → 0.765 → 0.748.
+- AP@0.5 for large persons falls monotonically: 0.941 → 0.928 → 0.874.
+- mAP@0.5 is 0.750 / 0.779 / 0.750, also non-monotonic.
+- Throughput falls monotonically with image size (84.0 → 78.6 → 71.6 FPS), as expected.
+
+Not decided here: which size, if any, should be used in production. That depends on an operating point and a
+precision target that are not defined (Q30 OPEN), and on the target hardware (Q25). D-069 stays OPEN, so
+no success threshold is set and no optimization follows from these numbers.
+
+**Three separate populations. Do not mix them.**
+
+1. **The three persisted attempt-2 ledger records** (`EXP-20261004-01..03`, commit `ab686f3`, the table above).
+   These are the evidence for this series.
+2. **The attempt-1 measurements under commit `8f9baaa`.** These were run, verified after the fact, and then
+   refused by the writer because of two verifier defects fixed in `ab686f3`. They are **not** ledger records
+   and cannot become ledger records, because ADR-0016 binds a record to the commit it ran from. They are
+   archived outside the repository at `/home/dev/cv-engineering-evidence/EXP-20261004-01/attempt1-commit-8f9baaa/`
+   (45 files, read-only). `MANIFEST.sha256` reports 45/45 OK. Their predictions files are byte-identical to
+   attempt 2 for each size, so the measurements reproduce; only the logs and run metadata differ, as expected.
+   The rerun note is `RERUN-NOTE.md` in the same archive.
+3. **The historical FP32 records** (`EXP-20260930-01`, and the `EXP-20261001-01..04` sweep rows). These ran
+   FP32 because no precision argument was supplied, and their mAP was computed at conf 0.25 (truncated protocol).
+   They are not like-for-like with this series. See the precision correction above.
 
 ### Sweep result — EXP-20261001-01..04 (completed 2026-10-02)
 

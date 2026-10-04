@@ -1,6 +1,6 @@
-# EXP-20261004-01 — Inference resolution: measurement-only (PROPOSED, NOT RUN)
+# EXP-20261004-01 — Inference resolution: measurement-only (EXECUTED 2026-10-04; see EXPERIMENTS.md)
 
-**Status:** proposed, not executed. **Revised:** 2026-10-04 (second revision). No pass/fail criteria are defined in this revision. See §7.
+**Status:** executed 2026-10-04 under approval `EXP-20261004-01-OWNER-20261004` from commit `ab686f3`; three records persisted (`EXP-20261004-01..03`). Measurement only; no pass/fail. Results: EXPERIMENTS.md.
 **Approval:** required before running. A three-setting grid is a sweep, which `docs/APPROVALS.md` gates (⛔ always).
 **Baseline:** EXP-20260930-01, legacy truncated protocol, reference only. **Control:** the 640 run in §3, new, Q28 protocol.
 **Depends on:** ADR-0015 (diagnosis; branch `feature/claude/diagnosis-baseline`, PR #71, not on this branch).
