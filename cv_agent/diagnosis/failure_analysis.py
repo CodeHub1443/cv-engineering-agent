@@ -764,9 +764,17 @@ def render_report(analyses: dict[str, FailureAnalysis], *, primary: str) -> str:
         f"- Small boxes account for {small.missed_at_reference} of {total_missed} misses at 0.25 "
         f"({small.missed_at_reference / total_missed:.1%}), from {small.gt} of {p.gt_total} GT "
         f"({small.gt / p.gt_total:.1%}).",
-        "- Fully missed persons are concentrated in small boxes and dense images: "
-        f"small {p.size_strata['small'].fully_missed} of {p.size_strata['small'].gt}, "
-        f"dense {p.density_strata['dense'].fully_missed} of {p.density_strata['dense'].gt}.",
+        "- Fully missed rate by box-area bin (share of that bin's GT): "
+        + ", ".join(
+            f"{name} {st.fully_missed / st.gt:.1%} ({st.fully_missed}/{st.gt})"
+            for name, st in p.size_strata.items()
+        )
+        + ". By density: "
+        + ", ".join(
+            f"{name} {st.fully_missed / st.gt:.1%} ({st.fully_missed}/{st.gt})"
+            for name, st in p.density_strata.items()
+        )
+        + ".",
     ]
     if {"EXP-20261004-01", "EXP-20261004-04"} <= set(analyses):
         a, b = analyses["EXP-20261004-01"], analyses["EXP-20261004-04"]
@@ -774,7 +782,8 @@ def render_report(analyses: dict[str, FailureAnalysis], *, primary: str) -> str:
             f"- Precision check, 640 FP16 vs 640 FP32 (one run each): fully missed {a.fully_missed.count} vs "
             f"{b.fully_missed.count}; missed at 0.25 {a.missed_at_reference.count} vs {b.missed_at_reference.count}; "
             f"unmatched predictions at 0.50 {a.unmatched_pred_050.count} vs {b.unmatched_pred_050.count}. "
-            "Differences of this size are within the run-to-run scale and are not a precision finding."
+            "One run per condition: no run-to-run variance is estimated, so this comparison cannot show a precision "
+            "effect either way."
         )
     if {"EXP-20261004-01", "EXP-20261004-02", "EXP-20261004-03"} <= set(analyses):
         r = [analyses[k] for k in ("EXP-20261004-01", "EXP-20261004-02", "EXP-20261004-03")]
