@@ -352,3 +352,9 @@ def test_cli_module_is_importable_and_has_no_ledger_write() -> None:
     for write_statement in ("INSERT INTO", "UPDATE EXPERIMENTS", "DELETE FROM"):
         assert write_statement not in source.upper()
     assert "ExperimentLedger" not in source
+
+
+def test_localization_categories_partition_every_gt_box(scenario: fa.RunOutcome) -> None:
+    loc = scenario.analysis.localization
+    assert sum(iv.count for iv in loc.values()) == scenario.analysis.gt_total
+    assert loc["matched_at_reference"].count + loc["competed"].count + loc["near_miss"].count + loc["no_overlap"].count == 4

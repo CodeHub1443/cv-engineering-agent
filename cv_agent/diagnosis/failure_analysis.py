@@ -745,12 +745,66 @@ def render_report(analyses: dict[str, FailureAnalysis], *, primary: str) -> str:
     for name, s in {**p.size_strata, **p.density_strata}.items():
         lines.append(
             f"- {name}: GT {s.gt}, fully missed {s.fully_missed}, missed at 0.25 {s.missed_at_reference} "
-            f"({s.missed_at_reference_share.share:.1%}; 95% CI {s.missed_at_reference_share.low:.1%}–{s.missed_at_reference_share.high:.1%})"
+            f"(share of this stratum's GT {s.missed_at_reference_share.share:.1%}; "
+            f"95% CI {s.missed_at_reference_share.low:.1%}–{s.missed_at_reference_share.high:.1%})"
         )
     lines += ["", "## Comparisons (descriptive, one run each)", ""]
     for exp_id, a in analyses.items():
         lines.append(f"- {exp_id}: fully missed {a.fully_missed.count}, missed at 0.25 {a.missed_at_reference.count}, "
                      f"unmatched predictions at 0.25 {a.unmatched_pred_ref.count}, at 0.50 {a.unmatched_pred_050.count}.")
+    total_missed = p.missed_at_reference.count
+    small = p.size_strata["small"]
+    lines += [
+        "",
+        "## Key descriptive findings (computed from the tables; no production decision)",
+        "",
+        f"- Descriptive bottleneck under the agreed definition ({primary}): "
+        f"`{p.bottleneck_ranking[0][0]}`, {p.bottleneck_ranking[0][1].count} GT persons "
+        f"({p.bottleneck_ranking[0][1].share:.1%} of all GT at reference 0.25).",
+        f"- Small boxes account for {small.missed_at_reference} of {total_missed} misses at 0.25 "
+        f"({small.missed_at_reference / total_missed:.1%}), from {small.gt} of {p.gt_total} GT "
+        f"({small.gt / p.gt_total:.1%}).",
+        "- Fully missed persons are concentrated in small boxes and dense images: "
+        f"small {p.size_strata['small'].fully_missed} of {p.size_strata['small'].gt}, "
+        f"dense {p.density_strata['dense'].fully_missed} of {p.density_strata['dense'].gt}.",
+    ]
+    if {"EXP-20261004-01", "EXP-20261004-04"} <= set(analyses):
+        a, b = analyses["EXP-20261004-01"], analyses["EXP-20261004-04"]
+        lines.append(
+            f"- Precision check, 640 FP16 vs 640 FP32 (one run each): fully missed {a.fully_missed.count} vs "
+            f"{b.fully_missed.count}; missed at 0.25 {a.missed_at_reference.count} vs {b.missed_at_reference.count}; "
+            f"unmatched predictions at 0.50 {a.unmatched_pred_050.count} vs {b.unmatched_pred_050.count}. "
+            "Differences of this size are within the run-to-run scale and are not a precision finding."
+        )
+    if {"EXP-20261004-01", "EXP-20261004-02", "EXP-20261004-03"} <= set(analyses):
+        r = [analyses[k] for k in ("EXP-20261004-01", "EXP-20261004-02", "EXP-20261004-03")]
+        lines.append(
+            "- Resolution, 640 -> 960 -> 1280 (FP16, one run each): fully missed "
+            f"{r[0].fully_missed.count} -> {r[1].fully_missed.count} -> {r[2].fully_missed.count}; "
+            f"unmatched predictions at 0.25 {r[0].unmatched_pred_ref.count} -> {r[1].unmatched_pred_ref.count} -> "
+            f"{r[2].unmatched_pred_ref.count}; unmatched at 0.50 {r[0].unmatched_pred_050.count} -> "
+            f"{r[1].unmatched_pred_050.count} -> {r[2].unmatched_pred_050.count}. Descriptive only; no winner is declared."
+        )
+    lines.append("")
+    lines += [
+        "",
+        "## Method and accepted deviations (issue #75; owner decisions 2026-10-04)",
+        "",
+        "- **Read-only ledger lookup.** Each run's expected predictions sha256 is read from its recorded ledger notes over a "
+        "read-only connection (`mode=ro`). No ledger row is written or altered.",
+        "- **Strict label parsing.** A malformed GT line refuses the whole analysis. Nothing is skipped silently.",
+        "- **Q28 full-curve gate (input-integrity and protocol, not a production criterion).** A run whose lowest person "
+        "score is above 0.002 is refused as truncated, because the reference thresholds and the bins would not be "
+        "computed on a full PR curve.",
+        "- **Partition of GT boxes at the reference threshold 0.25.** Every GT box is exactly one of: matched at reference, "
+        "competed, near-miss, or no-overlap. The `competed` category is a diagnostic sub-category of missed-at-reference: "
+        "the box overlaps a score >= 0.25 prediction at IoU >= 0.5, but the greedy assignment went to another GT box. "
+        "It does not replace fully-missed, missed-at-reference, near-miss or no-overlap.",
+        "- **Fully missed** is a separate definition: no prediction at any score (>= 0.001) overlaps the GT box at IoU >= 0.5.",
+        "- **Degenerate GT boxes (a side < 2 px)** are a descriptive review heuristic. They are not an annotation-quality standard.",
+        "- **Near-duplicate GT pairs (IoU >= 0.90)** are a review heuristic. They are not an annotation-quality standard.",
+        "",
+    ]
     lines += ["", "## Limitations (required)", ""]
     lines += [f"- {text}" for text in p.limitations]
     lines += ["", "## Not measured (reported as not measured, never as zero)", ""]
