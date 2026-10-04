@@ -1,8 +1,8 @@
 # ADR-0015 — Detection Diagnosis: Evidence Collection from Evaluation Artifacts
 
-**Status:** accepted  
+**Status:** accepted; amended 2026-10-04 (§9, owner acceptance; implementation under issue #75)  
 **Date:** 2026-09-30  
-**Issue:** #70  
+**Issue:** #70 (original evidence collector); #75 (IoU-matched failure analysis, §9)  
 **Supersedes:** —  
 **Canon:** `[P§29.1]`, `[P§29.3]`, `[P§11]`, `[P§34]`
 
@@ -148,6 +148,10 @@ Prediction sizes use pixel area from `predictions.json` bbox `[x, y, w, h]`:
 - medium: 1024 ≤ w×h < 9216 (32²–96²)
 - large: w×h ≥ 9216 (≥ 96²)
 
+These pixel-area prediction bins are used by `DetectionEvidence` only, and that is unchanged. The
+IoU-matched failure analysis in §9 does **not** use them. It uses normalized box-area bins for both GT
+and predictions (§9.5).
+
 ## 4. What this ADR does NOT change
 
 - `ExperimentRecord` schema — diagnosis results are stored in `notes` or in a
@@ -162,7 +166,7 @@ Prediction sizes use pixel area from `predictions.json` bbox `[x, y, w, h]`:
 
 ## 5. Limitations documented at this boundary
 
-1. **No IoU-level TP/FP/FN breakdown**: requires image dimensions to denormalize GT
+1. **[Superseded by §8 item 2 and §9, 2026-10-04.]** ~~No IoU-level TP/FP/FN breakdown~~: requires image dimensions to denormalize GT
    or `instances_val2017.json`. Both are absent. TP/FP/FN ratios are derived
    approximations from the reported precision/recall, not measured directly per-prediction.
 
@@ -253,3 +257,92 @@ Open: Q27 (official size-stratified mAP, which needs `instances_val2017.json`) r
 threshold-free per-size AP instrument on the sweep-results branch is an approximation (predicted-box
 area, greedy matching, no COCO area-range prioritisation). It is not the COCO evaluator, and it does
 not close Q27 for any published claim.
+
+## 9. IoU-matched failure analysis (amendment, 2026-10-04)
+
+**Status:** accepted by the owner on 2026-10-04. Implementation is tracked in issue #75. It is not yet
+implemented. Issue #70 and this ADR's §1–§8 are unchanged except where marked superseded above.
+
+### 9.1 Responsibility `[P§34]`
+
+`cv_agent/diagnosis/` may read existing prediction artifacts and YOLO label files and produce a
+read-only, deterministic categorization of ground-truth persons and predictions at named **descriptive**
+thresholds. It discovers which error categories are measured and in what share. It does not decide
+anything: no acceptance, no operating point, no optimization choice.
+
+### 9.2 Dependency (one-way)
+
+`cv_agent/diagnosis/` may import `cv_agent.experiments.detection_metrics` for the matching primitives
+(`iou`, `match_predictions`, `load_person_gt`, `load_person_predictions`, `jpeg_size`). The dependency is
+**one-way only**. The experiments layer must not import `cv_agent.diagnosis`. §2's layer boundaries otherwise
+stand.
+
+### 9.3 Schema
+
+A new frozen dataclass, `FailureAnalysis`, in `cv_agent/diagnosis/models.py`, fail-closed like
+`DetectionEvidence`. It holds measured facts only, with provenance (predictions `sha256`, labels directory,
+image-list `sha256`, code commit). **`DetectionEvidence` and `collect_detection_evidence()` are not modified.**
+The field list is set in the implementation under issue #75 and is bounded by §3.2's "measured facts only" rule.
+
+### 9.4 Matching
+
+For each image in the val2017 image list: person predictions are sorted by score, descending. Matching is greedy and
+one-to-one, at IoU ≥ 0.5, via `detection_metrics.match_predictions`. Coordinates are in pixels. GT is denormalized using
+the image size. This is the same matching rule as the existing fixed-threshold analysis. It is not the COCO evaluator.
+
+### 9.5 Bins: normalized box-area bins
+
+For both GT and predictions, `area = (w·h) / (W·H)`, where `W, H` are the image dimensions read from the image
+header. GT uses the label's `w, h`. Predictions use the bbox `w, h` in pixels. The cut-offs are the §3.4 GT
+cut-offs: small < 0.0025, medium < 0.023, large ≥ 0.023. Each bin is labelled **"box-area bin"**. This matches
+the existing threshold-free AP instrument (`detection_metrics.stratum_ap50`): a matched prediction takes the bin of the
+GT it matches, and an unmatched prediction takes the bin of its own normalized area. The §8 item 7 phrase
+"predicted-box area" should be read this way.
+
+### 9.6 Limitations (required wording in every output)
+
+- **Box-area bins are not COCO's official size categories.** COCO's categories use absolute annotation area in
+  pixels (32² and 96²). The §3.4 normalized cut-offs approximate those for roughly 640×480 images only.
+- **Official COCO size-stratified mAP is Q27.** It needs `instances_val2017.json`, which is not downloaded. Q27
+  remains open. Nothing here closes it or supports a published claim.
+- **Crowd (`iscrowd`) annotations cannot be identified** without `instances_val2017.json`. Crowd-related error is
+  reported as **not measured**, never as zero.
+
+### 9.7 Descriptive thresholds (no production criteria)
+
+- IoU **0.30**: near-miss localization bin. A missed GT whose best IoU with a score ≥ 0.25 prediction is in
+  [0.30, 0.50) is a near-miss. Below 0.30 is "no overlap".
+- Score **0.50**: high-confidence false-positive review set.
+- Score **0.25**: the existing reference threshold of the fixed-threshold measurement.
+
+These are **descriptive analysis parameters**. They are not operating points, precision floors, pass/fail
+thresholds, or acceptance criteria. **Q30 (operating point and precision floor) and D-069 remain OPEN.** Nothing
+in this section sets either.
+
+### 9.8 Input integrity and refusal
+
+- Refuse the analysis if any prediction artifact's `sha256` differs from its recorded provenance (the
+  `predictions_json` hash in the run's ledger notes).
+- **Refuse the analysis if any image's dimensions are missing or unreadable.** Such an image is never skipped,
+  because its GT cannot be denormalized.
+- Iterate over the 5000-image `val2017.txt` list. Images without a label file (the 48 backgrounds) count as zero GT.
+
+### 9.9 Outputs
+
+- **State-root artifacts** under `.cv_agent/analysis/failure-<series>/`, outside the repository and not committed:
+  `summary.json` (counts and shares, with input hashes and the code commit), per-GT and per-high-confidence-FP CSV,
+  the annotation-review sample, and crops.
+- **Annotation-review sample:** 50 items per candidate class (high-confidence FP at ≥ 0.50; near-duplicate GT pairs
+  at IoU ≥ 0.90; degenerate GT boxes). Drawn from the 640 FP16 run with a fixed seed, `random.Random(20261004)`.
+  Human review results are recorded separately, and nothing assigns them automatically. Agent labels are preliminary only.
+- **Committed descriptive report:** `docs/experiments/FAILURE-ANALYSIS-EXP-20261004.md`. Every result in it is marked
+  descriptive, and it repeats the §9.6 limitations.
+
+### 9.10 Ledger
+
+**No ExperimentLedger rows.** The analysis is evidence, not a measured run, and it is not a decision. §4 is unchanged.
+
+### 9.11 Not measured by this analysis
+
+Occlusion, crowd, blur, illumination, camera angle, compression, class confusion (the runs are person-only), domain
+shift, and temporal instability. Each is reported as **not measured**, never as zero.
