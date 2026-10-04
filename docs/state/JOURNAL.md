@@ -2067,3 +2067,19 @@ Q29 restore not executed (awaiting approval). Q30 OPEN.
 **Learned:** the earlier "four repository failures" were test expectations against a newer installed skill, plus one fixture missing its profile. The default ledger path was a silent-empty-ledger hazard in every worktree.
 
 **Not done:** no push, no merge, no EXP-20261004-01 run. A record-writing script for the experiment does not exist yet, so its prediction files would not yet be ledger evidence (proposal §10).
+
+## 2026-10-04 — Record-writing path for EXP-20261004-01 (ADR-0017, proposed); no GPU run
+
+**Did:**
+- **Shared metrics** moved from `scripts/run_fixed_threshold_strata.py` to `cv_agent/experiments/detection_metrics.py`. The script is a thin CLI. Its 23 existing tests pass unchanged.
+- **Verifier and record builder** `cv_agent/experiments/evaluation_records.py`: `verify_run` checks run.json (exit 0, protocol, commit = HEAD, hashes, GPU identity), val.log (summary row, Speed line, params line, no Traceback), predictions.json (shape, full curve), and dataset counts. It returns a `VerifiedRun`, or raises `RecordError` listing every problem. `build_record` writes only measured values. `preflight_new_ids` and `write_records` enforce all-or-nothing writes.
+- **Wrapper** `scripts/run_yolo_val_measured.py --imgsz {640,960,1280}`: refuses a dirty tree and any existing run directory. It builds argv through the binding's `build_command`, adds `half=True` and `exist_ok=True`, tees the log, and writes run.json (exit code, timing, hashes, nvidia-smi).
+- **Writer** `scripts/record_evaluation_runs.py --approval-ref ... --run 640=... --run 960=... --run 1280=... [--dry-run]`: verifies all three before opening the ledger, and uses the owner's id mapping (-01 SELF control, -02 and -03 baseline -01).
+- **Tests:** `tests/test_evaluation_records.py` (35): a complete record, standard and reference keys kept apart, notes with hashes, three series written with history untouched, missing stratum omitted, existing id refused, missing ledger not created, and fail-closed cases for truncated, malformed, missing, non-zero-exit, off-protocol, wrong-commit, changed-weights, bad-log, dataset-mismatch and no-GPU runs. The wrapper's argv and its dirty-tree refusal are covered.
+- **Docs:** ADR-0017 (proposed). EVALUATION.md (the `fixed_thr@` convention). The proposal (`half=True` explicit; §11 now the wrapper and writer commands; readiness updated). D-071.
+
+**Validation:** full pytest 1688 passed, 4 skipped, 0 failed. Ruff clean. Mypy clean (`cv_agent`: 81 files; new scripts and tests clean). Ledger sha256 unchanged (`d7ff167e…`).
+
+**Learned:** the ledger's `ExperimentRecord` has no artifact, protocol or fixed-threshold field, so those live in notes and prefixed `val_metrics` keys. `LatencyMeasurement` and `MemoryFootprint` require both sub-fields, so memory stays unset. Ultralytics auto-increments run names unless `exist_ok=True`, so the wrapper refuses existing directories instead of letting ultralytics rename them.
+
+**Not done:** no GPU run. No push, no merge. ADR-0017 is not accepted yet (owner decision). The writer has not been run on real artifacts. The fail-closed smoke test against the existing sweep directories runs after this commit, because the dirty-tree gate is correct until the tree is committed.

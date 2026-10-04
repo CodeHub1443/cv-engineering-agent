@@ -31,7 +31,7 @@ Expected direction, stated as an expectation to observe, not as an established m
 - **Protocol:** `conf = 0.001` for every run (Q28, D-067).
 - **Model:** `yolo11n.pt`, the same file for every run. Record its sha256 in the run notes.
 - **Dataset:** `coco-val2017-5k`, `classes=[0]`, 5,000 images. The same split as the baseline.
-- **Device and batch:** `device=0` (RTX 3060 12 GB), `batch=1`, FP16 (ultralytics default on CUDA).
+- **Device, batch and precision:** `device=0` (RTX 3060 12 GB), `batch=1`, `half=True` (FP16, passed explicitly so precision is a recorded setting, not an assumed default).
 - **NMS IoU and `max_det`:** ultralytics defaults. The binding does not expose NMS IoU.
 - **Software:** Ultralytics 8.4.138, Python 3.10, torch 2.5.1+cu121, as in existing runs.
 - **Commit and provenance:** the run must execute from a **clean, committed** worktree. The provenance rule (`cv_agent/experiments/provenance.py`) refuses otherwise.
@@ -86,51 +86,38 @@ This revision defines **no** pass/fail criteria and no magnitudes. The earlier p
 | ADR-0016 (experiment provenance; new module `cv_agent/experiments/provenance.py`) | drafted, owner review |
 | Restoring `yolo11n.pt` and `coco-person-val.yaml` from Trash | **prerequisite**, LEDGER-RECOVERY.md §4 (owner approval) |
 | Ledger restore (Q29) | **owner approval**; required to record a completed row |
-| Record-writing script for this experiment | **not written**. The §11 commands write no ledger row |
+| Record-writing path (verifier, writer, wrapper; ADR-0017) | done on the feature branch, 35 tests; owner acceptance of ADR-0017 before the first real run |
 | Owner decision on criteria (§7) | **open**. Needed only if the run is to drive a decision |
 | Q30 operating point | **OPEN**. Not needed for measurement-only |
 
-## 11. Command for EXP-20261004-01 (use only after final owner approval; NOT run)
+## 11. Commands (use only after final owner approval; NOT run)
 
-Prerequisites: owner approval of this run (§8); the reviewed changes committed on the feature branch
-`feature/claude/experiment-provenance-recovery`; `yolo11n.pt` and `coco-person-val.yaml` present in
-the main checkout's `.cv_agent/` (restored 2026-10-04 under LEDGER-RECOVERY.md §4a).
+Preconditions: owner approval (§8) with an approval id; the reviewed changes committed and the
+code tree clean (`feature/claude/experiment-provenance-recovery`); `yolo11n.pt` and
+`coco-person-val.yaml` present in the main checkout's `.cv_agent/` (restored 2026-10-04).
 
-The gate refuses a dirty code worktree, so the run cannot use uncommitted code. The state root is the
-main checkout's `.cv_agent/` (ADR-0016 §3), which every worktree resolves to. These commands write
-prediction files only. They write **no ledger row**. A ledger record needs a record-writing script
-through the execute path, which does not exist yet (see §10).
+The wrapper refuses a dirty tree and never overwrites a run directory. Each run writes
+`<project>/<name>/predictions.json`, `<project>/<name>.val.log` and `<project>/<name>.run.json`. The
+writer verifies all three runs and records them only if every check passes (ADR-0017). Nothing is
+written if any run fails. Use `--dry-run` first.
 
 ```bash
-CODE=/home/dev/cv-engineering-agent-sweep        # feature worktree: the code the analysis runs from
-STATE=/home/dev/cv-engineering-agent/.cv_agent    # state root (main checkout), per ADR-0016
-YOLO=/home/dev/.local/bin/yolo
-MODEL=$STATE/models/yolo11n.pt
-DATA=$STATE/evaluations/coco-person-val.yaml
-OUT=$STATE/evaluations
-
-# Provenance gate: clean, committed code only (same rule as cv_agent.experiments.provenance)
-if [ -n "$(git -C "$CODE" status --porcelain --untracked-files=normal)" ]; then
-  echo "REFUSED: dirty worktree; commit first"; exit 1
-fi
-COMMIT=$(git -C "$CODE" rev-parse HEAD)
-echo "running from commit $COMMIT"
-
+cd /home/dev/cv-engineering-agent-sweep        # committed, clean feature branch
 for SZ in 640 960 1280; do
-  $YOLO val model=$MODEL data=$DATA 'classes=[0]' conf=0.001 imgsz=$SZ \
-      batch=1 device=0 project=$OUT name=e1-yolo11n-coco-val2017-imgsz$SZ-conf0001
+  python3 scripts/run_yolo_val_measured.py --imgsz $SZ
 done
 
-cd "$CODE"
-python3 scripts/run_fixed_threshold_strata.py \
-  --coco-root /home/dev/Documents/data_cleaner/datasets/coco \
-  --run "E1-640=$OUT/e1-yolo11n-coco-val2017-imgsz640-conf0001/predictions.json" \
-  --run "E1-960=$OUT/e1-yolo11n-coco-val2017-imgsz960-conf0001/predictions.json" \
-  --run "E1-1280=$OUT/e1-yolo11n-coco-val2017-imgsz1280-conf0001/predictions.json" \
-  --threshold 0.25
+STATE=/home/dev/cv-engineering-agent/.cv_agent/evaluations
+python3 scripts/record_evaluation_runs.py --approval-ref "<owner approval id>" \
+  --run 640=$STATE/e1-yolo11n-coco-val2017-imgsz640-conf0001 \
+  --run 960=$STATE/e1-yolo11n-coco-val2017-imgsz960-conf0001 \
+  --run 1280=$STATE/e1-yolo11n-coco-val2017-imgsz1280-conf0001 \
+  --dry-run
+# Review the printed records. Then run the same command without --dry-run to write them.
 ```
 
-Each run must print `[full-curve]`. A `TRUNCATED` flag means the file is not at conf 0.001 and is invalid for this experiment.
+Each run must show a full curve, and the writer checks that for every predictions file. A
+`TRUNCATED` message is a refusal, not a warning.
 
 ## 12. Stop conditions
 

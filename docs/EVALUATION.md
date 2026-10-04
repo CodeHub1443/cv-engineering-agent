@@ -41,6 +41,11 @@ EXP-20261001-01..04) are **legacy, truncated-protocol values**. They are lower b
 Q28-protocol mAP for the same predictions, and they are not comparable with standard numbers.
 The `scripts/run_fixed_threshold_strata.py` output flags any predictions file that is not full-curve.
 
+**Recorded metric keys (ADR-0017).** A record's `val_metrics` keeps two kinds apart by prefix:
+- `mAP@0.5`, `mAP@0.5:0.95`, `AP@0.5/small|medium|large`: full-curve, conf=0.001 (standard).
+- `fixed_thr@0.25/<name>`: fixed-threshold reference measurement. **Reference only**, not mAP,
+  not an operating point (Q30 open). The ultralytics P and R summary is not recorded at all.
+
 **Inference operating-point default.** `yolo_inference` keeps `conf=0.25` as its default. That is
 an operating-point default, not a mAP protocol value, and it is unchanged because Q30 is open.
 The tracking baseline (`scripts/run_baseline.py`) runs at the same 0.25 for the same reason.
