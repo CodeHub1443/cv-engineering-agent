@@ -83,14 +83,16 @@ def density_bin(gt_count_in_image: int) -> str:
     return "dense" if gt_count_in_image >= DENSE_MIN_GT else "sparse"
 
 
-def match_predictions(preds: list[PredictedBox], gts: list[GroundTruthBox]) -> set[int]:
-    """Greedy score-ordered matching; return the indices of matched GT boxes.
+def greedy_match_pairs(preds: list[PredictedBox], gts: list[GroundTruthBox]) -> list[tuple[int, int]]:
+    """Greedy score-ordered matching as (prediction index, GT index) pairs, in matching order.
 
-    Each GT box can match at most one prediction. A prediction takes the unmatched GT
-    with the highest IoU, provided that IoU reaches ``MATCH_IOU``.
+    Indices refer to the input lists. Each GT box can match at most one prediction. A prediction
+    takes the unmatched GT with the highest IoU, provided that IoU reaches ``MATCH_IOU``.
     """
+    pairs: list[tuple[int, int]] = []
     matched: set[int] = set()
-    for pred in sorted(preds, key=lambda p: -p.score):
+    for i in sorted(range(len(preds)), key=lambda k: -preds[k].score):
+        pred = preds[i]
         pbox = (pred.x1, pred.y1, pred.x2, pred.y2)
         best_iou, best_j = MATCH_IOU, -1
         for j, gt in enumerate(gts):
@@ -101,7 +103,18 @@ def match_predictions(preds: list[PredictedBox], gts: list[GroundTruthBox]) -> s
                 best_iou, best_j = value, j
         if best_j >= 0:
             matched.add(best_j)
-    return matched
+            pairs.append((i, best_j))
+    return pairs
+
+
+def match_predictions(preds: list[PredictedBox], gts: list[GroundTruthBox]) -> set[int]:
+    """Greedy score-ordered matching; return the indices of matched GT boxes.
+
+    Each GT box can match at most one prediction. A prediction takes the unmatched GT
+    with the highest IoU, provided that IoU reaches ``MATCH_IOU``. Delegates to
+    ``greedy_match_pairs`` so there is one matcher.
+    """
+    return {j for _, j in greedy_match_pairs(preds, gts)}
 
 
 def load_person_gt(label_path: Path, width: int, height: int) -> list[GroundTruthBox]:
