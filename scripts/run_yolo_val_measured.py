@@ -41,7 +41,9 @@ from cv_agent.experiments.evaluation_records import (  # noqa: E402
     FP32_CONTROL_SERIES_ID,
     QUANTIZE,
     RUN_SCHEMA,
+    EXEMPT_GPU_PROCESS_NAMES,
     foreign_process_seen,
+    is_exempt_process,
     precision_label,
 )
 from cv_agent.experiments.provenance import (  # noqa: E402
@@ -304,8 +306,9 @@ def main(argv: list[str] | None = None) -> int:
     if start_snapshot["processes"] is None:
         print("REFUSED: cannot read the GPU process list (nvidia-smi); no run started", file=sys.stderr)
         return 2
-    if start_snapshot["processes"]:
-        pids = [p["pid"] for p in start_snapshot["processes"]]
+    blocking = [p for p in start_snapshot["processes"] if not is_exempt_process(p)]
+    if blocking:
+        pids = [p["pid"] for p in blocking]
         print(f"REFUSED: GPU has {len(pids)} compute process(es) before the run, pids {pids}; no run started", file=sys.stderr)
         return 2
 
@@ -357,6 +360,7 @@ def main(argv: list[str] | None = None) -> int:
         "own_pid": proc.pid,
         "gpu_process_snapshots": gpu_snapshots,
         "foreign_process_seen": foreign_process_seen(gpu_snapshots, proc.pid),
+        "gpu_exempt_process_names": sorted(EXEMPT_GPU_PROCESS_NAMES),
         "gpu_process_measurement": (
             "nvidia-smi --query-compute-apps at start (must be empty), every VRAM poll, and at end; "
             f"polled every {VRAM_POLL_SECONDS}s, so a process that starts and exits between polls is not seen"

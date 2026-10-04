@@ -227,8 +227,18 @@ def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+# Owner-directed exception (ADR-0018 §3.16, 2026-10-04): the NoMachine remote-desktop node holds a small
+# amount of GPU memory and is not a workload. Matched by its exact process path, never by pid.
+EXEMPT_GPU_PROCESS_NAMES = frozenset({"/usr/NX/bin/nxnode.bin"})
+
+
+def is_exempt_process(proc: object) -> bool:
+    """True only for an exact-name exempt process (ADR-0018 §3.16). Any other entry is blocking."""
+    return isinstance(proc, dict) and proc.get("name") in EXEMPT_GPU_PROCESS_NAMES
+
+
 def snapshot_foreign_pids(snapshot: object, own_pid: int) -> list[int] | None:
-    """Pids in one GPU-process snapshot other than the run's own process. None if unreadable."""
+    """Pids in one GPU-process snapshot other than the run's own and exempt processes. None if unreadable."""
     if not isinstance(snapshot, dict) or not isinstance(snapshot.get("processes"), list):
         return None
     foreign: list[int] = []
@@ -236,7 +246,7 @@ def snapshot_foreign_pids(snapshot: object, own_pid: int) -> list[int] | None:
         pid = proc.get("pid") if isinstance(proc, dict) else None
         if not _is_int(pid):
             return None
-        if pid != own_pid:
+        if pid != own_pid and not is_exempt_process(proc):
             foreign.append(pid)
     return foreign
 
@@ -262,8 +272,9 @@ def gpu_process_problems(run: dict) -> list[str]:
         during = []
     if not isinstance(start, dict) or not isinstance(start.get("processes"), list):
         problems.append("GPU-process snapshot at start is missing or unreadable: cannot read the GPU process list")
-    elif start["processes"]:
-        problems.append(f"GPU had {len(start['processes'])} compute process(es) before the run started")
+    elif [p for p in start["processes"] if not is_exempt_process(p)]:
+        blocking = [p for p in start["processes"] if not is_exempt_process(p)]
+        problems.append(f"GPU had {len(blocking)} compute process(es) before the run started")
     if not isinstance(end, dict) or not isinstance(end.get("processes"), list):
         problems.append("GPU-process snapshot at end is missing or unreadable")
     for index, snap in enumerate(during):

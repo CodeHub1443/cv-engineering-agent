@@ -2207,3 +2207,18 @@ invented; (2) an idle GPU. At the last check the other project's process (pid 31
 
 **Not done:** no GPU job, no ledger write, no approval record for a rerun, `EXP-20261004-04` unallocated, Q30 and
 D-069 OPEN, nothing pushed or merged.
+
+## 2026-10-04 — NoMachine exception (ADR-0018 §3.16, D-076)
+
+**Owner instruction:** "make nomachine exception". The NoMachine remote-desktop node (`/usr/NX/bin/nxnode.bin`) was the only
+compute process left on the GPU, and it blocked the empty-list gate in ADR-0018 §6.
+
+**Changed:** `cv_agent/experiments/evaluation_records.py` adds `EXEMPT_GPU_PROCESS_NAMES` and `is_exempt_process`
+(exact-path match). The foreign-process rule and the start check ignore exempt processes. `scripts/run_yolo_val_measured.py`
+applies the same exemption to its start preflight and records `gpu_exempt_process_names` in run.json. Four new tests cover
+exempt-only snapshots at every point, a second process still blocking, a lookalike path still blocking, and the exact
+exemption. ADR-0018 gets §3.16 and a changed gate item 6. D-076 is appended.
+
+**Accepted cost:** the exempt node's GPU use is not measured or corrected for. It is inside the device-wide VRAM value.
+
+**No GPU job, no ledger write, no approval reference chosen.** The approval reference for the rerun is still required from the owner.

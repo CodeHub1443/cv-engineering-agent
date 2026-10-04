@@ -951,3 +951,52 @@ def test_own_process_alone_is_not_foreign() -> None:
 
     snaps = _clean_gpu_snapshots()
     assert foreign_process_seen(snaps, OWN_PID) is False
+
+
+# ── Owner-directed exception: NoMachine remote-desktop node (ADR-0018 §3.16) ───────────
+
+NOMACHINE_PROC = {"pid": 3884, "name": "/usr/NX/bin/nxnode.bin"}
+
+
+def test_nomachine_alone_at_every_point_is_not_foreign(tmp_path: Path) -> None:
+    run_dir, coco = make_run(
+        tmp_path,
+        run_overrides={
+            "gpu_process_snapshots": _snaps(
+                start={"at": "t", "processes": [NOMACHINE_PROC]},
+                during=[{"at": "t", "processes": [OWN_PROC, NOMACHINE_PROC]}],
+                end={"at": "t", "processes": [NOMACHINE_PROC]},
+            ),
+            "foreign_process_seen": False,
+        },
+    )
+    _verify(run_dir, coco)
+
+
+def test_nomachine_does_not_excuse_another_process(tmp_path: Path) -> None:
+    run_dir, coco = make_run(
+        tmp_path,
+        run_overrides={
+            "gpu_process_snapshots": _snaps(start={"at": "t", "processes": [NOMACHINE_PROC, FOREIGN_PROC]}),
+            "foreign_process_seen": False,
+        },
+    )
+    assert "before the run started" in _problems(run_dir, coco)
+
+
+def test_a_lookalike_name_is_not_exempt(tmp_path: Path) -> None:
+    fake = {"pid": 5555, "name": "/tmp/nxnode.bin"}
+    run_dir, coco = make_run(
+        tmp_path,
+        run_overrides={
+            "gpu_process_snapshots": _snaps(during=[{"at": "t", "processes": [OWN_PROC, fake]}]),
+            "foreign_process_seen": True,
+        },
+    )
+    assert "foreign GPU process during the run" in _problems(run_dir, coco)
+
+
+def test_the_exemption_is_exactly_the_nomachine_path() -> None:
+    from cv_agent.experiments.evaluation_records import EXEMPT_GPU_PROCESS_NAMES
+
+    assert EXEMPT_GPU_PROCESS_NAMES == frozenset({"/usr/NX/bin/nxnode.bin"})

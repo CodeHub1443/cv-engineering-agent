@@ -1,6 +1,6 @@
 # ADR-0018: FP32 control for the image-size series (precision as the only variable)
 
-- **Status:** Accepted (2026-10-04, owner acceptance; recorded in D-075 and JOURNAL). Implemented on the branch under issue #74 (commits `d0aea40` and `9170e39`). Acceptance approves the design only. It does **not** approve any GPU run: each run needs a fresh owner approval reference (§3.8) and an idle GPU (§6).
+- **Status:** Accepted (2026-10-04, owner acceptance; recorded in D-075 and JOURNAL). Amended 2026-10-04 by owner instruction: NoMachine exception (§3.16, D-076). Implemented on the branch under issue #74 (commits `d0aea40` and `9170e39`). Acceptance approves the design only. It does **not** approve any GPU run: each run needs a fresh owner approval reference (§3.8) and an idle GPU (§6).
 - **Date:** 2026-10-04
 - **Layer:** experiments (provenance and recording, ADR-0016, ADR-0017)
 - **Canon:** `[P§25]` (reproducibility metadata), `[P§29.2]` (baseline discipline), `[P§29.3]` (no claim without a quantitative comparison), `[P§29.5]` (metadata completeness)
@@ -79,10 +79,29 @@ The clean FP32 640 rerun may start only when **all** of these hold:
 3. This ADR is **Accepted** by the owner.
 4. The contaminated artifacts are in quarantine, with the manifest verified, and the active evaluations path for `e1-yolo11n-coco-val2017-imgsz640-conf0001-fp32` is free.
 5. A fresh owner approval reference has been supplied, and an approval record with the required fields is in JOURNAL before the run.
-6. `nvidia-smi --query-compute-apps` lists **no process** immediately before launch. The start snapshot will be checked again by the wrapper.
+6. `nvidia-smi --query-compute-apps` lists **no process other than an exact-name exempt process** (§3.16) immediately before launch. The start snapshot will be checked again by the wrapper.
 7. No concurrent GPU workload from another project is running. The agent does not stop or control such a process.
 
 After the run: the writer runs in dry-run mode first. The record is written only if the run is eligible (§3.11) and the id is absent from the ledger. The ledger's hash is recorded before and after the write. STATUS, EXPERIMENTS and JOURNAL are updated in one commit. Nothing is pushed or merged.
+
+## 3.16 Owner-directed exception: NoMachine remote-desktop node (amendment, 2026-10-04)
+
+Owner instruction, 2026-10-04: "make nomachine exception". This amends §3.10 and §6 item 6. It was made to
+clear a rerun gate that the NoMachine node (`/usr/NX/bin/nxnode.bin`, pid 3884, about 137–589 MiB) held
+with no workload behind it.
+
+- **Scope, exactly:** a compute process whose reported process name is exactly `/usr/NX/bin/nxnode.bin` is
+  **exempt**. It is not counted as foreign at start, during polling or at end, and it does not block the start
+  preflight. It is still recorded in every snapshot. `run.json` names the exemption in `gpu_exempt_process_names`.
+- **Matching:** by exact process path only, never by pid. A lookalike such as `/tmp/nxnode.bin` is **not** exempt
+  and blocks. Any other process blocks, including one listed in the same snapshot as the exempt process.
+- **Not exempt:** the lung-training process and any other process, under any name.
+- **Known cost, accepted by the owner:** the exempt node may use some GPU memory and compute during a run.
+  Its effect on peak VRAM, FPS and latency is **not measured** and not corrected. ADR-0017's device-wide VRAM
+  measure therefore includes any GPU memory this node holds during the run.
+- **Unchanged:** the empty-list rule for everything else, the writer's rejection of missing, unreadable and
+  foreign snapshots, the 1-second polling limit, and the ADR-0017 system-metric requirements.
+- **Issue:** #74 (same issue as ADR-0018). Recorded as D-076.
 
 ## 7. Verification
 
