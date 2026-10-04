@@ -93,6 +93,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         except RecordError as exc:
             problems.extend(f"[{size}] {p}" for p in exc.problems)
+            continue
+        # Every run must carry exactly the approval the writer was given (ADR-0017 §3.3).
+        if verified[size].approval_ref != args.approval_ref:
+            problems.append(
+                f"[{size}] run approval {verified[size].approval_ref!r} != --approval-ref {args.approval_ref!r}"
+            )
     if problems:
         print("REFUSED: nothing recorded. Problems:", file=sys.stderr)
         for problem in problems:
@@ -102,9 +108,13 @@ def main(argv: list[str] | None = None) -> int:
     records = []
     for size in sorted(verified):
         exp_id, baseline = SERIES[size]
-        records.append(
-            build_record(verified[size], exp_id=exp_id, baseline_id=baseline, approval_ref=args.approval_ref)
-        )
+        try:
+            records.append(
+                build_record(verified[size], exp_id=exp_id, baseline_id=baseline, approval_ref=args.approval_ref)
+            )
+        except RecordError as exc:
+            print("REFUSED: nothing recorded:", "; ".join(exc.problems), file=sys.stderr)
+            return 1
 
     if args.dry_run:
         print(json.dumps([dataclasses.asdict(r) for r in records], indent=2, default=str))

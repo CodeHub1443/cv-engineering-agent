@@ -2083,3 +2083,19 @@ Q29 restore not executed (awaiting approval). Q30 OPEN.
 **Learned:** the ledger's `ExperimentRecord` has no artifact, protocol or fixed-threshold field, so those live in notes and prefixed `val_metrics` keys. `LatencyMeasurement` and `MemoryFootprint` require both sub-fields, so memory stays unset. Ultralytics auto-increments run names unless `exist_ok=True`, so the wrapper refuses existing directories instead of letting ultralytics rename them.
 
 **Not done:** no GPU run. No push, no merge. ADR-0017 is not accepted yet (owner decision). The writer has not been run on real artifacts. The fail-closed smoke test against the existing sweep directories runs after this commit, because the dirty-tree gate is correct until the tree is committed.
+
+## 2026-10-04 — ADR-0017 owner-review blocking changes implemented; no GPU run
+
+**Did (the six blocking changes):**
+1. **`quantize=16` replaces `half=True`.** Checked read-only with the installed ultralytics: `quantize=16` maps to 16 with no warning; `half=True` logs a deprecation warning. The wrapper argv carries `quantize=16`; `run.json` records `precision_requested` as the exact label `FP16 requested (quantize=16); actual inference precision is not logged`. The record uses the same label.
+2. **Historical precision corrected (docs only).** EXP-20260930-01 and the sweep rows ran FP32: no precision argument, so `quantize` defaulted to None (`engine/validator.py:191,195`). Correction note added to EXPERIMENTS.md; historical rows not edited. The 640 control names EXP-20260930-01 as the legacy FP32 reference in its notes.
+3. **Approval mandatory at GPU-run time.** The wrapper requires `--approval-ref` and refuses a blank value before any run. It writes the reference into `run.json`. The verifier requires it; the writer requires all three runs to match `--approval-ref`. `build_record` refuses a mismatch.
+4. **System metrics measured.** The wrapper polls `nvidia-smi` memory.used every second and records baseline and peak VRAM. Peak RAM comes from `getrusage(RUSAGE_CHILDREN).ru_maxrss` (Linux KiB converted to MiB). The verifier refuses a run without a positive VRAM peak or RAM peak. `memory` is recorded; `gpu_hours = wall_seconds / 3600` is derived and labelled; `power`, `train_time` and `flops` stay None.
+5. **Execution exception stated.** ADR-0017 §4a: the operator-run wrapper bypasses the JobExecutor path for this series only; ADR-0013 and ADR-0009 remain authoritative for agent-initiated execution.
+6. **Atomicity corrected.** ADR-0017 §3.2: verification is all-or-nothing before ledger access; ledger writes are sequential and not transactional across the three records; a mid-batch failure can leave a partial series, reported by `write_records`.
+
+**Tests:** `tests/test_evaluation_records.py` now 60 tests (was 35): quantize argv and requested label; the legacy note on the control only; approval refused when missing, blank or mismatched (within a run, at the builder, across runs at the writer); VRAM and RAM required and refused when missing or zero; gpu_hours derived; partial-write reporting; the KiB-to-MiB conversion; nvidia-smi parsing; sampler baseline, peak and failed-poll handling; the wrapper's blank-approval refusal and required argument.
+
+**Validation:** full pytest 1713 passed, 4 skipped, 0 failed (before a final typing-only fix in the verifier; the record tests and mypy re-checked after it). Ruff clean. Mypy clean (`cv_agent`: 81 files). Ledger sha256 unchanged (`d7ff167e…`).
+
+**Not done:** no GPU run. The writer was not executed against real run directories. No push, no merge. ADR-0017 remains Proposed until the owner accepts it. Q30, Q31, Q27 and D-069 remain OPEN.

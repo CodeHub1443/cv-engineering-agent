@@ -241,6 +241,19 @@ is not the COCO evaluator.
 - **"conf=0.10 gives the highest mAP"** is true only of the four legacy points tested. It is not
   a Q28-protocol result, and it is not an optimum.
 
+**Precision correction (2026-10-04, ADR-0017 §3a). Historical FP16 labels are wrong.**
+
+- **EXP-20260930-01 and the 20261001 sweep rows (EXP-20261001-01..04) ran FP32, not FP16.** Their
+  `precision` field says "FP16", but no precision argument was supplied. Ultralytics `quantize`
+  defaulted to None, so the model ran at FP32 (`engine/validator.py:191,195`). The historical rows are
+  **not edited**. This note is the correction.
+- **EXP-20261004-01 is FP16-requested via `quantize=16` and is NOT like-for-like with those runs.**
+  Any precision comparison against EXP-20260930-01 or the sweep rows must say so. The precision label
+  on new records is the requested setting, not a measured inference precision.
+- **Precision of the new series is requested, not measured.** Ultralytics does not log actual inference
+  precision. `half` is deprecated in 8.4.138 and is mapped to `quantize`, so the protocol uses `quantize=16`.
+- The 640 control names EXP-20260930-01 as the legacy FP32 reference in its record notes.
+
 **Validity status (`[P§25]` rules):**
 
 - `commit_sha` is **NULL on all six ledger rows**, including the baseline. Rule 4 requires

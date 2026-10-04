@@ -31,7 +31,7 @@ Expected direction, stated as an expectation to observe, not as an established m
 - **Protocol:** `conf = 0.001` for every run (Q28, D-067).
 - **Model:** `yolo11n.pt`, the same file for every run. Record its sha256 in the run notes.
 - **Dataset:** `coco-val2017-5k`, `classes=[0]`, 5,000 images. The same split as the baseline.
-- **Device, batch and precision:** `device=0` (RTX 3060 12 GB), `batch=1`, `half=True` (FP16, passed explicitly so precision is a recorded setting, not an assumed default).
+- **Device, batch and precision:** `device=0` (RTX 3060 12 GB), `batch=1`, `quantize=16` (FP16 requested, passed explicitly; ultralytics does not log the actual inference precision). **Not like-for-like with the FP32 historical runs** (EXP-20260930-01 and the sweep rows; see EXPERIMENTS.md, precision correction).
 - **NMS IoU and `max_det`:** ultralytics defaults. The binding does not expose NMS IoU.
 - **Software:** Ultralytics 8.4.138, Python 3.10, torch 2.5.1+cu121, as in existing runs.
 - **Commit and provenance:** the run must execute from a **clean, committed** worktree. The provenance rule (`cv_agent/experiments/provenance.py`) refuses otherwise.
@@ -104,7 +104,7 @@ written if any run fails. Use `--dry-run` first.
 ```bash
 cd /home/dev/cv-engineering-agent-sweep        # committed, clean feature branch
 for SZ in 640 960 1280; do
-  python3 scripts/run_yolo_val_measured.py --imgsz $SZ
+  python3 scripts/run_yolo_val_measured.py --imgsz $SZ --approval-ref "<owner approval id>"
 done
 
 STATE=/home/dev/cv-engineering-agent/.cv_agent/evaluations

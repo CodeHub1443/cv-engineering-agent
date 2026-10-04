@@ -41,6 +41,7 @@ from cv_agent.experiments.models import (
     ExperimentRecord,
     HardwareInfo,
     LatencyMeasurement,
+    MemoryFootprint,
 )
 
 RUN_SCHEMA = "cv-agent/yolo-val-run/v1"
@@ -55,7 +56,14 @@ SUCCESS_CRITERIA = (
     "Measurement-only (D-069): no pass/fail threshold. Reports threshold-free AP@0.5 by size, mAP at "
     "conf=0.001, and reference fixed-threshold P/R at 0.25."
 )
-PRECISION_LABEL = "FP16 (half=True, CUDA)"
+QUANTIZE = 16
+# What was REQUESTED, never what was measured: ultralytics does not log actual inference precision.
+PRECISION_REQUESTED = "FP16 requested (quantize=16); actual inference precision is not logged"
+LEGACY_REFERENCE = (
+    "EXP-20260930-01 (and the 20261001 sweep rows) ran FP32: no precision argument was supplied, "
+    "so ultralytics quantize defaulted to None. This series is FP16-requested and NOT like-for-like "
+    "with those runs. Their mAP was also computed at conf=0.25 (truncated protocol, Q28)."
+)
 MODEL_NAME_EXPECTED = "yolo11n.pt"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -121,6 +129,10 @@ class VerifiedRun:
     gt_persons: int
     min_person_score: float
     artifacts: dict[str, dict[str, str]]
+    approval_ref: str
+    vram_baseline_mib: int | None
+    vram_peak_mib: int
+    ram_peak_mib: float
 
 
 def sha256_file(path: Path) -> str:
@@ -224,7 +236,7 @@ def verify_run(
     protocol = {
         "imgsz": imgsz,
         "conf": MAP_PROTOCOL_CONF,
-        "half": True,
+        "quantize": QUANTIZE,
         "batch": 1,
         "device": "0",
         "classes": [0],
@@ -233,6 +245,17 @@ def verify_run(
     for key, expected in protocol.items():
         if run.get(key) != expected:
             problems.append(f"run.json {key}={run.get(key)!r}, protocol requires {expected!r}")
+    if run.get("precision_requested") != PRECISION_REQUESTED:
+        problems.append("run.json precision_requested must be the exact requested-precision label")
+    approval = run.get("approval_ref")
+    if not isinstance(approval, str) or not approval.strip():
+        problems.append("run.json has no approval_ref (GPU runs require an owner approval reference)")
+    vram_peak = run.get("vram_peak_mib")
+    if not (isinstance(vram_peak, int) and not isinstance(vram_peak, bool) and vram_peak > 0):
+        problems.append("run.json vram_peak_mib is missing or not a positive integer (system metric required)")
+    ram_peak = _num(run.get("ram_peak_mib"))
+    if not ram_peak > 0:
+        problems.append("run.json ram_peak_mib is missing or not positive (system metric required)")
     if run.get("exit_code") != 0:
         problems.append(f"yolo val exit_code={run.get('exit_code')!r} (must be 0)")
     if run.get("commit") != head_commit:
@@ -400,11 +423,20 @@ def verify_run(
         gt_persons=n_gt,
         min_person_score=min_score,
         artifacts=artifacts,
+        approval_ref=str(approval).strip(),
+        vram_baseline_mib=run["vram_baseline_mib"] if isinstance(run.get("vram_baseline_mib"), int) else None,
+        vram_peak_mib=int(vram_peak or 0),
+        ram_peak_mib=ram_peak,
     )
 
 
 def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_ref: str) -> ExperimentRecord:
     """The ExperimentRecord for one verified run. Only measured values are populated."""
+    if run.approval_ref != approval_ref:
+        raise RecordError(
+            [f"run approval_ref {run.approval_ref!r} != requested {approval_ref!r}: "
+             "every run in a series must carry the same approval"]
+        )
     val_metrics: dict[str, float] = {"mAP@0.5": run.map50, "mAP@0.5:0.95": run.map50_95}
     for stratum, value in run.ap50.items():
         val_metrics[f"AP@0.5/{stratum}"] = value
@@ -414,6 +446,7 @@ def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_re
     fps = run.images / run.wall_seconds
     notes = {
         "series": f"{SERIES_ID} measurement-only (D-069); this record is one image size of the series",
+        **({"legacy_reference": LEGACY_REFERENCE} if baseline_id == "SELF" else {}),
         "confidence_protocol": (
             f"conf={MAP_PROTOCOL_CONF} (Q28/D-067) for mAP and AP@0.5/* (full PR curve). "
             f"fixed_thr@{FIXED_THRESHOLD}/* are REFERENCE ONLY: not mAP, not an operating point (Q30 open)."
@@ -427,7 +460,14 @@ def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_re
             "fps": f"{run.images} images / measured wall_seconds ({run.wall_seconds:.3f} s)",
             "params": "from the val.log YOLO model summary line",
         },
-        "not_measured": ["gpu_hours", "train_time", "memory (VRAM/RAM not sampled)", "power"],
+        "precision_requested": PRECISION_REQUESTED,
+        "approval_ref": run.approval_ref,
+        "units": {"memory": "MiB (peak VRAM from nvidia-smi; peak RAM from getrusage ru_maxrss)"},
+        "derived": {
+            "gpu_hours": f"wall_seconds / 3600 = {run.wall_seconds:.3f} s / 3600 (one GPU; derived, not a separate meter)"
+        },
+        "not_measured": ["train_time", "power", "flops (ultralytics reports GFLOPs only; see notes)"],
+        "vram_baseline_mib": run.vram_baseline_mib,
         "omitted_metrics": list(run.omitted_strata),
         "predictions_min_person_score": run.min_person_score,
         "artifacts": run.artifacts,
@@ -450,7 +490,9 @@ def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_re
         dataset_version=f"coco-val2017-5k (val2017.txt sha256 {run.val_txt_sha256})",
         input_resolution=f"{run.imgsz}x{run.imgsz}",
         batch_size=1,
-        precision=PRECISION_LABEL,
+        precision=PRECISION_REQUESTED,
+        memory=MemoryFootprint(vram=float(run.vram_peak_mib), ram=run.ram_peak_mib),
+        gpu_hours=run.wall_seconds / 3600.0,
         hardware=HardwareInfo(training="N/A (inference only)", target=target),
         params=run.params,
         fps=fps,

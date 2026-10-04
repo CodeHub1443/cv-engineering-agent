@@ -12,6 +12,7 @@ import importlib.util
 import json
 import struct
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -109,7 +110,12 @@ def make_run(
         "batch": 1,
         "device": "0",
         "classes": [0],
-        "half": True,
+        "quantize": 16,
+        "precision_requested": "FP16 requested (quantize=16); actual inference precision is not logged",
+        "approval_ref": "APPROVAL-TEST",
+        "vram_baseline_mib": 360,
+        "vram_peak_mib": 600,
+        "ram_peak_mib": 900.5,
         "model": "yolo11n.pt",
         "model_path": str(weights),
         "data_yaml": str(data_yaml),
@@ -168,9 +174,13 @@ def test_verified_run_builds_a_complete_record(tmp_path: Path) -> None:
     assert record.latency.end_to_end == pytest.approx(0.4 + 5.3 + 0.7)
     assert record.latency.inference_only == pytest.approx(5.3)
     assert record.fps == pytest.approx(2 / 3.0)
-    # Not measured, so not fabricated.
-    assert record.memory is None
-    assert record.gpu_hours is None
+    # System metrics are measured: peak VRAM and peak RAM (MiB), not invented.
+    assert record.memory is not None
+    assert record.memory.vram == pytest.approx(600.0)
+    assert record.memory.ram == pytest.approx(900.5)
+    # gpu_hours is derived from the measured wall time (one device), not a separate meter.
+    assert record.gpu_hours == pytest.approx(3.0 / 3600.0)
+    # Still not measured, so not fabricated.
     assert record.train_time is None
     assert record.power is None
     assert record.flops is None
@@ -178,7 +188,7 @@ def test_verified_run_builds_a_complete_record(tmp_path: Path) -> None:
 
 def test_standard_and_reference_metrics_are_kept_apart(tmp_path: Path) -> None:
     run_dir, coco = make_run(tmp_path)
-    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="A")
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
     metrics = record.val_metrics or {}
     standard = {k for k in metrics if not k.startswith("fixed_thr@")}
     reference = {k for k in metrics if k.startswith("fixed_thr@0.25/")}
@@ -192,20 +202,21 @@ def test_standard_and_reference_metrics_are_kept_apart(tmp_path: Path) -> None:
 
 def test_notes_carry_protocol_artifacts_and_hashes(tmp_path: Path) -> None:
     run_dir, coco = make_run(tmp_path)
-    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="A")
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
     notes = json.loads(record.notes or "{}")
     assert "REFERENCE ONLY" in notes["confidence_protocol"]
     assert notes["imgsz"] == 640
     for key in ("val_log", "predictions_json", "run_json", "weights", "data_yaml", "val_txt"):
         assert len(notes["artifacts"][key]["sha256"]) == 64
     assert notes["artifacts"]["weights"]["sha256"] == sha256_file(tmp_path / "state" / "models" / "yolo11n.pt")
-    assert "not_measured" in notes and "memory (VRAM/RAM not sampled)" in notes["not_measured"]
+    assert "gpu_hours" in notes["derived"] and "wall_seconds / 3600" in notes["derived"]["gpu_hours"]
+    assert "power" in notes["not_measured"]
 
 
 def test_three_series_records_write_and_leave_history_untouched(tmp_path: Path) -> None:
     ledger_path = tmp_path / "ledger.sqlite"
     historical = build_record(
-        _verify(*make_run(tmp_path / "old")), exp_id="EXP-20260929-01", baseline_id="SELF", approval_ref="old"
+        _verify(*make_run(tmp_path / "old")), exp_id="EXP-20260929-01", baseline_id="SELF", approval_ref="APPROVAL-TEST"
     )
     ledger = open_ledger(db_path=ledger_path, create=True)
     try:
@@ -229,7 +240,7 @@ def test_three_series_records_write_and_leave_history_untouched(tmp_path: Path) 
 
 def test_missing_stratum_is_omitted_and_noted_not_invented(tmp_path: Path) -> None:
     run_dir, coco = make_run(tmp_path, small_gt=False)  # no small ground truth at all
-    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="A")
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
     assert "AP@0.5/small" not in (record.val_metrics or {})
     notes = json.loads(record.notes or "{}")
     assert "AP@0.5/small" in notes["omitted_metrics"]
@@ -240,7 +251,7 @@ def test_missing_stratum_is_omitted_and_noted_not_invented(tmp_path: Path) -> No
 
 def test_existing_exp_id_refuses_the_whole_batch(tmp_path: Path) -> None:
     run_dir, coco = make_run(tmp_path)
-    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="A")
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
     ledger = open_ledger(db_path=tmp_path / "l.sqlite", create=True)
     try:
         ledger.record_experiment(record)
@@ -303,7 +314,7 @@ def test_nonzero_exit_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "override",
-    [{"conf": 0.25}, {"half": False}, {"batch": 2}, {"device": "cpu"}, {"classes": [0, 2]}, {"model": "yolo11s.pt"}],
+    [{"conf": 0.25}, {"quantize": None}, {"batch": 2}, {"device": "cpu"}, {"classes": [0, 2]}, {"model": "yolo11s.pt"}],
 )
 def test_off_protocol_run_is_refused(tmp_path: Path, override: dict) -> None:
     run_dir, coco = make_run(tmp_path, run_overrides=override)
@@ -375,8 +386,9 @@ def test_wrapper_argv_fixes_the_protocol_and_only_varies_imgsz(tmp_path: Path) -
     wrapper = _load_wrapper()
     argv = wrapper.build_argv(960, state_root=tmp_path, executable="yolo")
     assert argv[:2] == ["yolo", "val"]
-    for token in ("conf=0.001", "imgsz=960", "batch=1", "device=0", "classes=[0]", "half=True", "exist_ok=True"):
+    for token in ("conf=0.001", "imgsz=960", "batch=1", "device=0", "classes=[0]", "quantize=16", "exist_ok=True"):
         assert token in argv
+    assert not any(a.startswith("half") for a in argv)  # half is deprecated in ultralytics 8.4
     assert any(a.endswith("e1-yolo11n-coco-val2017-imgsz960-conf0001") for a in argv)
     other = wrapper.build_argv(640, state_root=tmp_path, executable="yolo")
     # Same tokens except the image size and the run name.
@@ -396,7 +408,7 @@ def test_wrapper_refuses_a_dirty_tree_before_running_anything(monkeypatch, capsy
 
     monkeypatch.setattr(wrapper, "require_clean_worktree", dirty)
     monkeypatch.setattr(wrapper.subprocess, "Popen", must_not_run)
-    assert wrapper.main(["--imgsz", "640"]) == 2
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "APPROVAL-TEST"]) == 2
     assert "REFUSED" in capsys.readouterr().err
 
 
@@ -404,3 +416,173 @@ def test_wrapper_rejects_unapproved_image_size() -> None:
     wrapper = _load_wrapper()
     with pytest.raises(SystemExit):
         wrapper.main(["--imgsz", "800"])
+
+
+# ── Review changes (ADR-0017 §3.2–§3.8): precision label, approval, system metrics ───────
+
+REQUESTED_LABEL = "FP16 requested (quantize=16); actual inference precision is not logged"
+
+
+def test_precision_is_the_requested_label_not_a_measurement(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
+    assert record.precision == REQUESTED_LABEL
+    assert "measured" not in (record.precision or "").replace("not logged", "")
+
+
+def test_run_without_the_exact_precision_label_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides={"precision_requested": "FP16"})
+    assert "exact requested-precision label" in _problems(run_dir, coco)
+
+
+def test_control_record_names_the_legacy_fp32_reference(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
+    legacy = json.loads(record.notes or "{}")["legacy_reference"]
+    assert "EXP-20260930-01" in legacy and "FP32" in legacy and "NOT like-for-like" in legacy
+
+
+def test_series_follower_has_no_legacy_note(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, imgsz=960)
+    record = build_record(_verify(run_dir, coco, imgsz=960), exp_id="EXP-20261004-02", baseline_id="EXP-20261004-01", approval_ref="APPROVAL-TEST")
+    assert "legacy_reference" not in json.loads(record.notes or "{}")
+
+
+@pytest.mark.parametrize("approval", [None, "", "   "])
+def test_run_without_an_approval_reference_is_refused(tmp_path: Path, approval) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides={"approval_ref": approval})
+    assert "no approval_ref" in _problems(run_dir, coco)
+
+
+def test_build_refuses_a_run_approved_under_a_different_reference(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    with pytest.raises(RecordError, match="every run in a series must carry the same approval"):
+        build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="OTHER")
+
+
+@pytest.mark.parametrize("override", [{"vram_peak_mib": None}, {"vram_peak_mib": 0}, {"vram_peak_mib": "600"}])
+def test_missing_or_zero_vram_peak_is_refused(tmp_path: Path, override: dict) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides=override)
+    assert "vram_peak_mib is missing or not a positive integer" in _problems(run_dir, coco)
+
+
+@pytest.mark.parametrize("override", [{"ram_peak_mib": None}, {"ram_peak_mib": 0.0}])
+def test_missing_or_zero_ram_peak_is_refused(tmp_path: Path, override: dict) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides=override)
+    assert "ram_peak_mib is missing or not positive" in _problems(run_dir, coco)
+
+
+def test_gpu_hours_is_derived_from_wall_time_and_labelled(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides={"wall_seconds": 1800.0, "ended_at": "2026-10-04T10:30:00+00:00"})
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
+    assert record.gpu_hours == pytest.approx(0.5)
+    assert record.fps == pytest.approx(2 / 1800.0)
+    assert "wall_seconds / 3600" in json.loads(record.notes or "{}")["derived"]["gpu_hours"]
+
+
+def test_partial_batch_write_is_reported_not_claimed_atomic(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
+    second = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-02", baseline_id="EXP-20261004-01", approval_ref="APPROVAL-TEST")
+
+    class FailsSecond:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def record_experiment(self, _record) -> None:
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("disk full")
+
+    with pytest.raises(RecordError) as info:
+        write_records(FailsSecond(), [record, second])
+    message = info.value.problems[0]
+    assert "failed writing EXP-20261004-02" in message and "already written: ['EXP-20261004-01']" in message
+
+
+def _load_writer():
+    path = Path(__file__).resolve().parent.parent / "scripts" / "record_evaluation_runs.py"
+    spec = importlib.util.spec_from_file_location("record_evaluation_runs", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_writer_refuses_a_series_with_mixed_approvals(tmp_path: Path, monkeypatch, capsys) -> None:
+    writer = _load_writer()
+    monkeypatch.setattr(writer, "require_clean_worktree", lambda _root: HEAD)
+    monkeypatch.setattr(writer, "DatasetExpectation", lambda: EXPECT)  # 2 images / 2 persons fixture
+    runs = []
+    coco = None
+    for size, approval in ((640, "APPROVAL-TEST"), (960, "APPROVAL-TEST"), (1280, "DIFFERENT")):
+        run_dir, coco = make_run(tmp_path / f"s{size}", imgsz=size, run_overrides={"approval_ref": approval})
+        runs += ["--run", f"{size}={run_dir}"]
+    code = writer.main(["--approval-ref", "APPROVAL-TEST", *runs, "--coco-root", str(coco), "--dry-run"])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "[1280] run approval 'DIFFERENT' != --approval-ref 'APPROVAL-TEST'" in err
+    assert "nothing recorded" in err
+
+
+def test_writer_refuses_a_blank_approval_reference(monkeypatch, capsys) -> None:
+    writer = _load_writer()
+    assert writer.main(["--approval-ref", "  ", "--run", "640=/x", "--run", "960=/x", "--run", "1280=/x"]) == 2
+
+
+def test_wrapper_requires_the_approval_argument() -> None:
+    wrapper = _load_wrapper()
+    with pytest.raises(SystemExit):
+        wrapper.main(["--imgsz", "640"])
+
+
+def test_wrapper_refuses_a_blank_approval_before_any_run(monkeypatch, capsys) -> None:
+    wrapper = _load_wrapper()
+    monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run on blank approval"))
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "   "]) == 2
+    assert "must not be blank" in capsys.readouterr().err
+
+
+def test_ru_maxrss_is_converted_from_linux_kib_to_mib() -> None:
+    wrapper = _load_wrapper()
+    assert wrapper.ru_maxrss_to_mib(2048) == pytest.approx(2.0)
+    assert wrapper.ru_maxrss_to_mib(1024 * 1536) == pytest.approx(1536.0)
+
+
+@pytest.mark.parametrize(("text", "expected"), [("  1234\n", 1234), ("[N/A]\n", None), ("", None)])
+def test_nvidia_smi_memory_parse(text: str, expected) -> None:
+    assert _load_wrapper().parse_memory_used(text) == expected
+
+
+def test_vram_sampler_keeps_baseline_and_peak_and_skips_failed_polls(monkeypatch) -> None:
+    wrapper = _load_wrapper()
+    values = iter([300, None, 900, 450])
+    last = {"v": 450}
+
+    def fake(_cls=None):
+        try:
+            last["v"] = next(values)
+        except StopIteration:
+            pass
+        return last["v"]
+
+    monkeypatch.setattr(wrapper.VramSampler, "sample_once", staticmethod(fake))
+    sampler = wrapper.VramSampler(interval=0.001)
+    sampler.start()
+    for _ in range(5000):  # let the poller take its samples before stopping
+        if len(sampler.samples) >= 2:
+            break
+        time.sleep(0.001)
+    peak = sampler.stop()
+    assert sampler.baseline_mib == 300
+    assert peak == 900  # the poll that returned None was skipped, not invented as 0
+    assert 900 in sampler.samples
+
+
+def test_vram_sampler_reports_none_when_no_sample_succeeds(monkeypatch) -> None:
+    wrapper = _load_wrapper()
+    monkeypatch.setattr(wrapper.VramSampler, "sample_once", staticmethod(lambda: None))
+    sampler = wrapper.VramSampler(interval=0.001)
+    sampler.start()
+    assert sampler.stop() is None

@@ -3,37 +3,42 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-10-04 · **Phase:** 5d — record-writing path for EXP-20261004-01 built and tested;
-**no GPU run** · **Health:** green on repository tests; amber on experiment readiness
+**Updated:** 2026-10-04 · **Phase:** 5d — ADR-0017 owner-review blocking changes implemented;
+**no GPU run; recording writer not run against real artifacts** · **Health:** green on repository
+tests; amber on experiment readiness
 
 ## Where we are
 
 Branch `feature/claude/experiment-provenance-recovery` (worktree `/home/dev/cv-engineering-agent-sweep`).
-Committed on the branch; **not pushed, not merged.**
+Committed on the branch. **Not pushed, not merged.**
 
-**Done:**
-- **Record-writing path (ADR-0017, proposed):** `cv_agent/experiments/evaluation_records.py` verifies a
-  measured run directory and builds an ExperimentRecord, or refuses. Writes are all-or-nothing.
-  `cv_agent/experiments/detection_metrics.py` holds the shared metric math.
-- **Wrapper and writer:** `scripts/run_yolo_val_measured.py --imgsz N` (one `yolo val` run, refuses a
-  dirty tree and overwriting) and `scripts/record_evaluation_runs.py` (verify three runs, dry-run or write).
-- **Ledger, provenance, path, Q28 protocol:** unchanged from the previous session (ADR-0016, Q29 recovered).
+**Done (six blocking changes from the ADR-0017 review):**
+1. `quantize=16` replaces the deprecated `half=True` in the measured wrapper. `run.json` records the
+   exact requested-precision label.
+2. Historical precision corrected in EXPERIMENTS.md: EXP-20260930-01 and the sweep rows ran FP32, so
+   EXP-20261004-01 is FP16-requested and NOT like-for-like. Historical rows are unedited.
+3. `--approval-ref` is mandatory at GPU-run time, recorded in `run.json`, and the writer requires all
+   three runs to carry the same reference.
+4. Peak VRAM (nvidia-smi polling) and peak RAM (`getrusage`, Linux KiB to MiB) are required. `gpu_hours`
+   is derived from wall time and labelled as derived.
+5. ADR-0017 §4a states the operator-run exception to the ADR-0013/ADR-0009 JobExecutor path, limited to
+   this series.
+6. ADR-0017 §3.2 states that verification is all-or-nothing and ledger writes are sequential, not transactional.
 
-**Validation:** full pytest **1688 passed, 4 skipped, 0 failed** (35 new record-writer tests).
-`ruff check .` clean. `mypy cv_agent` clean (81 files). New scripts and tests clean.
+**Validation:** full pytest 1713 passed, 4 skipped, 0 failed (before a final typing-only fix; the
+record tests and mypy re-checked after it). `ruff check .` clean. `mypy cv_agent` clean (81 files).
 
 ## Next (owner)
 
-1. **Accept ADR-0017** (recording boundary) before the first real run.
-2. **Approve the GPU run** for EXP-20261004-01 with an approval id, and only then run the wrapper three times.
-3. Review the record output with `--dry-run` before writing.
-4. Q30, Q31, Q27 and D-069 stay OPEN and are not needed for the measurement.
+1. **Accept ADR-0017** (now revised to implement the review changes).
+2. **Approve the GPU run** for EXP-20261004-01 and supply the approval id as `--approval-ref`.
+3. Dry-run the writer on the three real run directories before writing anything.
 
 ## Blockers
 
-- The writer has been tested only on synthetic runs. The first real run is the first end-to-end check.
-- VRAM, GPU hours and power are not measured for this series.
-- Six historical rows keep NULL `commit_sha` (no SHA fabricated).
+- The recording writer has only been tested on synthetic runs. The first real run is the first end-to-end check.
+- Historical records keep their original precision labels; the correction lives in EXPERIMENTS.md only.
+- Q30, Q31, Q27 and D-069 remain OPEN. None blocks the measurement.
 
 ## Do not start yet
 
