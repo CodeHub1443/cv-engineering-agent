@@ -2135,3 +2135,27 @@ No production winner, no success threshold, no optimization decision.
 
 **Not done:** no GPU run beyond the three approved measurements; no further writes to the ledger; attempt-1
 archive not modified; no push, no merge.
+
+## 2026-10-04 — FP32 640 control (ADR-0018): run executed, ledger write held
+
+**Owner inputs received:** D-069 yes (measurement-only, no pass/fail or production criterion); Q30 "not yet"
+(stays OPEN); approval reference `EXP-20261004-FP32-640-OWNER-20261004`.
+
+**Changed (commit `5861718`):** the measured wrapper gained `--precision fp32` (640 only, `quantize` unset);
+the verifier takes the protocol's `quantize`; the writer gained `--fp32-control`, one record `EXP-20261004-04`
+with baseline `EXP-20261004-01`. The FP16 series path is unchanged. 86 evaluation-record tests pass; full
+suite 1739 passed, 4 skipped; ruff and mypy clean. ADR-0018 is Proposed.
+
+**Run:** `e1-yolo11n-coco-val2017-imgsz640-conf0001-fp32` exited 0 in 140.8 s. mAP@0.5 0.75, mAP@0.5:0.95 0.518,
+AP@0.5 small/medium/large 0.355 / 0.726 / 0.941. The writer dry run verifies all checks.
+
+**Not written to the ledger.** The run's system metrics are contaminated. The GPU was shared with another
+project's training job (`models/7_train_single_task.py --task lung`, pid 308159, 716 MiB, 77% utilization).
+The pre-run VRAM baseline was 1164 MiB, against 360 MiB in the FP16 series. The recorded `memory.vram`
+(1629 MiB) is device-wide, and FPS (35.5) and latency (7.4 ms inference) reflect contention. Ledger rows are
+append-only, so a contaminated row cannot be corrected in place. Accuracy values are not affected by
+contention, but ADR-0017 requires system metrics in the same record, so the record is held for an owner decision.
+
+**Open:** owner decides between (a) a re-run on an idle GPU under a new approval reference, (b) recording the
+accuracy with system metrics marked not comparable, which needs a recording rule decision, or (c) no record.
+D-069 stays OPEN generally; Q30 stays OPEN.
