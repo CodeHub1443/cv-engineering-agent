@@ -3,55 +3,55 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-10-04 · **Phase:** 5d — FP32 640 control: implementation under issue #74;
-rerun gated on owner inputs · **Health:** green on repository tests (see JOURNAL for the last run)
+**Updated:** 2026-10-04 · **Phase:** 5d — FP32 640 control persisted as `EXP-20261004-04` (measurement
+only). Documentation reconciled. **Health:** green on repository tests (see JOURNAL for the last run).
 
 ## Where we are
 
 Branch `feature/claude/experiment-provenance-recovery` (worktree `/home/dev/cv-engineering-agent-sweep`).
 Committed on the branch. **Not pushed, not merged.**
 
-**Done:**
-- **EXP-20261004-01 series** persisted (measurement only): `-01` (640, SELF), `-02` (960), `-03` (1280),
-  baseline `-01` for both. Commit `ab686f3`. Details: EXPERIMENTS.md.
-- **Ledger: 9 rows.** No row written in this stage. SHA-256 of `experiments.sqlite` was `0d910b01…cfc1`
-  before quarantine and is re-checked before any future write.
-- **Issue #74** created (authorized). Scope: contaminated-run quarantine, GPU-process provenance,
-  writer eligibility, FP32 control path. It is not closed.
-- **Contaminated FP32 attempt quarantined** (rename, not copy): `/home/dev/cv-engineering-evidence/EXP-20261004-FP32-640/contaminated-concurrent-gpu/`.
-  Contains the run directory, `run.json`, `val.log`, pre/post-move hashes, `MANIFEST.sha256` (15 files, verified),
-  `CONTAMINATED.md`. Read-only. **Not ledger-eligible, permanently.** Its owner approval reference is consumed.
-- **GPU-process provenance implemented:** `nvidia-smi --query-compute-apps` snapshots at start (must be
-  empty), at every VRAM poll (own pid excluded), and at end, recorded in run.json. The wrapper refuses an
-  unreadable or busy start. The writer rejects any run with a missing, unreadable or foreign snapshot,
-  or a mismatched `foreign_process_seen`. The 1-second polling limit is documented.
-- **ADR-0018:** Accepted by the owner on 2026-10-04 (D-075), linked to #74. Acceptance approves the design only.
+**Ledger: 10 records.** SHA-256 of `experiments.sqlite` is `9251eb0c…8fef8fa` (it was `0d910b01…cfc1` before the
+`EXP-20261004-04` write). Integrity check ok. Exactly one row was added on 2026-10-04.
 
-**Interpretation:** unchanged from EXP-20261004-01 (descriptive only). No winner, no threshold.
+**Done:**
+- **EXP-20261004-01 series** persisted (measurement only): `-01` (640, SELF), `-02` (960), `-03` (1280), baseline
+  `-01` for `-02` and `-03`. Commit `ab686f3`. Details: EXPERIMENTS.md.
+- **EXP-20261004-04** persisted (FP32 640 control, measurement only). Baseline `-01`, commit `74a3cc2`, approval
+  `EXP-20261004-FP32-640-RERUN-OWNER-20261004`. mAP@0.5:0.95 0.518; FPS 81.9. Details: EXPERIMENTS.md.
+  - **Approval deviation:** the approval record was documented **after** the GPU run, not before it. It is recorded
+    in JOURNAL as a post-execution entry. The gate was not satisfied before execution, and nothing claims otherwise.
+  - **NoMachine exemption** (ADR-0018 §3.16, D-076): `/usr/NX/bin/nxnode.bin` was present during the run and exempt
+    from the foreign-process rule. VRAM and timing are device-wide and include it.
+- **Contaminated FP32 attempt** quarantined by rename at `/home/dev/cv-engineering-evidence/EXP-20261004-FP32-640/contaminated-concurrent-gpu/`.
+  Read-only, manifest verified. **Not ledger-eligible, permanently.** Its approval reference is consumed.
+- **ADR-0018:** Accepted (D-075), amended for the NoMachine exception (D-076), linked to issue #74. Issue #74 is open.
+- **GPU-process provenance** is implemented: snapshots at start, during polling and at end, recorded in run.json.
+  The writer rejects missing, unreadable or foreign snapshots. The 1-second polling limit is documented.
+
+**Interpretation (descriptive only):** at 640, the FP32 control and the FP16-requested run agree within about 0.001
+on every accuracy value reported. This is one comparison and does not decide FP16 vs FP32. No winner, no threshold.
 
 ## Open (owner)
 
-1. **Fresh approval reference** for the clean FP32 640 rerun. Not supplied; the agent does not invent one.
-   This is one of the two owner gates. The other is an idle GPU, which is an observed condition, not a decision.
-3. **D-069** (measurement-only scope for the next series) — answered for this control only; stays OPEN generally.
-4. **Q30** — precision floor / operating point — "not yet", stays OPEN.
-5. **Q31**, **Q27** — unchanged, OPEN.
+1. **D-069** — whether any AP change should drive a decision. Answered for the FP32 control only (measurement-only).
+   Stays OPEN generally.
+2. **Q30** — precision floor and operating point. "Not yet." Stays OPEN. Needed before any production choice.
+3. **Q31** — repository versus skill ownership of the trt-perf-analysis contract. Stays OPEN.
+4. **Q27** — official size-stratified mAP needs `instances_val2017.json`. Stays OPEN.
 
 ## Blockers
 
-- **Rerun blocked** until a fresh approval reference is supplied and the GPU is idle. The rest of the gate in ADR-0018 §6 must also hold.
-- **GPU busy:** another project's training job (`models/7_train_single_task.py --task lung`, pid 308159)
-  was on the device at the last check. The agent does not stop or control it. The rerun waits for an idle GPU.
+None for the repository. Any production or precision decision waits on Q30 and D-069.
 
-## Next actions (in order)
+## Next actions
 
-1. Owner: supply a fresh approval reference when ready to run.
-2. Agent: when the reference is supplied and the GPU is idle, re-run the gate in ADR-0018 §6 (clean tree, empty GPU
-   process list, no concurrent workload), write the approval record to JOURNAL, then run the FP32 640 control.
-3. Agent: after the run, dry-run the writer; write `EXP-20261004-04` only if the run is eligible.
+1. Owner: review EXP-20261004-04 and decide whether to close issue #74.
+2. Owner: decide whether any further GPU series is wanted. Any run needs a fresh approval reference and a clean
+   GPU process check (ADR-0018 §6).
 
 ## Do not start yet
 
-Any GPU job without a fresh approval reference. Training. Model swaps (Q25). NMS or crowd experiments.
+Any GPU job without a fresh owner approval reference. Training. Model swaps (Q25). NMS or crowd experiments.
 TensorRT, DeepStream, Model Optimizer. Stopping or controlling another project's processes. Pushing or
 merging this branch without owner review.

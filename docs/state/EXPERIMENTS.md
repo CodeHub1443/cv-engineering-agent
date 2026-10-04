@@ -160,6 +160,7 @@ The table below is a condensed rollup view for scanning; full row records live i
 | EXP-20261004-01 | Measurement only (no pass/fail, D-069): imgsz 640, control of the series, Q28 protocol conf=0.001 | SELF | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 requested (quantize=16); NOT like-for-like with FP32 history | RTX 3060 12GB | **0.517** | ref. only, P 0.777 / R 0.670 @0.25 | 84.0 | 6.9 e2e / 5.8 inf | 748 MiB peak / 2190 MiB RAM | N/A | 0.0165 (derived) | measured; no decision |
 | EXP-20261004-02 | Measurement only (no pass/fail, D-069): imgsz 960 | EXP-20261004-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 requested (quantize=16); NOT like-for-like with FP32 history | RTX 3060 12GB | **0.532** | ref. only, P 0.727 / R 0.733 @0.25 | 78.6 | 7.6 e2e / 6.1 inf | 797 MiB peak / 2267 MiB RAM | N/A | 0.0177 (derived) | measured; no decision |
 | EXP-20261004-03 | Measurement only (no pass/fail, D-069): imgsz 1280 | EXP-20261004-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 requested (quantize=16); NOT like-for-like with FP32 history | RTX 3060 12GB | **0.489** | ref. only, P 0.661 / R 0.741 @0.25 | 71.6 | 8.5 e2e / 6.4 inf | 772 MiB peak / 2357 MiB RAM | N/A | 0.0194 (derived) | measured; no decision |
+| EXP-20261004-04 | Measurement only (no pass/fail, D-069): FP32 control at imgsz 640 (precision is the only variable vs EXP-20261004-01; ADR-0018) | EXP-20261004-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP32 requested (quantize unset); NOT like-for-like with FP16-requested series in this respect | RTX 3060 12GB | **0.518** | ref. only, P 0.776 / R 0.670 @0.25 | 81.9 | 6.9 e2e / 5.7 inf | 858 MiB peak (device-wide; NoMachine node present) / 1940 MiB RAM | N/A | 0.0170 (derived) | measured; no decision; see section below |
 
 ### EXP-20261004-01 series — completed, measurement only (2026-10-04)
 
@@ -352,5 +353,72 @@ VRAM (baseline 1164 MiB, peak 1629 MiB), FPS (35.5) and latency (7.4 ms inferenc
 (`/home/dev/cv-engineering-evidence/EXP-20261004-FP32-640/contaminated-concurrent-gpu/`) holds the artifacts,
 `CONTAMINATED.md` and a verified manifest, and is read-only. ADR-0018 §3.9 and D-074 record the decision. The
 clean rerun is gated (ADR-0018 §6) and needs a fresh owner approval reference. Its id is `EXP-20261004-04`,
-which is not allocated until a record is written. Series rows above are unchanged. Their GPU idleness is
+which is not allocated until a record is written. Series rows above are unchanged. **Update 2026-10-04:** the clean rerun was executed and written as `EXP-20261004-04`; see the section below. Their GPU idleness is
 inferred from baseline VRAM, not verified from process snapshots (ADR-0018 §3.13).
+
+### EXP-20261004-04 — FP32 640 control, persisted (completed 2026-10-04, measurement only)
+
+**Status: completed and persisted. Measurement only (D-069). No pass/fail criterion, no decision, no production
+choice.** This is the precision control for EXP-20261004-01: the same protocol at imgsz 640, with `quantize` unset
+(FP32) instead of `quantize=16`. Q30 (operating point and precision floor) and D-069 remain OPEN. Nothing here
+decides whether FP16 or FP32 is acceptable.
+
+- **Ledger record:** `EXP-20261004-04`, baseline `EXP-20261004-01`, commit `74a3cc2403788c7a1745b101371127fffa5bf3ea`,
+  approval `EXP-20261004-FP32-640-RERUN-OWNER-20261004`. Written by `scripts/record_evaluation_runs.py --fp32-control`
+  on 2026-10-04 after a reviewed dry run.
+- **Approval chronology (deviation, recorded in JOURNAL):** the approval record required by ADR-0018 §6 item 5 was
+  documented **after** the GPU run, not before it. The run is not evidence that the gate was satisfied before
+  execution. The approval record is documented in JOURNAL with this explicit deviation.
+- **Protocol:** YOLO11n, COCO val2017 persons (5000 images, 10777 GT persons), RTX 3060 12GB (driver 535.309.01),
+  batch 1, device 0, conf 0.001 (Q28, full PR curve), `quantize` unset (ultralytics `fp16=False`). Actual inference
+  precision is not logged by ultralytics, so the label is the request.
+- **Run:** wall 61.058 s, exit 0, started 2026-10-04T17:18:30.563932+00:00, ended 2026-10-04T17:19:31.621467+00:00.
+
+Measured values, exactly as persisted in the ledger:
+
+| Metric | Value |
+|---|---|
+| mAP@0.5 | 0.75 |
+| mAP@0.5:0.95 | 0.518 |
+| AP@0.5 small / medium / large | 0.35468745409468344 / 0.7259676696869994 / 0.9409535908564703 |
+| fixed_thr@0.25 precision / recall (reference only) | 0.7763794772507261 / 0.6697596733784912 |
+| fixed_thr@0.25 recall small / medium / large / dense / sparse (reference only) | 0.2676332288401254 / 0.655733261046354 / 0.9074074074074074 / 0.6059106128985297 / 0.781985670419652 |
+| FPS (e2e) | 81.88935110878181 |
+| latency end-to-end / inference (ms) | 6.9 / 5.7 |
+| VRAM peak (device-wide) / RAM peak | 858.0 MiB / 1939.9 MiB |
+| VRAM baseline (device-wide, pre-run) | 592 MiB |
+| gpu_hours (derived: wall / 3600) | 0.016960555555555555 |
+| predictions min person score | 0.001 (full curve, Q28 gate satisfied) |
+
+**Comparison with EXP-20261004-01 (FP16 requested, same protocol).** Descriptive only, one run each:
+
+| Metric | EXP-20261004-01 (quantize=16) | EXP-20261004-04 (FP32) |
+|---|---|---|
+| mAP@0.5 / mAP@0.5:0.95 | 0.75 / 0.517 | 0.75 / 0.518 |
+| AP@0.5 small / medium / large | 0.3556 / 0.7259 / 0.9410 | 0.3547 / 0.7260 / 0.9410 |
+| fixed P / R at 0.25 (reference) | 0.7768 / 0.6701 | 0.7764 / 0.6698 |
+| inference latency (ms) | 5.8 | 5.7 |
+
+The accuracy values agree within about 0.001 at this single size. That is an observation about this one
+comparison, not evidence of a general FP16 or FP32 property, and it is not a production choice.
+
+**Caveats (read these before using any system metric):**
+
+1. **NoMachine exemption (ADR-0018 §3.16, D-076).** The GPU-process rule exempts exactly one process name,
+   `/usr/NX/bin/nxnode.bin` (NoMachine remote desktop, pid 3884). It was present at start, during polling (every
+   sample), and at end. It is not counted as a foreign workload. Its GPU memory and compute are inside the device-wide
+   VRAM value, and its effect on FPS and latency is not measured.
+2. **Device-wide metrics.** VRAM is `nvidia-smi memory.used` for the whole device (ADR-0017). The pre-run baseline
+   was 592 MiB here, against 413–433 MiB for the EXP-20261004-01..03 series. So the VRAM values are not directly
+   comparable across the two series, and no memory conclusion is drawn.
+3. **Process observation.** During polling the run's own process appeared under pid 15596 (`/usr/bin/python3`) and
+   was recognized as the run's own process, which confirms the own-pid assumption on a real run (ADR-0018 §3.10). Only
+   the NoMachine node and that own process were observed. No other process appeared in any sample. Polling is at 1 s,
+   so a process that started and exited between polls would not be seen.
+4. **Not verified.** The EXP-20261004-01..03 records have no process snapshots, so their idle state remains inferred
+   from baseline VRAM, not process-verified (ADR-0018 §3.13).
+5. **Contaminated attempt.** The earlier FP32 640 run (`5861718`) is not part of this record. It is quarantined and
+   permanently not ledger-eligible (section above).
+
+**Not done here:** no production winner, no pass/fail threshold, no precision floor, no operating point (Q30 open),
+no change to D-069 (OPEN). No ADR was modified.

@@ -2262,3 +2262,11 @@ with the exempt NoMachine node, see ADR-0018 §3.16) and RAM 1939.9 MiB.
 
 **Not done:** no GPU job, no further ledger write, ADR-0018 not modified, measured run artifacts not modified,
 no push, no merge. STATUS.md and EXPERIMENTS.md were not updated in this commit (owner scope: JOURNAL only).
+
+## 2026-10-04 — State reconciliation after the EXP-20261004-04 write
+
+STATUS.md is rewritten for the 10-record ledger. EXPERIMENTS.md gains the `EXP-20261004-04` rollup row, a measurement
+section with the persisted values, the NoMachine exemption and the device-wide caveat, and an update line in the
+quarantine section. Both are measurement-only and state that no production choice is made. The post-execution approval
+deviation is preserved. Q30 and D-069 remain OPEN. ADR-0016, ADR-0017, ADR-0018 and the ledger records are unchanged.
+The measured run artifacts are unchanged. Earlier entries are not rewritten.
