@@ -86,7 +86,7 @@ This revision defines **no** pass/fail criteria and no magnitudes. The earlier p
 | ADR-0016 (experiment provenance; new module `cv_agent/experiments/provenance.py`) | drafted, owner review |
 | Restoring `yolo11n.pt` and `coco-person-val.yaml` from Trash | **prerequisite**, LEDGER-RECOVERY.md §4 (owner approval) |
 | Ledger restore (Q29) | **owner approval**; required to record a completed row |
-| Record-writing path (verifier, writer, wrapper; ADR-0017) | done on the feature branch, 35 tests; owner acceptance of ADR-0017 before the first real run |
+| Record-writing path (verifier, writer, wrapper; ADR-0017) | done on the feature branch; ADR-0017 **accepted** 2026-10-04 (D-073). The run still needs the owner's approval reference |
 | Owner decision on criteria (§7) | **open**. Needed only if the run is to drive a decision |
 | Q30 operating point | **OPEN**. Not needed for measurement-only |
 

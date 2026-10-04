@@ -1,6 +1,6 @@
 # ADR-0017: Recording measured evaluation runs as ExperimentRecords
 
-- **Status:** Proposed (revised 2026-10-04 to implement the six blocking changes from the owner review). Implemented on `feature/claude/experiment-provenance-recovery`. Owner acceptance is required before the first real evaluation run is recorded (CLAUDE.md §5).
+- **Status:** Accepted (2026-10-04, owner acceptance). Implemented on `feature/claude/experiment-provenance-recovery` (commit `417f639` for the review changes); committed on the branch, not pushed or merged. Acceptance does not approve any GPU run; each run still needs an owner approval reference (§3b).
 - **Date:** 2026-10-04
 - **Layer:** experiments (cross-cutting provenance, ADR-0016)
 - **Canon:** `[P§25]` (reproducibility metadata), `[P§29.3]` (no claim without a quantitative comparison), `[P§29.5]` (no result valid without the full metadata), `[P§34]` (boundaries)

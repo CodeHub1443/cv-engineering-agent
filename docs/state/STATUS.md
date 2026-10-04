@@ -3,7 +3,7 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-10-04 · **Phase:** 5d — ADR-0017 owner-review blocking changes implemented;
+**Updated:** 2026-10-04 · **Phase:** 5d — ADR-0017 accepted (D-073); owner-review blocking changes implemented;
 **no GPU run; recording writer not run against real artifacts** · **Health:** green on repository
 tests; amber on experiment readiness
 
@@ -30,8 +30,8 @@ record tests and mypy re-checked after it). `ruff check .` clean. `mypy cv_agent
 
 ## Next (owner)
 
-1. **Accept ADR-0017** (now revised to implement the review changes).
-2. **Approve the GPU run** for EXP-20261004-01 and supply the approval id as `--approval-ref`.
+1. ~~Accept ADR-0017~~ **Done 2026-10-04 (D-073):** ADR-0017 is Accepted.
+2. **Approve the GPU run** for EXP-20261004-01 and supply the approval id as `--approval-ref`. This is the only remaining owner action before execution.
 3. Dry-run the writer on the three real run directories before writing anything.
 
 ## Blockers
@@ -42,6 +42,6 @@ record tests and mypy re-checked after it). `ruff check .` clean. `mypy cv_agent
 
 ## Do not start yet
 
-EXP-20261004-01 execution before owner approval and ADR-0017 acceptance. Training. Model swaps (Q25).
+EXP-20261004-01 execution before the owner's approval reference (ADR-0017 is accepted). Training. Model swaps (Q25).
 NMS or crowd experiments. Any precision floor, recall target, or operating point (Q30). TensorRT,
 DeepStream, Model Optimizer. Pushing or merging this branch without owner review.

@@ -2099,3 +2099,11 @@ Q29 restore not executed (awaiting approval). Q30 OPEN.
 **Validation:** full pytest 1713 passed, 4 skipped, 0 failed (before a final typing-only fix in the verifier; the record tests and mypy re-checked after it). Ruff clean. Mypy clean (`cv_agent`: 81 files). Ledger sha256 unchanged (`d7ff167e…`).
 
 **Not done:** no GPU run. The writer was not executed against real run directories. No push, no merge. ADR-0017 remains Proposed until the owner accepts it. Q30, Q31, Q27 and D-069 remain OPEN.
+
+## 2026-10-04 — ADR-0017 accepted (D-073); documentation only; no GPU run
+
+**Did:** Changed ADR-0017 status from Proposed to Accepted, with the implementation commit reference and the statement that acceptance approves no GPU run. Recorded D-073 (acceptance) as a new row, leaving the earlier D-071 and D-072 rows as written. Updated the readiness row in the EXP-20261004-01 proposal and the next-steps list in STATUS, so the pending item is no longer described as pending. Journal entries from earlier in the session are unchanged.
+
+**Not changed:** the six historical ledger records; Q30, Q31, Q27 and D-069 (all OPEN); the EXP-20261004-01 measurement protocol; the code.
+
+**Not done:** no GPU run, no writer run against real artifacts, no push, no merge. The only remaining owner action before execution is the approval reference for EXP-20261004-01.
