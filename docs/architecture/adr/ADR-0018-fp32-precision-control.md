@@ -36,6 +36,8 @@ The first FP32 640 attempt ran on 2026-10-04 under owner reference `EXP-20261004
     - **end:** after the run process exits.
 
     `run.json` also records `own_pid` and `foreign_process_seen`, a boolean computed from all three points. The **polling limitation** is stated here: polling is at 1-second intervals, so a process that starts and exits between two polls is not seen. This is a known limit of the method, not a claim that the GPU was idle between polls.
+
+    **Own-pid assumption (UNVERIFIED on a real run).** The exclusion above assumes that the pid nvidia-smi reports for the run's GPU work is the pid of the `yolo val` process the wrapper started (`proc.pid`). No real GPU run has yet confirmed this. The rule fails closed. If the run's GPU work appears under a different pid, its own process is recorded as foreign, so `foreign_process_seen` is true and the writer refuses the run. A wrong assumption can therefore block a clean rerun, but it cannot allow a contaminated one. The first rerun must confirm the pid match, and its snapshots are the evidence. A refused run is never recorded as eligible.
 11. **Writer rejection.** The writer refuses any run that:
     - has no `gpu_process_snapshots` or `own_pid`;
     - has a start snapshot that is missing, unreadable, or non-empty;
