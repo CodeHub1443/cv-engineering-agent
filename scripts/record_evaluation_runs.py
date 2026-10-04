@@ -2,6 +2,8 @@
 
     python3 scripts/record_evaluation_runs.py --approval-ref "<approval id>" \\
         --run 640=<run dir> --run 960=<run dir> --run 1280=<run dir> [--dry-run]
+    python3 scripts/record_evaluation_runs.py --approval-ref "<approval id>" \\
+        --fp32-control <run dir> [--dry-run]     (ADR-0018: one FP32 640 control record)
 
 Each --run points at the run directory written by scripts/run_yolo_val_measured.py. All three runs
 are verified before anything is written. If any run fails, nothing is recorded and every problem
@@ -24,6 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from cv_agent.experiments.evaluation_records import (  # noqa: E402
+    FP32_CONTROL_BASELINE,
+    FP32_CONTROL_SERIES_ID,
     DatasetExpectation,
     RecordError,
     build_record,
@@ -40,6 +44,7 @@ SERIES = {
     1280: ("EXP-20261004-03", "EXP-20261004-01"),
 }
 COCO_ROOT = Path("/home/dev/Documents/data_cleaner/datasets/coco")
+FP32_CONTROL_IMGSZ = 640
 
 
 def parse_runs(items: list[str]) -> dict[int, Path]:
@@ -60,13 +65,22 @@ def parse_runs(items: list[str]) -> dict[int, Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--approval-ref", required=True, help="the owner approval id for this run series")
-    parser.add_argument("--run", action="append", required=True, metavar="IMGSZ=RUN_DIR")
+    parser.add_argument("--run", action="append", metavar="IMGSZ=RUN_DIR")
+    parser.add_argument("--fp32-control", type=Path, metavar="RUN_DIR", help="the FP32 640 control run (ADR-0018)")
     parser.add_argument("--dry-run", action="store_true", help="verify and print records; write nothing")
     parser.add_argument("--coco-root", type=Path, default=COCO_ROOT)
     args = parser.parse_args(argv)
 
     if not args.approval_ref.strip():
         print("REFUSED: --approval-ref must not be blank", file=sys.stderr)
+        return 2
+    if args.fp32_control is not None and args.run:
+        print("REFUSED: --fp32-control and --run are separate series; give one", file=sys.stderr)
+        return 2
+    if args.fp32_control is not None:
+        return record_fp32_control(args)
+    if not args.run:
+        print("REFUSED: give three --run IMGSZ=RUN_DIR entries, or --fp32-control RUN_DIR", file=sys.stderr)
         return 2
     try:
         runs = parse_runs(args.run)
@@ -116,7 +130,12 @@ def main(argv: list[str] | None = None) -> int:
             print("REFUSED: nothing recorded:", "; ".join(exc.problems), file=sys.stderr)
             return 1
 
-    if args.dry_run:
+    return finish(records, dry_run=args.dry_run)
+
+
+def finish(records: list, *, dry_run: bool) -> int:
+    """Print the records, or preflight and write them. Shared by the series and the control."""
+    if dry_run:
         print(json.dumps([dataclasses.asdict(r) for r in records], indent=2, default=str))
         print("dry run: nothing written")
         return 0
@@ -136,6 +155,46 @@ def main(argv: list[str] | None = None) -> int:
         ledger.close()  # type: ignore[attr-defined]
     print("recorded:", ", ".join(written))
     return 0
+
+
+def record_fp32_control(args: argparse.Namespace) -> int:
+    """One FP32 640 control record, verified under the FP32 protocol (ADR-0018). Same approval rules."""
+    try:
+        head = require_clean_worktree(REPO_ROOT)
+    except ProvenanceError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    try:
+        run = verify_run(
+            args.fp32_control,
+            imgsz=FP32_CONTROL_IMGSZ,
+            coco_root=args.coco_root,
+            head_commit=head,
+            dataset=DatasetExpectation(),
+            quantize=None,
+        )
+    except RecordError as exc:
+        print("REFUSED: nothing recorded. Problems:", file=sys.stderr)
+        for problem in exc.problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 1
+    if run.approval_ref != args.approval_ref:
+        print(
+            f"REFUSED: run approval {run.approval_ref!r} != --approval-ref {args.approval_ref!r}",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        record = build_record(
+            run,
+            exp_id=FP32_CONTROL_SERIES_ID,
+            baseline_id=FP32_CONTROL_BASELINE,
+            approval_ref=args.approval_ref,
+        )
+    except RecordError as exc:
+        print("REFUSED: nothing recorded:", "; ".join(exc.problems), file=sys.stderr)
+        return 1
+    return finish([record], dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

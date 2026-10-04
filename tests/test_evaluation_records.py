@@ -82,6 +82,7 @@ def make_run(
     val_log: str = VAL_LOG,
     predictions: str | None = None,
     run_overrides: dict | None = None,
+    quantize: int | None = 16,
 ) -> tuple[Path, Path]:
     """Build <tmp>/state/evaluations/<name>/ plus .val.log and .run.json. Returns (run_dir, coco_root)."""
     state = tmp / "state"
@@ -110,8 +111,13 @@ def make_run(
         "batch": 1,
         "device": "0",
         "classes": [0],
-        "quantize": 16,
-        "precision_requested": "FP16 requested (quantize=16); actual inference precision is not logged",
+        "quantize": quantize,
+        "precision_requested": (
+            "FP16 requested (quantize=16); actual inference precision is not logged"
+            if quantize == 16
+            else "FP32 requested (quantize unset; ultralytics default None, fp16=False); "
+            "actual inference precision is not logged"
+        ),
         "approval_ref": "APPROVAL-TEST",
         "vram_baseline_mib": 360,
         "vram_peak_mib": 600,
@@ -693,3 +699,80 @@ def test_invalid_geometry_is_still_refused(tmp_path: Path, bbox) -> None:
     ]
     run_dir, coco = make_run(tmp_path, predictions=json.dumps(preds))
     assert "malformed bbox" in _problems(run_dir, coco)
+
+
+# ── FP32 control (ADR-0018): precision is the only variable against the FP16 640 baseline ──
+
+
+def test_fp32_control_verifies_and_records_with_the_fp32_label(tmp_path: Path) -> None:
+    from cv_agent.experiments.evaluation_records import (
+        FP32_CONTROL_BASELINE,
+        FP32_CONTROL_SERIES_ID,
+        PRECISION_FP32_REQUESTED,
+    )
+
+    run_dir, coco = make_run(tmp_path, quantize=None)
+    run = verify_run(run_dir, imgsz=640, coco_root=coco, head_commit=HEAD, dataset=EXPECT, quantize=None)
+    record = build_record(
+        run, exp_id=FP32_CONTROL_SERIES_ID, baseline_id=FP32_CONTROL_BASELINE, approval_ref="APPROVAL-TEST"
+    )
+    assert record.precision == PRECISION_FP32_REQUESTED
+    assert record.baseline_id == "EXP-20261004-01"
+    notes = json.loads(record.notes)
+    assert "precision_control" in notes
+    assert "legacy_reference" not in notes  # the control is not a SELF baseline
+
+
+def test_fp16_run_is_refused_when_an_fp32_run_is_expected(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)  # quantize=16
+    with pytest.raises(RecordError) as info:
+        verify_run(run_dir, imgsz=640, coco_root=coco, head_commit=HEAD, dataset=EXPECT, quantize=None)
+    assert "quantize" in " | ".join(info.value.problems)
+
+
+def test_fp32_run_is_refused_under_the_fp16_protocol(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, quantize=None)
+    assert "quantize" in _problems(run_dir, coco)
+
+
+def test_fp32_argv_omits_quantize_and_names_the_run_distinctly(tmp_path: Path) -> None:
+    wrapper = _load_wrapper()
+    argv = wrapper.build_argv(640, state_root=tmp_path, executable="yolo", quantize=None)
+    assert not any(a.startswith("quantize=") for a in argv)
+    assert "exist_ok=True" in argv
+    assert wrapper.run_name(640, quantize=None) == "e1-yolo11n-coco-val2017-imgsz640-conf0001-fp32"
+    assert wrapper.run_name(640) == "e1-yolo11n-coco-val2017-imgsz640-conf0001"  # FP16 name unchanged
+
+
+def test_wrapper_fp32_is_refused_at_any_size_but_the_approved_control(monkeypatch, capsys) -> None:
+    wrapper = _load_wrapper()
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: pytest.fail("no git check first"))
+    monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run"))
+    assert wrapper.main(["--imgsz", "960", "--precision", "fp32", "--approval-ref", "X"]) == 2
+    assert "only the approved 640 control" in capsys.readouterr().err
+
+
+def test_writer_control_dry_run_names_the_new_id_and_baseline(tmp_path: Path, monkeypatch, capsys) -> None:
+    writer = _load_writer()
+    monkeypatch.setattr(writer, "require_clean_worktree", lambda _root: HEAD)
+    monkeypatch.setattr(writer, "DatasetExpectation", lambda: EXPECT)
+    run_dir, coco = make_run(tmp_path, quantize=None, run_overrides={"approval_ref": "CONTROL-REF"})
+    code = writer.main(
+        ["--approval-ref", "CONTROL-REF", "--fp32-control", str(run_dir), "--coco-root", str(coco), "--dry-run"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert '"EXP-20261004-04"' in out and '"EXP-20261004-01"' in out
+    assert "dry run" in out
+
+
+def test_writer_control_refuses_a_different_approval(tmp_path: Path, monkeypatch, capsys) -> None:
+    writer = _load_writer()
+    monkeypatch.setattr(writer, "require_clean_worktree", lambda _root: HEAD)
+    monkeypatch.setattr(writer, "DatasetExpectation", lambda: EXPECT)
+    run_dir, coco = make_run(tmp_path, quantize=None, run_overrides={"approval_ref": "CONTROL-REF"})
+    code = writer.main(
+        ["--approval-ref", "OTHER", "--fp32-control", str(run_dir), "--coco-root", str(coco), "--dry-run"]
+    )
+    assert code == 1
+    assert "!= --approval-ref 'OTHER'" in capsys.readouterr().err

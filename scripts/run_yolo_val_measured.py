@@ -38,9 +38,10 @@ from cv_agent.execution.jobs.runtimes.yolo_eval import (  # noqa: E402
     build_command,
 )
 from cv_agent.experiments.evaluation_records import (  # noqa: E402
-    PRECISION_REQUESTED,
+    FP32_CONTROL_SERIES_ID,
     QUANTIZE,
     RUN_SCHEMA,
+    precision_label,
 )
 from cv_agent.experiments.provenance import (  # noqa: E402
     ProvenanceError,
@@ -58,14 +59,26 @@ DATA_YAML_NAME = "coco-person-val.yaml"
 VRAM_POLL_SECONDS = 1.0
 
 
-def run_name(imgsz: int) -> str:
-    return f"e1-yolo11n-coco-val2017-imgsz{imgsz}-conf0001"
+FP32_CONTROL_IMGSZ = 640
+PRECISIONS = {"fp16": QUANTIZE, "fp32": None}
 
 
-def build_argv(imgsz: int, *, state_root: Path, executable: str = DEFAULT_YOLO_EXECUTABLE) -> list[str]:
-    """The `yolo val` argv: the binding's builder, plus the two settings it does not expose.
+def run_name(imgsz: int, quantize: int | None = QUANTIZE) -> str:
+    suffix = "" if quantize is not None else "-fp32"
+    return f"e1-yolo11n-coco-val2017-imgsz{imgsz}-conf0001{suffix}"
 
-    ``quantize=16`` requests FP16 through the current ultralytics key. ``half`` is deprecated in
+
+def build_argv(
+    imgsz: int,
+    *,
+    state_root: Path,
+    executable: str = DEFAULT_YOLO_EXECUTABLE,
+    quantize: int | None = QUANTIZE,
+) -> list[str]:
+    """The `yolo val` argv: the binding's builder, plus the settings it does not expose.
+
+    ``quantize=16`` requests FP16 through the current ultralytics key. ``quantize=None`` (the FP32
+    control, ADR-0018) omits the argument, so ultralytics runs FP32. ``half`` is deprecated in
     8.4.138 and is mapped to ``quantize``, so it is not used. ``exist_ok=True`` makes ultralytics
     write to exactly ``name``; this script refuses an existing directory before the run.
     """
@@ -73,7 +86,7 @@ def build_argv(imgsz: int, *, state_root: Path, executable: str = DEFAULT_YOLO_E
         "model": str(state_root / "models" / MODEL_NAME),
         "data": str(state_root / "evaluations" / DATA_YAML_NAME),
         "output_dir": str(state_root / "evaluations"),
-        "run_name": run_name(imgsz),
+        "run_name": run_name(imgsz, quantize),
         "conf": CONF,
         "imgsz": imgsz,
         "classes": CLASSES,
@@ -81,7 +94,8 @@ def build_argv(imgsz: int, *, state_root: Path, executable: str = DEFAULT_YOLO_E
         "batch": BATCH,
         "yolo_executable": executable,
     }
-    return [*build_command(inputs), f"quantize={QUANTIZE}", "exist_ok=True"]
+    precision_args = [] if quantize is None else [f"quantize={quantize}"]
+    return [*build_command(inputs), *precision_args, "exist_ok=True"]
 
 
 def ru_maxrss_to_mib(ru_maxrss: int) -> float:
@@ -191,10 +205,20 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="owner approval id for this GPU run; recorded in run.json and required by the writer",
     )
+    parser.add_argument(
+        "--precision",
+        choices=tuple(PRECISIONS),
+        default="fp16",
+        help="fp16 (quantize=16, the EXP-20261004-01 series) or fp32 (quantize unset, the ADR-0018 control)",
+    )
     args = parser.parse_args(argv)
     approval_ref = args.approval_ref.strip()
     if not approval_ref:
         print("REFUSED: --approval-ref must not be blank", file=sys.stderr)
+        return 2
+    quantize = PRECISIONS[args.precision]
+    if quantize is None and args.imgsz != FP32_CONTROL_IMGSZ:
+        print("REFUSED: fp32 is only the approved 640 control (ADR-0018)", file=sys.stderr)
         return 2
 
     try:
@@ -205,7 +229,7 @@ def main(argv: list[str] | None = None) -> int:
 
     state = repository_state_root()
     project = state / "evaluations"
-    name = run_name(args.imgsz)
+    name = run_name(args.imgsz, quantize)
     run_dir = project / name
     run_json = project / f"{name}.run.json"
     val_log = project / f"{name}.val.log"
@@ -231,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         "data_yaml_sha256": sha256_file(data_yaml),
         "val_txt_sha256": sha256_file(val_txt),
     }
-    command = build_argv(args.imgsz, state_root=state)
+    command = build_argv(args.imgsz, state_root=state, quantize=quantize)
     print(f"running from commit {commit}")
     print("command:", " ".join(command))
 
@@ -253,14 +277,14 @@ def main(argv: list[str] | None = None) -> int:
 
     run = {
         "schema": RUN_SCHEMA,
-        "series": "EXP-20261004-01",
+        "series": FP32_CONTROL_SERIES_ID if quantize is None else "EXP-20261004-01",
         "imgsz": args.imgsz,
         "conf": CONF,
         "batch": BATCH,
         "device": DEVICE,
         "classes": CLASSES,
-        "quantize": QUANTIZE,
-        "precision_requested": PRECISION_REQUESTED,
+        "quantize": quantize,
+        "precision_requested": precision_label(quantize),
         "approval_ref": approval_ref,
         "model": MODEL_NAME,
         "model_path": str(model),

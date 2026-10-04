@@ -59,6 +59,13 @@ SUCCESS_CRITERIA = (
 QUANTIZE = 16
 # What was REQUESTED, never what was measured: ultralytics does not log actual inference precision.
 PRECISION_REQUESTED = "FP16 requested (quantize=16); actual inference precision is not logged"
+# The FP32 control (ADR-0018): quantize is left unset, so ultralytics runs with fp16=False.
+PRECISION_FP32_REQUESTED = (
+    "FP32 requested (quantize unset; ultralytics default None, fp16=False); "
+    "actual inference precision is not logged"
+)
+FP32_CONTROL_SERIES_ID = "EXP-20261004-04"
+FP32_CONTROL_BASELINE = "EXP-20261004-01"
 LEGACY_REFERENCE = (
     "EXP-20260930-01 (and the 20261001 sweep rows) ran FP32: no precision argument was supplied, "
     "so ultralytics quantize defaulted to None. This series is FP16-requested and NOT like-for-like "
@@ -133,6 +140,16 @@ class VerifiedRun:
     vram_baseline_mib: int | None
     vram_peak_mib: int
     ram_peak_mib: float
+    quantize: int | None = QUANTIZE
+
+
+def precision_label(quantize: int | None) -> str:
+    """The requested-precision label for a verified quantize setting (never a measured precision)."""
+    if quantize == QUANTIZE:
+        return PRECISION_REQUESTED
+    if quantize is None:
+        return PRECISION_FP32_REQUESTED
+    raise ValueError(f"no precision label for quantize={quantize!r}")
 
 
 def sha256_file(path: Path) -> str:
@@ -213,8 +230,13 @@ def verify_run(
     coco_root: Path,
     head_commit: str,
     dataset: DatasetExpectation = DatasetExpectation(),
+    quantize: int | None = QUANTIZE,
 ) -> VerifiedRun:
-    """Verify one run directory end to end. Raises RecordError listing every problem found."""
+    """Verify one run directory end to end. Raises RecordError listing every problem found.
+
+    ``quantize`` is the protocol the run must have been executed under: 16 for the FP16 series,
+    None for the FP32 control (ADR-0018).
+    """
     run_dir = Path(run_dir)
     run_json, val_log, predictions = run_paths(run_dir)
     problems: list[str] = []
@@ -236,7 +258,7 @@ def verify_run(
     protocol = {
         "imgsz": imgsz,
         "conf": MAP_PROTOCOL_CONF,
-        "quantize": QUANTIZE,
+        "quantize": quantize,
         "batch": 1,
         "device": "0",
         "classes": [0],
@@ -245,7 +267,7 @@ def verify_run(
     for key, expected in protocol.items():
         if run.get(key) != expected:
             problems.append(f"run.json {key}={run.get(key)!r}, protocol requires {expected!r}")
-    if run.get("precision_requested") != PRECISION_REQUESTED:
+    if run.get("precision_requested") != precision_label(quantize):
         problems.append("run.json precision_requested must be the exact requested-precision label")
     approval = run.get("approval_ref")
     if not isinstance(approval, str) or not approval.strip():
@@ -428,6 +450,7 @@ def verify_run(
         approval_ref=str(approval).strip(),
         vram_baseline_mib=run["vram_baseline_mib"] if isinstance(run.get("vram_baseline_mib"), int) else None,
         vram_peak_mib=int(vram_peak or 0),
+        quantize=quantize,
         ram_peak_mib=ram_peak,
     )
 
@@ -446,9 +469,25 @@ def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_re
         val_metrics[f"fixed_thr@{FIXED_THRESHOLD}/{name}"] = value
 
     fps = run.images / run.wall_seconds
+    is_control = run.quantize is None
     notes = {
-        "series": f"{SERIES_ID} measurement-only (D-069); this record is one image size of the series",
+        "series": (
+            f"{FP32_CONTROL_SERIES_ID} FP32 control (measurement-only, D-069, ADR-0018)"
+            if is_control
+            else f"{SERIES_ID} measurement-only (D-069); this record is one image size of the series"
+        ),
         **({"legacy_reference": LEGACY_REFERENCE} if baseline_id == "SELF" else {}),
+        **(
+            {
+                "precision_control": (
+                    f"Compared with {baseline_id} (FP16 requested, quantize=16) at identical imgsz, conf, "
+                    "dataset, batch, device and code. quantize is the only intended difference. "
+                    "Reference for the precision question only; not a decision (D-069)."
+                )
+            }
+            if is_control
+            else {}
+        ),
         "confidence_protocol": (
             f"conf={MAP_PROTOCOL_CONF} (Q28/D-067) for mAP and AP@0.5/* (full PR curve). "
             f"fixed_thr@{FIXED_THRESHOLD}/* are REFERENCE ONLY: not mAP, not an operating point (Q30 open)."
@@ -462,7 +501,7 @@ def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_re
             "fps": f"{run.images} images / measured wall_seconds ({run.wall_seconds:.3f} s)",
             "params": "from the val.log YOLO model summary line",
         },
-        "precision_requested": PRECISION_REQUESTED,
+        "precision_requested": precision_label(run.quantize),
         "approval_ref": run.approval_ref,
         "units": {"memory": "MiB (peak VRAM from nvidia-smi; peak RAM from getrusage ru_maxrss)"},
         "derived": {
@@ -492,7 +531,7 @@ def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_re
         dataset_version=f"coco-val2017-5k (val2017.txt sha256 {run.val_txt_sha256})",
         input_resolution=f"{run.imgsz}x{run.imgsz}",
         batch_size=1,
-        precision=PRECISION_REQUESTED,
+        precision=precision_label(run.quantize),
         memory=MemoryFootprint(vram=float(run.vram_peak_mib), ram=run.ram_peak_mib),
         gpu_hours=run.wall_seconds / 3600.0,
         hardware=HardwareInfo(training="N/A (inference only)", target=target),
