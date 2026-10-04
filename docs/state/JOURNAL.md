@@ -2159,3 +2159,35 @@ contention, but ADR-0017 requires system metrics in the same record, so the reco
 **Open:** owner decides between (a) a re-run on an idle GPU under a new approval reference, (b) recording the
 accuracy with system metrics marked not comparable, which needs a recording rule decision, or (c) no record.
 D-069 stays OPEN generally; Q30 stays OPEN.
+
+## 2026-10-04 — FP32 control: issue #74, quarantine, GPU-process provenance (rerun gated)
+
+**Owner decisions received:** GitHub issue creation authorized; `EXP-20261004-04` to be used for the clean rerun;
+the other project's lung-training process is not to be stopped or controlled; no approval reference invented;
+ADR-0018 stays Proposed until the owner accepts it.
+
+**Issue:** #74 created (`ADR-0018: FP32 640 control — GPU-process provenance, preflight, writer eligibility,
+contaminated-run quarantine`). Required by CLAUDE.md §5 before the implementation below. Not closed; no other issue touched.
+
+**Quarantine (rename, not copy):** the contaminated run's directory, `run.json` and `val.log` moved from
+`.cv_agent/evaluations/` to `/home/dev/cv-engineering-evidence/EXP-20261004-FP32-640/contaminated-concurrent-gpu/`.
+Pre-move and post-move SHA-256 hashes are identical for all 15 files (`PRE-MOVE-SHA256.txt`,
+`POST-MOVE-SHA256.txt`). `MANIFEST.sha256` verifies. `CONTAMINATED.md` documents the cause and status. The
+archive is read-only. The active evaluations path is free: no FP32 entry remains there.
+
+**Implementation:** `cv_agent/experiments/evaluation_records.py` adds `foreign_process_seen` and
+`gpu_process_problems`, shared by the verifier. `scripts/run_yolo_val_measured.py` adds `parse_compute_apps`,
+`snapshot_compute_apps`, a start preflight that refuses a busy or unreadable GPU before any run, per-poll
+snapshots with the run's own pid excluded, an end snapshot, and `gpu_process_snapshots`, `own_pid` and
+`foreign_process_seen` in run.json. The baseline VRAM sample now precedes the run process. `tests/test_evaluation_records.py`
+adds 16 tests with a fake `nvidia-smi`. The FP16 path is unchanged, and its existing tests pass.
+
+**Validation:** full pytest 1755 passed, 4 skipped, 0 failed. Ruff clean. Mypy clean (81 files).
+
+**Ledger:** still 9 rows. SHA-256 of `experiments.sqlite` is `0d910b01…cfc1`, the same as before this stage.
+No row was written. `EXP-20261004-04` is not present.
+
+**No GPU job ran in this stage.** The lung-training process (pid 308159) was not touched.
+
+**Not done (gated):** ADR-0018 acceptance (owner). The rerun, which needs a fresh owner approval reference and an
+idle GPU (ADR-0018 §6). The approval record for the rerun is not written, because no reference exists yet.

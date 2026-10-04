@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from cv_agent.experiments.detection_metrics import (
     MAP_PROTOCOL_CONF,
@@ -223,6 +223,67 @@ def _check_predictions_shape(path: Path, problems: list[str]) -> None:
             return
 
 
+def _is_int(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def snapshot_foreign_pids(snapshot: object, own_pid: int) -> list[int] | None:
+    """Pids in one GPU-process snapshot other than the run's own process. None if unreadable."""
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("processes"), list):
+        return None
+    foreign: list[int] = []
+    for proc in snapshot["processes"]:
+        pid = proc.get("pid") if isinstance(proc, dict) else None
+        if not _is_int(pid):
+            return None
+        if pid != own_pid:
+            foreign.append(pid)
+    return foreign
+
+
+def foreign_process_seen(snapshots: object, own_pid: int) -> bool:
+    """True if any readable snapshot (start, during, end) names a process other than the run's own."""
+    if not isinstance(snapshots, dict):
+        return False
+    parts = [snapshots.get("start"), *(snapshots.get("during") or []), snapshots.get("end")]
+    return any(snapshot_foreign_pids(part, own_pid) for part in parts)
+
+
+def gpu_process_problems(run: dict) -> list[str]:
+    """ADR-0018: GPU-process provenance. A run with a foreign GPU process at any point is not eligible."""
+    snaps = run.get("gpu_process_snapshots")
+    own = run.get("own_pid")
+    if not isinstance(snaps, dict) or not _is_int(own):
+        return ["run.json has no gpu_process_snapshots or own_pid: GPU-process provenance is required (ADR-0018)"]
+    problems: list[str] = []
+    start, during, end = snaps.get("start"), snaps.get("during"), snaps.get("end")
+    if not isinstance(during, list) or not during:
+        problems.append("GPU-process snapshots during polling are missing (ADR-0018)")
+        during = []
+    if not isinstance(start, dict) or not isinstance(start.get("processes"), list):
+        problems.append("GPU-process snapshot at start is missing or unreadable: cannot read the GPU process list")
+    elif start["processes"]:
+        problems.append(f"GPU had {len(start['processes'])} compute process(es) before the run started")
+    if not isinstance(end, dict) or not isinstance(end.get("processes"), list):
+        problems.append("GPU-process snapshot at end is missing or unreadable")
+    for index, snap in enumerate(during):
+        if snapshot_foreign_pids(snap, own) is None:
+            problems.append(f"GPU-process snapshot during[{index}] is unreadable")
+    for index, snap in enumerate(during):
+        foreign = snapshot_foreign_pids(snap, own)
+        if foreign:
+            problems.append(f"foreign GPU process during the run (pids {foreign}, sample {index})")
+    end_foreign = snapshot_foreign_pids(end, own)
+    if end_foreign:
+        problems.append(f"foreign GPU process at end of the run (pids {end_foreign})")
+    seen = foreign_process_seen(snaps, own)
+    if run.get("foreign_process_seen") is not seen:
+        problems.append(
+            f"run.json foreign_process_seen={run.get('foreign_process_seen')!r} does not match the snapshots ({seen})"
+        )
+    return problems
+
+
 def verify_run(
     run_dir: Path,
     *,
@@ -280,6 +341,7 @@ def verify_run(
         problems.append("run.json ram_peak_mib is missing or not positive (system metric required)")
     if run.get("exit_code") != 0:
         problems.append(f"yolo val exit_code={run.get('exit_code')!r} (must be 0)")
+    problems.extend(gpu_process_problems(run))
     if run.get("commit") != head_commit:
         problems.append(
             f"run commit {run.get('commit')!r} != HEAD {head_commit!r}: "

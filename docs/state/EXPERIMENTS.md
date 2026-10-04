@@ -342,3 +342,15 @@ is not the COCO evaluator.
   (most likely; the execute-time working tree is unknown). EXP-20260930-01 ≈ `8f29618`, but its
   code was **uncommitted at run time**: the `yolo_eval` binding first appears in `8f29618`, committed
   five minutes after the run. No single commit reproduces the baseline exactly.
+
+### FP32 640 control — first attempt quarantined, NOT ledger-eligible (2026-10-04)
+
+**No row was written for this attempt, and it must not be cited as a measurement.** The FP32 640 control
+(`e1-yolo11n-coco-val2017-imgsz640-conf0001-fp32`, commit `5861718`, owner reference
+`EXP-20261004-FP32-640-OWNER-20261004`) ran while another project's training job shared the GPU. Its device-wide
+VRAM (baseline 1164 MiB, peak 1629 MiB), FPS (35.5) and latency (7.4 ms inference) are invalid. The archive
+(`/home/dev/cv-engineering-evidence/EXP-20261004-FP32-640/contaminated-concurrent-gpu/`) holds the artifacts,
+`CONTAMINATED.md` and a verified manifest, and is read-only. ADR-0018 §3.9 and D-074 record the decision. The
+clean rerun is gated (ADR-0018 §6) and needs a fresh owner approval reference. Its id is `EXP-20261004-04`,
+which is not allocated until a record is written. Series rows above are unchanged. Their GPU idleness is
+inferred from baseline VRAM, not verified from process snapshots (ADR-0018 §3.13).

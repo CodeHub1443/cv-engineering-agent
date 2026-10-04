@@ -139,6 +139,9 @@ def make_run(
         "gpu_name": "NVIDIA GeForce RTX 3060",
         "gpu_memory_mib": 12042,
         "driver_version": "535.309.01",
+        "own_pid": OWN_PID,
+        "gpu_process_snapshots": _clean_gpu_snapshots(),
+        "foreign_process_seen": False,
     }
     run.update(run_overrides or {})
     run_json.write_text(json.dumps(run), encoding="utf-8")
@@ -586,8 +589,10 @@ def test_vram_sampler_keeps_baseline_and_peak_and_skips_failed_polls(monkeypatch
         return last["v"]
 
     monkeypatch.setattr(wrapper.VramSampler, "sample_once", staticmethod(fake))
+    monkeypatch.setattr(wrapper, "snapshot_compute_apps", lambda *, at: {"at": at, "processes": []})
     sampler = wrapper.VramSampler(interval=0.001)
-    sampler.start()
+    sampler.baseline_mib = sampler.sample_once()
+    sampler.start(own_pid=1)
     for _ in range(5000):  # let the poller take its samples before stopping
         if len(sampler.samples) >= 2:
             break
@@ -601,8 +606,9 @@ def test_vram_sampler_keeps_baseline_and_peak_and_skips_failed_polls(monkeypatch
 def test_vram_sampler_reports_none_when_no_sample_succeeds(monkeypatch) -> None:
     wrapper = _load_wrapper()
     monkeypatch.setattr(wrapper.VramSampler, "sample_once", staticmethod(lambda: None))
+    monkeypatch.setattr(wrapper, "snapshot_compute_apps", lambda *, at: {"at": at, "processes": []})
     sampler = wrapper.VramSampler(interval=0.001)
-    sampler.start()
+    sampler.start(own_pid=1)
     assert sampler.stop() is None
 
 
@@ -776,3 +782,172 @@ def test_writer_control_refuses_a_different_approval(tmp_path: Path, monkeypatch
     )
     assert code == 1
     assert "!= --approval-ref 'OTHER'" in capsys.readouterr().err
+
+
+# ── GPU-process provenance (ADR-0018): snapshots, preflight, writer eligibility ───────
+
+OWN_PID = 4242
+OWN_PROC = {"pid": OWN_PID, "name": "yolo"}
+FOREIGN_PROC = {"pid": 308159, "name": ".venv/bin/python"}
+
+
+def _clean_gpu_snapshots() -> dict:
+    return {
+        "start": {"at": "2026-10-05T10:00:00+00:00", "processes": []},
+        "during": [{"at": "2026-10-05T10:00:01+00:00", "processes": [OWN_PROC]}],
+        "end": {"at": "2026-10-05T10:00:03+00:00", "processes": []},
+    }
+
+
+def _snaps(**parts) -> dict:
+    snaps = _clean_gpu_snapshots()
+    snaps.update(parts)
+    return snaps
+
+
+def test_clean_gpu_snapshots_verify(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    _verify(run_dir, coco)  # the run's own process is not foreign
+
+
+def test_foreign_process_at_start_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(
+        tmp_path,
+        run_overrides={
+            "gpu_process_snapshots": _snaps(start={"at": "t", "processes": [FOREIGN_PROC]}),
+            "foreign_process_seen": True,
+        },
+    )
+    assert "before the run started" in _problems(run_dir, coco)
+
+
+def test_foreign_process_during_polling_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(
+        tmp_path,
+        run_overrides={
+            "gpu_process_snapshots": _snaps(during=[{"at": "t", "processes": [OWN_PROC, FOREIGN_PROC]}]),
+            "foreign_process_seen": True,
+        },
+    )
+    assert "foreign GPU process during the run" in _problems(run_dir, coco)
+
+
+def test_foreign_process_at_end_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(
+        tmp_path,
+        run_overrides={
+            "gpu_process_snapshots": _snaps(end={"at": "t", "processes": [FOREIGN_PROC]}),
+            "foreign_process_seen": True,
+        },
+    )
+    assert "foreign GPU process at end" in _problems(run_dir, coco)
+
+
+@pytest.mark.parametrize(
+    "snapshots",
+    [
+        None,  # no snapshots at all
+        _snaps(during=[]),  # no polling samples
+        _snaps(start={"at": "t", "processes": None}),  # unreadable start snapshot
+        _snaps(end={"at": "t"}),  # end snapshot without a process list
+    ],
+)
+def test_missing_or_unreadable_snapshot_is_refused(tmp_path: Path, snapshots) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides={"gpu_process_snapshots": snapshots})
+    assert "GPU-process" in _problems(run_dir, coco)
+
+
+def test_writer_rejects_a_flag_that_disagrees_with_the_snapshots(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides={"foreign_process_seen": True})  # snapshots are clean
+    assert "does not match the snapshots" in _problems(run_dir, coco)
+
+
+def test_writer_rejects_a_missing_foreign_process_flag(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    run_json, _, _ = run_paths(run_dir)
+    run = json.loads(run_json.read_text())
+    del run["foreign_process_seen"]
+    run_json.write_text(json.dumps(run))
+    assert "does not match the snapshots" in _problems(run_dir, coco)
+
+
+def test_parse_compute_apps_reads_empty_clean_and_unreadable_output() -> None:
+    wrapper = _load_wrapper()
+    assert wrapper.parse_compute_apps("") == []
+    assert wrapper.parse_compute_apps("No running processes found\n") == []
+    assert wrapper.parse_compute_apps("308159, .venv/bin/python\n") == [{"pid": 308159, "name": ".venv/bin/python"}]
+    assert wrapper.parse_compute_apps("[Insufficient Permissions]\n") is None  # unreadable: fail closed
+
+
+def _fake_nvidia_smi(compute_apps_stdout: str | None, memory: str = "400\n"):
+    """A fake subprocess.run: answers the three nvidia-smi queries the wrapper makes."""
+
+    def fake(argv, **_kwargs):
+        class Result:
+            stdout = ""
+
+        result = Result()
+        joined = " ".join(argv)
+        if "query-compute-apps" in joined:
+            if compute_apps_stdout is None:
+                raise OSError("nvidia-smi not found")
+            result.stdout = compute_apps_stdout
+        elif "memory.used" in joined:
+            result.stdout = memory
+        elif "name,memory.total" in joined:
+            result.stdout = "NVIDIA GeForce RTX 3060, 12288, 535.309.01\n"
+        return result
+
+    return fake
+
+
+def test_clean_start_snapshot_has_no_processes(monkeypatch) -> None:
+    wrapper = _load_wrapper()
+    monkeypatch.setattr(wrapper.subprocess, "run", _fake_nvidia_smi(""))
+    snap = wrapper.snapshot_compute_apps(at="t")
+    assert snap == {"at": "t", "processes": []}
+
+
+def test_foreign_process_at_start_refuses_before_any_run(tmp_path: Path, monkeypatch, capsys) -> None:
+    wrapper = _load_wrapper()
+    run_dir, _coco = make_run(tmp_path / "other", imgsz=960)  # supplies models/ and the data yaml
+    state = tmp_path / "other" / "state"
+    monkeypatch.setattr(wrapper, "repository_state_root", lambda: state)
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: HEAD)
+    monkeypatch.setattr(wrapper.subprocess, "run", _fake_nvidia_smi("308159, .venv/bin/python\n"))
+    monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run on a busy GPU"))
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "APPROVAL-TEST"]) == 2
+    assert "compute process" in capsys.readouterr().err
+
+
+def test_unreadable_start_snapshot_refuses_before_any_run(tmp_path: Path, monkeypatch, capsys) -> None:
+    wrapper = _load_wrapper()
+    make_run(tmp_path / "other", imgsz=960)
+    state = tmp_path / "other" / "state"
+    monkeypatch.setattr(wrapper, "repository_state_root", lambda: state)
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: HEAD)
+    monkeypatch.setattr(wrapper.subprocess, "run", _fake_nvidia_smi(None))
+    monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run without a process list"))
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "APPROVAL-TEST"]) == 2
+    assert "cannot read the GPU process list" in capsys.readouterr().err
+
+
+def test_foreign_process_during_polling_is_recorded_and_own_process_is_not(monkeypatch) -> None:
+    wrapper = _load_wrapper()
+    stdout = "4242, yolo\n308159, .venv/bin/python\n"
+    monkeypatch.setattr(wrapper.subprocess, "run", _fake_nvidia_smi(stdout))
+    sampler = wrapper.VramSampler()
+    sampler.own_pid = OWN_PID
+    sampler._poll_once()
+    [snap] = sampler.process_snapshots
+    assert {p["pid"] for p in snap["processes"]} == {OWN_PID, 308159}
+    from cv_agent.experiments.evaluation_records import foreign_process_seen
+
+    assert foreign_process_seen({"start": {"processes": []}, "during": [snap], "end": {"processes": []}}, OWN_PID)
+
+
+def test_own_process_alone_is_not_foreign() -> None:
+    from cv_agent.experiments.evaluation_records import foreign_process_seen
+
+    snaps = _clean_gpu_snapshots()
+    assert foreign_process_seen(snaps, OWN_PID) is False

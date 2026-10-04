@@ -41,6 +41,7 @@ from cv_agent.experiments.evaluation_records import (  # noqa: E402
     FP32_CONTROL_SERIES_ID,
     QUANTIZE,
     RUN_SCHEMA,
+    foreign_process_seen,
     precision_label,
 )
 from cv_agent.experiments.provenance import (  # noqa: E402
@@ -113,6 +114,37 @@ def parse_memory_used(text: str) -> int | None:
     return None
 
 
+COMPUTE_APPS_ARGV = ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader,nounits"]
+
+
+def parse_compute_apps(text: str) -> list[dict[str, int | str]] | None:
+    """Compute processes from `nvidia-smi --query-compute-apps`. [] means none; None means unreadable.
+
+    Any row whose pid is not a number (for example ``[Insufficient Permissions]``) makes the whole
+    snapshot unreadable, so it cannot be mistaken for an idle GPU (fail closed, ADR-0018).
+    """
+    if "no running" in text.lower():
+        return []
+    processes: list[dict[str, int | str]] = []
+    for line in text.strip().splitlines():
+        if not line.strip():
+            continue
+        pid_text, _, name = line.partition(",")
+        if not pid_text.strip().isdigit():
+            return None
+        processes.append({"pid": int(pid_text.strip()), "name": name.strip()})
+    return processes
+
+
+def snapshot_compute_apps(*, at: str) -> dict:
+    """One GPU-process snapshot for run.json provenance. ``processes`` is None when unreadable."""
+    try:
+        out = subprocess.run(COMPUTE_APPS_ARGV, capture_output=True, text=True, check=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {"at": at, "processes": None}
+    return {"at": at, "processes": parse_compute_apps(out)}
+
+
 class VramSampler:
     """Polls `nvidia-smi` memory.used in a background thread and keeps the peak.
 
@@ -124,6 +156,9 @@ class VramSampler:
         self.interval = interval
         self.baseline_mib: int | None = None
         self.samples: list[int] = []
+        # ADR-0018: one GPU-process snapshot per poll, with the run's own pid excluded when judging it.
+        self.own_pid: int | None = None
+        self.process_snapshots: list[dict] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -141,16 +176,21 @@ class VramSampler:
             return None
         return parse_memory_used(out)
 
-    def start(self) -> None:
-        self.baseline_mib = self.sample_once()
+    def start(self, own_pid: int) -> None:
+        """Begin polling. The baseline is taken by the caller before the run process starts."""
+        self.own_pid = own_pid
         self._thread = threading.Thread(target=self._poll, daemon=True)
         self._thread.start()
 
+    def _poll_once(self) -> None:
+        value = self.sample_once()
+        if value is not None:
+            self.samples.append(value)
+        self.process_snapshots.append(snapshot_compute_apps(at=datetime.now(timezone.utc).isoformat()))
+
     def _poll(self) -> None:
         while not self._stop.is_set():
-            value = self.sample_once()
-            if value is not None:
-                self.samples.append(value)
+            self._poll_once()
             self._stop.wait(self.interval)
 
     def stop(self) -> int | None:
@@ -259,12 +299,23 @@ def main(argv: list[str] | None = None) -> int:
     print(f"running from commit {commit}")
     print("command:", " ".join(command))
 
+    # ADR-0018 preflight: refuse to start unless the GPU has no compute process and the list is readable.
+    start_snapshot = snapshot_compute_apps(at=datetime.now(timezone.utc).isoformat())
+    if start_snapshot["processes"] is None:
+        print("REFUSED: cannot read the GPU process list (nvidia-smi); no run started", file=sys.stderr)
+        return 2
+    if start_snapshot["processes"]:
+        pids = [p["pid"] for p in start_snapshot["processes"]]
+        print(f"REFUSED: GPU has {len(pids)} compute process(es) before the run, pids {pids}; no run started", file=sys.stderr)
+        return 2
+
     sampler = VramSampler()
+    sampler.baseline_mib = sampler.sample_once()  # before the run process exists
     started = datetime.now(timezone.utc)
     t0 = time.monotonic()
-    sampler.start()
     with val_log.open("w", encoding="utf-8") as log:
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        sampler.start(proc.pid)
         assert proc.stdout is not None
         for line in proc.stdout:
             sys.stdout.write(line)
@@ -273,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
     wall = time.monotonic() - t0
     ended = datetime.now(timezone.utc)
     vram_peak = sampler.stop()
+    end_snapshot = snapshot_compute_apps(at=datetime.now(timezone.utc).isoformat())
+    gpu_snapshots = {"start": start_snapshot, "during": sampler.process_snapshots, "end": end_snapshot}
     ram_peak_mib = ru_maxrss_to_mib(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
 
     run = {
@@ -301,6 +354,13 @@ def main(argv: list[str] | None = None) -> int:
         "vram_baseline_mib": sampler.baseline_mib,
         "vram_peak_mib": vram_peak,
         "vram_samples": len(sampler.samples),
+        "own_pid": proc.pid,
+        "gpu_process_snapshots": gpu_snapshots,
+        "foreign_process_seen": foreign_process_seen(gpu_snapshots, proc.pid),
+        "gpu_process_measurement": (
+            "nvidia-smi --query-compute-apps at start (must be empty), every VRAM poll, and at end; "
+            f"polled every {VRAM_POLL_SECONDS}s, so a process that starts and exits between polls is not seen"
+        ),
         "vram_measurement": f"nvidia-smi memory.used polled every {VRAM_POLL_SECONDS}s; peak in MiB",
         "ram_peak_mib": round(ram_peak_mib, 1),
         "ram_measurement": (
