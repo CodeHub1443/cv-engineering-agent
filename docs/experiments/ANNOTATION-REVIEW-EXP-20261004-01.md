@@ -23,14 +23,12 @@ The 63 candidates come from the primary-run review sample of the failure analysi
 
 ## Human label counts
 
-- annotation_error: 0
-- valid_annotation: 0
-- ambiguous: 0
+- valid_annotation: 34
+- annotation_error: 5
+- ambiguous: 8
 - not_reviewable: 0
 - crowd_region_unresolved: 0
-- pending: 63
-
-- ambiguous: 0; not_reviewable: 0
+- unlabelled: 16
 
 ## Crowd status (Q27)
 
@@ -54,11 +52,17 @@ The 63 candidates come from the primary-run review sample of the failure analysi
 
 ## Interpretation: what the review can and cannot establish
 
-- It can say how many of these 63 candidates are annotation errors, valid annotations, or undecidable, once entered by the reviewer.
+- It can say how many of these 63 candidates are annotation errors, valid annotations, or undecidable. Counts cover only the reviewer-labelled candidates (47 of 63); 16 are unlabelled.
 - If most sampled high-confidence FPs are `annotation_error`, the labels undercount persons in that sample. The FP counts in the failure analysis then need that caveat.
 - It cannot establish whether the 1,863 small-box misses at 0.25 are label errors or model errors. None is in the sample. Testing that needs a separate sample of fully missed small GT, which is out of scope here.
 - It makes no production decision. It sets no operating point, precision floor, tolerance or winner.
 
 ## Status
 
-Human labels are pending. Nothing in this report was entered by the agent. The counts above change only when the reviewer enters labels.
+- Ranks 001–050 (high_conf_fp) were reviewed by Tanvir on 2026-10-13.
+- Ranks 011, 013, and 027 have observation notes but no assigned label.
+- Ranks 051–063 (near_dup_gt_pair and degenerate_gt) remain unreviewed and unlabelled.
+- Rank 025 (`annotation_error`, mapped from the owner's original `invalid_annotation` term) and rank 041 (`ambiguous`) were resolved by explicit owner confirmation.
+- Q30, D-069, and Q27 remain open.
+
+Nothing in this report was entered by the agent. The counts above change only when the reviewer enters labels.

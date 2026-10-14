@@ -2270,3 +2270,15 @@ section with the persisted values, the NoMachine exemption and the device-wide c
 quarantine section. Both are measurement-only and state that no production choice is made. The post-execution approval
 deviation is preserved. Q30 and D-069 remain OPEN. ADR-0016, ADR-0017, ADR-0018 and the ledger records are unchanged.
 The measured run artifacts are unchanged. Earlier entries are not rewritten.
+
+## 2026-10-13 — Annotation-review report reconciled to the labelled CSV (feature/claude/experiment-provenance-recovery)
+
+**Did:** Updated `docs/experiments/ANNOTATION-REVIEW-EXP-20261004-01.md` to match the current `annotation_review_sample.csv`: label counts are valid_annotation 34, annotation_error 5, ambiguous 8, not_reviewable 0, crowd_region_unresolved 0, and unlabelled 16. Removed the stale “pending: 63” and duplicate count line. Updated Status to record that ranks 001–050 were reviewed by Tanvir on 2026-10-13; ranks 011, 013, and 027 have observation notes but no label; ranks 051–063 remain unreviewed and unlabelled; and ranks 025 (`annotation_error`, mapped from the owner’s original `invalid_annotation`) and 041 (`ambiguous`) were resolved by explicit owner confirmation.
+
+**Why:** The report described the pre-labelling state and no longer matched the current CSV.
+
+**Broke:** Nothing. A read-only audit found the report stale. The CSV and the owner decision record differed on ranks 025 and 041 because the decision record predates their resolution.
+
+**Learned:** The owner decision record under `.cv_agent/` is gitignored and predates the owner’s rank 025 and 041 resolutions. The current CSV is the source of truth for applied labels.
+
+**Left open:** Ranks 011, 013, 027, and 051–063 remain unlabelled. Q30, D-069, and Q27 remain open. No error-rate claim is made because the sample is not representative. CSV, ledger, backups, and model artifacts were not modified during the documentation reconciliation.
