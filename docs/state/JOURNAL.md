@@ -2294,3 +2294,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** `CV Engineering Agent.md` at the repo root is tracked and unmodified, not untracked as the brief said. It was not touched.
 
 **Left open:** Q32 (variance, baseline precision, delta rationale), Q27, Q31. The AP deltas are not approved gates. No GPU job was run.
+
+## 2026-10-14 — Issue #76 foundation implemented (feature/claude/76-training-execution-pipeline)
+
+**Did:** Wrote ADR-0019 (Proposed). Added `cv_agent/experiments/acceptance.py` (candidate vs baseline: both APs must improve, precision >= 0.75 at conf 0.25, AP and fixed-threshold keys kept separate, provisional gains) and `cv_agent/execution/jobs/training.py` (provenance-complete request, cost estimate, approval gate before the executor, explicit lifecycle, cancel/failure handling). Tests: `tests/test_acceptance.py` (15), `tests/test_training_jobs.py` (42), fake runtimes only.
+
+**Why:** Issue #76 requires an approval-gated training pipeline foundation with no GPU run. JobExecutor already supplied pin/approval/host checks, so the new layer only adds training-specific preflight and result semantics.
+
+**Learned:** The experiments layer may not import execution (ADR-0017 §4), so acceptance and lifecycle are separate modules and the clean-worktree check is an injected callable. mypy reports one pre-existing error (`signal.SIGKILL` in linux_nvidia.py on Windows), unrelated to this change.
+
+**Left open:** Q32 (AP deltas stay provisional), ADR-0019 acceptance, a real training runtime (separate issue and approval), wiring acceptance into a script or graph node. No GPU job was run, no ledger write, no push of this branch, no PR.

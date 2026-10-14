@@ -41,12 +41,15 @@ That branch is pushed; remote tip is f745afe (verified 2026-10-14). Neither bran
 3. **Q31** — repository versus skill ownership of the trt-perf-analysis contract.
 4. Labels for ranks 011, 013, 027; whether to review ranks 051–063; issue #74 and any further GPU series.
 
-**Blockers:** none for #76 implementation. Any real training run waits on separate owner approval and Q32.
+**#76 built (D-079, ADR-0019 proposed):** job lifecycle + approval gate + acceptance comparer; fake-runtime tests
+only; no training runtime, no GPU run, no PR opened yet.
+
+**Blockers:** none for #76. Any real training run waits on separate owner approval and Q32.
 
 ## Next actions
 
-1. Implement #76 in small commits: typed job lifecycle, approval gate, provenance, fake-runtime tests.
-2. Owner: review the #76 PR; answer Q32.
+1. Owner: review ADR-0019 and the #76 branch (training.py, acceptance.py); then open the PR.
+2. Owner: answer Q32 so the AP deltas can become final gates.
 3. Owner: approve (or not) any real GPU training run separately; none is authorized.
 
 ## Do not start yet
