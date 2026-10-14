@@ -2282,3 +2282,15 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** The owner decision record under `.cv_agent/` is gitignored and predates the owner’s rank 025 and 041 resolutions. The current CSV is the source of truth for applied labels.
 
 **Left open:** Ranks 011, 013, 027, and 051–063 remain unlabelled. Q30, D-069, and Q27 remain open. No error-rate claim is made because the sample is not representative. CSV, ledger, backups, and model artifacts were not modified during the documentation reconciliation.
+
+## 2026-10-14 — Owner decisions Q30 and D-069 recorded; issue #76 branch opened (feature/claude/76-training-execution-pipeline)
+
+**Did:** Verified f745afe was a descendant of 2028ab1 containing only the three approved documentation files, fetched, and pushed it as a fast-forward (remote tip verified f745afe). Created the #76 branch. Appended D-077 (Q30: precision floor 0.75 at conf 0.25, IoU >= 0.5) and D-078 (D-069: both overall AP@0.5:0.95 and small-person AP@0.5 must improve; deltas +0.010 / +0.020 provisional). Struck through Q30 and added Q32. Rewrote STATUS.
+
+**Why:** The owner supplied the decisions in the #76 brief; CLAUDE.md §7 requires them in the state files before implementation.
+
+**Checked:** Baselines 0.517 / 0.3556 / P 0.7768 / R 0.6701 match the persisted EXP-20261004-01 ledger values. The baseline was FP16-requested; the FP32 control is 0.518 / 0.3547. The recorded 960 run (P 0.7273) would not meet the 0.75 floor.
+
+**Learned:** `CV Engineering Agent.md` at the repo root is tracked and unmodified, not untracked as the brief said. It was not touched.
+
+**Left open:** Q32 (variance, baseline precision, delta rationale), Q27, Q31. The AP deltas are not approved gates. No GPU job was run.

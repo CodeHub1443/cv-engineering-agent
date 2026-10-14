@@ -3,17 +3,15 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-10-14 · **Phase:** 5d — measurement series persisted (10-record ledger); failure-analysis report
-and code committed (#75); annotation-label review in progress (47 of 63 labelled).
+**Updated:** 2026-10-14 · **Phase:** 5e — owner decisions Q30/D-069 recorded; issue #76 (approval-gated training
+pipeline, no GPU run) in progress on its own branch. Annotation review paused (47 of 63 labelled).
 **Health:** Last recorded full suite: 1755 passed, 4 skipped (JOURNAL, 2026-10-04). Not re-run this session. The #75
 code (failure_analysis, annotation_review) has no recorded run in JOURNAL.
 
 ## Where we are
 
-Branch `feature/claude/experiment-provenance-recovery` (worktree `/home/dev/cv-engineering-agent-sweep`).
-Local HEAD was 2028ab1 when written; the origin tracking ref matched it as of a fetch on 2026-10-12 18:15 (+0600).
-The remote was not re-checked after that fetch. Not merged. The report, JOURNAL and this file change in the commit
-that follows 2028ab1 and were not pushed when written.
+Branch `feature/claude/76-training-execution-pipeline`, cut from `feature/claude/experiment-provenance-recovery`.
+That branch is pushed; remote tip is f745afe (verified 2026-10-14). Neither branch is merged.
 
 **Ledger: 10 records, unchanged** (sha256 `9251eb0c…8fef8fa`, full value in JOURNAL; integrity ok). No #75 row.
 
@@ -37,21 +35,29 @@ that follows 2028ab1 and were not pushed when written.
   - Crowd status is `q27_unresolved` for all 63. The sample is **not representative** (fixed rules, seeded draw);
     no error rate is claimed. It contains no missed GT box, so it does not test the small-box bottleneck.
 
+## Decisions recorded 2026-10-14 (D-077, D-078)
+
+- **Q30 answered:** precision floor **0.75** at conf=**0.25**, IoU >= 0.5. Fixed-threshold only; never mAP.
+- **D-069 answered:** a candidate must improve **both** overall AP@0.5:0.95 and small-person AP@0.5 and meet the floor.
+- Full-curve AP (conf=0.001) and fixed-threshold P/R stay separate. Truncated conf=0.25 history is not comparable.
+- **Provisional, not approved gates:** +0.010 overall (0.517 → 0.527), +0.020 small (0.3556 → 0.3756). Baseline
+  matches EXP-20261004-01. Missing: run-to-run variance, FP16 vs FP32 baseline choice, delta rationale (Q32).
+- Observation: only imgsz 640 clears the 0.75 floor in the recorded series (0.777; 960 is 0.727); headroom 0.027.
+
 ## Open (owner)
 
-1. **D-069** — whether any AP change should drive a decision. Answered for the FP32 control only
-   (measurement-only). Stays OPEN generally.
-2. **Q30** — precision floor and operating point. "Not yet." Stays OPEN. Needed before any production choice.
-3. **Q27** — official size-stratified mAP and crowd status need `instances_val2017.json`. Stays OPEN.
-4. **Q31** — repository versus skill ownership of the trt-perf-analysis contract. Stays OPEN.
+1. **Q32** — validity of the provisional AP deltas (variance, baseline precision, rationale).
+2. **Q27** — official size-stratified mAP and crowd status need `instances_val2017.json`.
+3. **Q31** — repository versus skill ownership of the trt-perf-analysis contract.
+4. Labels for ranks 011, 013, 027; whether to review ranks 051–063; issue #74 and any further GPU series.
 
-**Blockers:** none for the repository. Any production or precision decision waits on Q30 and D-069.
+**Blockers:** none for #76 implementation. Any real training run waits on separate owner approval and Q32.
 
 ## Next actions
 
-1. Owner: review the uncommitted report, journal and STATUS edits; approve a commit and push.
-2. Owner: decide labels (or leave unlabelled) for ranks 011, 013, 027; decide whether to review ranks 051–063.
-3. Owner: decide on issue #74 and any further GPU series (fresh approval reference, clean GPU check, ADR-0018 §6).
+1. Implement #76 in small commits: typed job lifecycle, approval gate, provenance, fake-runtime tests.
+2. Owner: review the #76 PR; answer Q32.
+3. Owner: approve (or not) any real GPU training run separately; none is authorized.
 
 ## Do not start yet
 
