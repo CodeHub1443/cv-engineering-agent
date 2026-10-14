@@ -18,22 +18,12 @@ That branch is pushed; remote tip is f745afe (verified 2026-10-14). Neither bran
 **Done:**
 - **EXP-20261004-01..04** persisted (measurement only): `-01` (640, SELF), `-02` (960), `-03` (1280), `-04` (FP32 640
   control, baseline `-01`, mAP@0.5:0.95 0.518, FPS 81.9). Details: EXPERIMENTS.md.
-  - **Approval deviation:** the `-04` approval record was documented **after** the GPU run. The gate was not
-    satisfied before execution, and nothing claims otherwise.
-  - A contaminated FP32 attempt is quarantined and **not ledger-eligible, permanently.** ADR-0018 accepted (D-075),
-    NoMachine exemption D-076. Issue #74 was open as of 2026-10-04; its current state is not verified.
-- **Failure analysis** (ADR-0015 §9, #75): report and code committed; read-only, descriptive, no GPU run; issue
-  status not verified. Report: `docs/experiments/FAILURE-ANALYSIS-EXP-20261004.md`.
-- **Annotation-label review** of 63 primary-sample candidates (50 high_conf_fp, 2 near_dup_gt_pair, 11
-  degenerate_gt). Report: `docs/experiments/ANNOTATION-REVIEW-EXP-20261004-01.md`, reconciled to the CSV 2026-10-13.
-  - **Labels:** valid_annotation 34, annotation_error 5, ambiguous 8, not_reviewable 0, crowd_region_unresolved 0,
-    **unlabelled 16**. Single reviewer (Tanvir).
-  - Ranks 001–050 were reviewed 2026-10-13. Ranks **011, 013, 027** have observation notes but **no assigned label**.
-  - Ranks **025** (`annotation_error`, mapped from the owner's `invalid_annotation`) and **041** (`ambiguous`) were
-    resolved by explicit owner confirmation.
-  - Ranks **051–063** remain unreviewed and unlabelled.
-  - Crowd status is `q27_unresolved` for all 63. The sample is **not representative** (fixed rules, seeded draw);
-    no error rate is claimed. It contains no missed GT box, so it does not test the small-box bottleneck.
+  - **Approval deviation:** the `-04` approval record was documented **after** the GPU run; nothing claims otherwise.
+  - A contaminated FP32 attempt is quarantined, **permanently not ledger-eligible.** ADR-0018 (D-075), D-076.
+- **Failure analysis** (#75): report and code committed; read-only, no GPU run. `docs/experiments/FAILURE-ANALYSIS-EXP-20261004.md`.
+- **Annotation-label review** (63 candidates): valid 34, annotation_error 5, ambiguous 8, **unlabelled 16** (ranks
+  011, 013, 027 noted but unlabelled; 051–063 unreviewed). Single reviewer; sample **not representative**, no
+  error rate claimed; crowd status `q27_unresolved`. Report: `docs/experiments/ANNOTATION-REVIEW-EXP-20261004-01.md`.
 
 ## Decisions recorded 2026-10-14 (D-077, D-078)
 
