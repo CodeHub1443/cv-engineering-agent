@@ -257,6 +257,12 @@ baseline execution, dataset backend implementation, research tool, evaluation
 subsystem, or model binding exists.** See `docs/state/DECISIONS.md` D-043–D-048 and
 the design notes cited above for the full gap analysis and proposed sequence.
 
+**Update (2026-11-04):** the job boundary (ADR-0013), provenance (ADR-0016), evaluation
+recording (ADR-0017) and the FP32 control (ADR-0018) are merged to main, and baseline
+measurement runs EXP-20261004-01..04 are recorded (reference baseline: the FP16-requested
+640 run, D-082). The training pipeline foundation and acceptance comparer (ADR-0019, fake
+runtimes) is also merged; no real training runtime exists yet (see Phase 6).
+
 **Exit test:** a dataset version is created, a temporal- and camera-leakage check runs and
 **fails** a deliberately leaky split, and a baseline run is recorded with accuracy,
 latency, memory, and power on a named target.
@@ -272,9 +278,13 @@ latency, memory, and power on a named target.
 that decision was actually written, per this repo's real numbering practice —
 see its own header note) · ADR-0011 evaluation & failure analysis.
 
-**Status:** not started. No training-execution or evaluation ADR has been written; no
-`cv_agent` training/evaluation module exists; `docs/state/EXPERIMENTS.md`'s schema is a
-hand-maintained convention with zero real rows recorded — no code reads or writes it.
+**Status (2026-11-04):** foundation merged to main; no real training runtime yet. Merged: the
+job/process boundary (ADR-0013), experiment provenance (ADR-0016), evaluation recording
+(ADR-0017), the FP32 precision control (ADR-0018), and the training pipeline foundation
+with the acceptance comparer (ADR-0019: approval-gated job lifecycle and like-for-like
+candidate-vs-baseline comparison, fake runtimes only). **Remaining:** a real training
+runtime (own issue), a ledger-row write from a training run, and ranked failure analysis
+feeding the next experiment. `docs/state/EXPERIMENTS.md` holds the ledger rows recorded so far.
 
 **Exit test:** a training run requests approval with a cost estimate, runs after approval,
 writes a complete ledger row, produces a composite result per `docs/EVALUATION.md`, and

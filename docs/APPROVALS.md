@@ -18,7 +18,7 @@ comparing against EXP-…" is.
 
 | Action | Gate | Estimate required |
 |---|---|---|
-| Training run | ⛔ always | GPU-hours, wall time, cost, storage |
+| Training run | standing grant (D-080): no per-run wait; cost estimate + grant-issued approval reference recorded per run; idle-GPU and process-provenance checks still required | GPU-hours, wall time, cost, storage |
 | Hyperparameter sweep | ⛔ always | runs × cost, search space size |
 | NAS `[P§11]` | ⛔ always, **plus** a written justification that the baseline bottleneck warrants it | as above + why NAS over cheaper options |
 | Cloud GPU allocation | ⛔ always | instance, hours, $ |
@@ -34,6 +34,8 @@ comparing against EXP-…" is.
 | Read-only research, retrieval, analysis | ✅ free | — |
 | Code, docs, config, tests inside the repo | ✅ free (still via PR) | — |
 | Dry-run / cost-estimation of any gated action | ✅ free | — |
+
+**Standing grant (D-080, D-087; `[P§24]`):** real GPU training, fine-tuning, benchmark and optimization runs need no per-run owner approval and have no cap. Each run still estimates cost first, records an approval reference issued under the grant (bound to one `experiment_id` and one cost ceiling), and reports it to the owner at launch. The ADR-0018 §6 idle-GPU and process-provenance checks still apply. The sweep and NAS rows above are unchanged.
 
 ### Platform-sensitive actions
 
