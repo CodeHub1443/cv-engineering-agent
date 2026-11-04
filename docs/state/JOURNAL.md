@@ -2282,3 +2282,49 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** The owner decision record under `.cv_agent/` is gitignored and predates the owner’s rank 025 and 041 resolutions. The current CSV is the source of truth for applied labels.
 
 **Left open:** Ranks 011, 013, 027, and 051–063 remain unlabelled. Q30, D-069, and Q27 remain open. No error-rate claim is made because the sample is not representative. CSV, ledger, backups, and model artifacts were not modified during the documentation reconciliation.
+
+## 2026-10-14 — Owner decisions Q30 and D-069 recorded; issue #76 branch opened (feature/claude/76-training-execution-pipeline)
+
+**Did:** Verified f745afe was a descendant of 2028ab1 containing only the three approved documentation files, fetched, and pushed it as a fast-forward (remote tip verified f745afe). Created the #76 branch. Appended D-077 (Q30: precision floor 0.75 at conf 0.25, IoU >= 0.5) and D-078 (D-069: both overall AP@0.5:0.95 and small-person AP@0.5 must improve; deltas +0.010 / +0.020 provisional). Struck through Q30 and added Q32. Rewrote STATUS.
+
+**Why:** The owner supplied the decisions in the #76 brief; CLAUDE.md §7 requires them in the state files before implementation.
+
+**Checked:** Baselines 0.517 / 0.3556 / P 0.7768 / R 0.6701 match the persisted EXP-20261004-01 ledger values. The baseline was FP16-requested; the FP32 control is 0.518 / 0.3547. The recorded 960 run (P 0.7273) would not meet the 0.75 floor.
+
+**Learned:** `CV Engineering Agent.md` at the repo root is tracked and unmodified, not untracked as the brief said. It was not touched.
+
+**Left open:** Q32 (variance, baseline precision, delta rationale), Q27, Q31. The AP deltas are not approved gates. No GPU job was run.
+
+## 2026-10-14 — Issue #76 foundation implemented (feature/claude/76-training-execution-pipeline)
+
+**Did:** Wrote ADR-0019 (Proposed). Added `cv_agent/experiments/acceptance.py` (candidate vs baseline: both APs must improve, precision >= 0.75 at conf 0.25, AP and fixed-threshold keys kept separate, provisional gains) and `cv_agent/execution/jobs/training.py` (provenance-complete request, cost estimate, approval gate before the executor, explicit lifecycle, cancel/failure handling). Tests: `tests/test_acceptance.py` (15), `tests/test_training_jobs.py` (42), fake runtimes only.
+
+**Why:** Issue #76 requires an approval-gated training pipeline foundation with no GPU run. JobExecutor already supplied pin/approval/host checks, so the new layer only adds training-specific preflight and result semantics.
+
+**Learned:** The experiments layer may not import execution (ADR-0017 §4), so acceptance and lifecycle are separate modules and the clean-worktree check is an injected callable. mypy reports one pre-existing error (`signal.SIGKILL` in linux_nvidia.py on Windows), unrelated to this change.
+
+**Left open:** Q32 (AP deltas stay provisional), ADR-0019 acceptance, a real training runtime (separate issue and approval), wiring acceptance into a script or graph node. No GPU job was run, no ledger write, no push of this branch, no PR.
+
+## 2026-11-04 — Issue #76 review fixes; owner decisions D-080 to D-083 (feature/claude/76-training-execution-pipeline)
+
+**Corrects:** the 2026-10-14 foundation entry says the #76 branch was not pushed. The owner pushed it on 2026-11-04 13:09:31 +0600 (origin tip d2292ae, per the remote-tracking reflog). That entry is not edited.
+
+**Did:** An independent review (2026-11-04) returned verdict revise. Fixed, each with a test that failed first: H1 (approval bound to `experiment_id`, "single run" scope and a gpu/wall-hour ceiling), H2 (precision, input_resolution and model must match unless declared as the single variable under test), M1 (named D-077/D-078 constants, deviations, verdict `meets_criteria_with_deviations`, caveats follow the flags), M2 (controller-only token for `TrainingJob`/`TrainingResult`), M3 (`TrainingJobController.for_repository` under a narrow layering exception, with a temporary-git-repo integration test), M5 (`approval_ref` and `host_requirement` in provenance; ADR-0019 §3 uses the real API names), L1 (exact `conf=0.001` token), and L2 (cancel/collect fault tests; `cancel_requested` set only after the runtime accepts; NaN metric is `invalid`). Recorded D-080 (standing authorization), D-081 (review fixes), D-082 (Q32(b): FP16-requested EXP-20261004-01 is the baseline) and D-083 (merge path #69 → #71 → #73 → provenance-recovery → #76). Struck Q32(b); added Q33 (typed identities, L3). ADR-0019 updated and still Proposed; ADR-0017 §4 unchanged.
+
+**Deferred:** M4 (`evaluation_records.py:566` and `docs/EVALUATION.md:46` wording, separate PR). L3, recorded as Q33. The stale CLAUDE.md §9 line, for a separate docs branch.
+
+**Tests:** Windows baseline before the change: 31 failed, 1839 passed, 6 skipped. All 31 are Windows-only (POSIX resource, nvidia-smi, path and pipe tests in test_evaluation_records, test_baseline_wiring, test_linux_nvidia_runtime and the yolo binding tests). The review session's 46 included 15 more Windows temp-file lock errors (WinError 32/267) in test_linux_nvidia_runtime. After the change, two runs gave 31 failed, 1882 passed, 6 skipped, with the failing set identical to the baseline by node ID. The two #76 files: 100 passed. ruff clean; mypy only the known `signal.SIGKILL` error in linux_nvidia.py. Ledger hashes unchanged. No GPU job was run.
+
+**Learned:** The rtk output hook is disabled for this repository through a local, untracked settings file (`.claude/settings.local.json`, excluded via `.git/info/exclude`), as reported by the operator. `ExperimentRecord` has no class-set or split field; the split lives inside `dataset_version`. D-080 conflicts with ADR-0018 §6 ("fresh owner approval reference") and with the `docs/APPROVALS.md` gated-actions table until ADR-0018 is amended.
+
+**Left open:** ADR-0019 acceptance; Q32(a), (c) and (d); Q33; the ADR-0018 amendment for D-080; a Linux/WSL full-suite baseline; the PR-stack audit before the D-083 merges. Commits are local; nothing pushed, no PR.
+
+## 2026-11-04 — ADR-0019 accepted; merge sequence started (feature/claude/76-training-execution-pipeline)
+
+**Did:** Recorded the owner's acceptance of ADR-0019 (D-084) and the merge/fixture decisions (D-085). ADR-0019 status is now Accepted; it approves the design, not any GPU run.
+
+**Audit (2026-11-04):** origin/main f7cd28d. #69 head 8f29618 (base main, MERGEABLE/CLEAN, CI green). #71 head a4a6f9b (base main, CI green; conflicts if merged alone after #69). #73 head 1531344 (base adr-0009-second-binding, no CI). experiment-provenance-recovery f745afe contains #73 and #71 with conflicts resolved in 4f93d0d; no PR. The #76 branch a3207a9 sits on it; no PR. All merges predicted clean by git merge-tree. Hygiene check: GO for both ranges.
+
+**Merge plan (D-083, D-085):** merge #69 (merge commit); retarget #73 to main without merging; open and merge the provenance-recovery PR (brings #71 and #73), each gated on green CI; then open the #76 PR as one PR. #71 and #73 are never merged directly. Stop at the first failure. Merging launches no GPU workload.
+
+**Left open:** Q32(a), (c), (d); Q27; Q31; Q33; ADR-0018 amendment for D-080; Linux/WSL baseline. No GPU job was run, ledger unchanged.

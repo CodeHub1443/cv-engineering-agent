@@ -365,14 +365,16 @@ JSON snapshots. Provenance and write rules are implemented (ADR-0016). The defau
 fixed to the repository's state root (no cwd-relative creation). Historical rows keep NULL
 `commit_sha`. No SHA was fabricated.
 
-**Q30. (2026-10-04) What precision floor, or operating point, does the person-detection
+~~**Q30. (2026-10-04) What precision floor, or operating point, does the person-detection
 target require? — OPEN. OWNER INPUT REQUIRED before any production operating point is
 defined.** Fixed-threshold recall rises 0.670→0.773 at conf=0.10, but precision falls
 0.776→0.541. No precision floor, operating point, or pass/fail threshold on precision or
 fixed-threshold recall has been set by any document. EXP-20261004-01 defines **no** pass/fail criteria
 for this reason, and it reports threshold-free small-object AP50 from the full curve. Reported
 fixed-threshold P/R at conf 0.25 is reference-only. Related: Q24 (reference project), Q25 (target hardware).
-Owner: Tanvir.
+Owner: Tanvir.~~ — **Answered 2026-10-14 (owner decision, D-077): precision floor 0.75 at
+conf=0.25, IoU >= 0.5.** Fixed-threshold precision only; never mAP. Reference operating point
+conf=0.25. D-069 is answered in the same session (D-078) with the AP gains still provisional (Q32).
 
 **Q31. (2026-10-04) Should the repository pin the trt-perf-analysis skill version and output
 schema, or track the installed skill?** Current behaviour: the real-skill tests read the installed
@@ -382,3 +384,15 @@ repository would fail on any machine with a different installed skill, and the s
 is the authority. This is a genuine ownership decision between repository and skill, and it is
 not guessed here. **Until decided:** track the installed skill; do not hard-code a version. Owner:
 Tanvir, or the skill owner.
+
+**Q32. (2026-10-14) Are the provisional AP acceptance thresholds (+0.010 overall AP@0.5:0.95,
++0.020 small-person AP@0.5) valid gates? — OPEN for (a), (c) and (d); (b) answered 2026-11-04 (D-082). OWNER INPUT REQUIRED before any run that is
+meant to drive a decision.** Baseline provenance matches EXP-20261004-01 (0.517 / 0.3556 at 640).
+Missing evidence: (a) run-to-run variance of `yolo val` and of any training seed (one run per
+configuration so far); ~~(b) which inference precision defines the baseline (FP16-requested
+EXP-20261004-01 versus FP32 EXP-20261004-04, 0.518 / 0.3547)~~ — **(b) answered 2026-11-04 (owner
+decision, D-082): FP16-requested EXP-20261004-01 is the baseline; candidates must match its precision;** (c) the practical rationale for the
+delta sizes on this dataset; (d) whether "improve" means >= the delta or any positive change.
+Until answered, issue #76 encodes the thresholds as provisional-labelled configuration. Owner: Tanvir.
+
+**Q33. (2026-11-04) Should training and acceptance identifiers be typed identities rather than free strings?** `[P§32]` Review finding L3 on ADR-0019: `TrainingJobRequest` and `TrainingApproval` carry `experiment_id`, `approval_ref`, `scope`, `model`, `precision`, `dataset_version` and `hardware_target` as validated strings, and `evaluate_candidate(variable_under_test=...)` takes a string. CLAUDE.md §8 says registries hold typed identities, not free strings. Which identities become types, and which registry owns them, changes state shape and is not decided here. **Until decided:** strings stay format-validated where a format exists (EXP ids, 40-hex SHA). Owner: Tanvir.
