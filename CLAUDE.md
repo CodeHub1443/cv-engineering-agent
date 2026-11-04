@@ -150,6 +150,4 @@ pytest tests/test_x.py::test_name   # single test
 python -m cv_agent         # CLI health check (or: cv-agent, once installed)
 ```
 
-`ruff` and `mypy` are required clean per §8 but are not yet in `pyproject.toml`
-dev-dependencies — installing and running them is part of closing that gap, not a
-sign they should be skipped.
+`ruff` and `mypy` are pinned in the `dev` extra (`ruff==0.15.19`, `mypy==2.1.0`) and CI runs `ruff check cv_agent tests`, `mypy cv_agent` and `pytest`.

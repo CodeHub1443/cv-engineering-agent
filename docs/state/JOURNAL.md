@@ -2328,3 +2328,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Merge plan (D-083, D-085):** merge #69 (merge commit); retarget #73 to main without merging; open and merge the provenance-recovery PR (brings #71 and #73), each gated on green CI; then open the #76 PR as one PR. #71 and #73 are never merged directly. Stop at the first failure. Merging launches no GPU workload.
 
 **Left open:** Q32(a), (c), (d); Q27; Q31; Q33; ADR-0018 amendment for D-080; Linux/WSL baseline. No GPU job was run, ledger unchanged.
+
+## 2026-11-04 — Post-merge housekeeping (docs/claude/post-merge-housekeeping, issue #81)
+
+**Did:** Recorded the completed merge sequence: #69 → 4f93352, #79 → 96b2f4b, #77 → 42bd16e, #80 → ffd89e4 (origin/main); #71 and #73 were auto-marked merged; Issues #76 and #78 are closed. Added D-086 (Pillow dependency) and D-087 (approval policy aligned with D-080), amended docs/APPROVALS.md and ADR-0018 (new Amendment section; original text untouched), replaced the stale CLAUDE.md §9 ruff/mypy sentence, updated the ROADMAP Phase 5 and 6 status, rewrote STATUS.
+
+**CI / health:** Linux CI on #80: ruff clean, mypy ok (85 files), pytest 1893 passed, 26 skipped. Windows local: 31 known Linux-only failures (the Windows-only baseline). Linux is now the authoritative baseline.
+
+**Deviation (minor):** pyproject.toml was reset in the temporary cifix worktree after a sed line-ending change; no work was lost.
+
+**Left open:** Q32(a), (c), (d); Q27; Q31; Q33; M4 wording PR; annotation labels for ranks 011, 013, 027. OPEN_QUESTIONS.md unchanged. Docs only; no GPU job, ledger unchanged.

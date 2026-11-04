@@ -108,3 +108,7 @@ with no workload behind it.
 - `tests/test_evaluation_records.py` (102 tests) covers: a clean start snapshot; a foreign process at start, during polling, and at end; a missing, unreadable or empty snapshot; a flag that disagrees with the snapshots, or is missing; the wrapper refusing a busy GPU and an unreadable process list before any run; the run's own process not counted as foreign; parsing of empty, clean and unreadable output; the FP32 argv and run name; refusal of FP32 at sizes other than 640; the FP16 path unchanged.
 - The tests use a fake `nvidia-smi`. No GPU run is part of the test suite.
 - ADR-0018 was accepted by the owner on 2026-10-04 (see the status line). Acceptance does not approve a GPU run.
+
+## Amendment (2026-11-04, D-087)
+
+The owner's standing authorization (D-080) supersedes per-run owner approval for GPU runs. §3.8 and §6's "fresh owner approval reference" is satisfied by a reference issued under the D-080 standing grant, bound to one experiment and one cost ceiling (ADR-0019, H1) and recorded before the run. The idle-GPU and process-provenance rules are unchanged. The original §3.8 and §6 text above is not rewritten. Status remains Accepted. `[P§24]`
