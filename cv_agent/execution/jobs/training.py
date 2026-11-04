@@ -9,8 +9,9 @@ distinguishes "the process finished" from "the candidate is evidence".
 
 Does NOT own: spawning processes (JobRuntime), pin/host checks (JobExecutor), judging a
 candidate against its baseline (cv_agent.experiments.acceptance), or minting approvals
-(docs/APPROVALS.md). It imports nothing from cv_agent.experiments (layering, ADR-0017 §4);
-the clean-worktree check arrives as an injected callable.
+(docs/APPROVALS.md). Its only dependency on cv_agent.experiments is the narrow ADR-0019 §2
+exception: ``TrainingJobController.for_repository`` imports ``require_clean_worktree`` (ADR-0016)
+inside that function, so the HEAD check is reused, not duplicated. Experiments never imports execution.
 
 No real training runtime exists in this change. Nothing here starts a GPU workload by itself.
 """
@@ -21,6 +22,7 @@ import json
 import math
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable, Literal, Mapping
 
@@ -32,6 +34,10 @@ from cv_agent.skills.models import Skill
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _EXP_ID_RE = re.compile(r"^EXP-\d{8}-\d{2}$")
+SUPPORTED_APPROVAL_SCOPE = "single run"
+"""docs/APPROVALS.md also allows "N runs" and "until date"; this layer supports one run only."""
+_ISSUER = object()
+"""Controller-only token: TrainingJob and TrainingResult cannot be built in any state from outside."""
 
 TrainingState = Literal[
     "refused", "started", "running", "training_completed", "failed", "cancelled"
@@ -89,18 +95,28 @@ class CostEstimate:
 
 @dataclass(frozen=True)
 class TrainingApproval:
-    """An owner approval, recorded not minted. The reference must name this experiment's run."""
+    """An owner approval, recorded not minted, bound to one experiment, a scope and a cost ceiling."""
 
     approval_ref: str
     approved_by: str
     binding_pin: Mapping[str, Any]
     """The execution pin the approval was granted for (ADR-0009 §14); the executor verifies it."""
+    experiment_id: str
+    """The one experiment this approval authorizes (non-transferable, docs/APPROVALS.md)."""
+    scope: str
+    approved_cost: CostEstimate
+    """The estimate presented when asking; its gpu_hours and wall_hours are the approved ceiling."""
 
     def __post_init__(self) -> None:
         _nonblank(self.approval_ref, "TrainingApproval.approval_ref")
         _nonblank(self.approved_by, "TrainingApproval.approved_by")
         if not self.binding_pin:
             raise ValueError("TrainingApproval.binding_pin is required (approval must bind to a snapshot)")
+        if not _EXP_ID_RE.match(self.experiment_id or ""):
+            raise ValueError(f"TrainingApproval.experiment_id must match EXP-YYYYMMDD-NN, got {self.experiment_id!r}")
+        _nonblank(self.scope, "TrainingApproval.scope")
+        if not isinstance(self.approved_cost, CostEstimate):
+            raise ValueError("TrainingApproval.approved_cost must be the CostEstimate that was presented")
 
 
 @dataclass(frozen=True)
@@ -148,10 +164,13 @@ class TrainingJobRequest:
             self, "config", MappingProxyType(json.loads(json.dumps(dict(self.config))))
         )
 
-    def provenance(self) -> dict[str, Any]:
+    def provenance(self, approval_ref: str | None) -> dict[str, Any]:
         """The immutable snapshot recorded with every result."""
+        host = self.host_requirement
         return {
             "experiment_id": self.experiment_id,
+            "approval_ref": approval_ref,
+            "host_requirement": {"os": host.os, "gpu_vendor": host.gpu_vendor, "min_vram_mb": host.min_vram_mb},
             "baseline_id": self.baseline_id,
             "commit": self.commit,
             "dataset_version": self.dataset_version,
@@ -181,6 +200,11 @@ class TrainingResult:
     resources: JobResourceMetadata = field(default_factory=JobResourceMetadata)
     evaluation_required: bool = True
     """Always True: a finished job is not a result until evaluated against the baseline."""
+    _issuer: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._issuer is not _ISSUER:
+            raise TypeError("TrainingResult is created only by TrainingJob.result()")
 
     @property
     def terminal(self) -> bool:
@@ -208,7 +232,11 @@ class TrainingJob:
         handle: JobHandle | None,
         state: TrainingState,
         reasons: tuple[str, ...] = (),
+        *,
+        _issuer: object = None,
     ) -> None:
+        if _issuer is not _ISSUER:
+            raise TypeError("TrainingJob is created only by TrainingJobController.start()")
         self._request = request
         self._approval = approval
         self._executor = executor
@@ -268,28 +296,30 @@ class TrainingJob:
         """Request cancellation. No-op on terminal jobs. The state changes when poll() observes it."""
         if self._state in _TERMINAL or self._handle is None:
             return False
-        self.cancel_requested = True
         try:
             self._executor.cancel_job(self._handle)
         except Exception as exc:  # noqa: BLE001
             self._reasons.append(f"cancel raised: {exc}")
             return False
+        self.cancel_requested = True  # only once the runtime accepted the request
         return True
 
     def result(self) -> TrainingResult:
         outcome = self._outcome
         reasons = list(self._reasons)
+        approval_ref = self._approval.approval_ref if self._approval else None
         if outcome is not None and outcome.error_message:
             reasons.append(outcome.error_message)
         return TrainingResult(
             experiment_id=self._request.experiment_id,
             state=self._state,
-            provenance=MappingProxyType(self._request.provenance()),
-            approval_ref=self._approval.approval_ref if self._approval else None,
+            provenance=MappingProxyType(self._request.provenance(approval_ref)),
+            approval_ref=approval_ref,
             job_id=self._handle.job_id if self._handle else None,
             reasons=tuple(reasons),
             artifacts=MappingProxyType(dict(outcome.artifacts)) if outcome else MappingProxyType({}),
             resources=outcome.resources if outcome else JobResourceMetadata(),
+            _issuer=_ISSUER,
         )
 
 
@@ -300,16 +330,24 @@ class TrainingJobController:
         self,
         executor: JobExecutor,
         skill: Skill,
-        head_commit: Callable[[], str],
+        *,
+        head_commit_for_tests: Callable[[], str],
     ) -> None:
         """
-        ``head_commit`` must return HEAD's SHA and raise if the worktree is dirty
-        (cv_agent.experiments.provenance.require_clean_worktree). It is required so a real
-        run cannot skip the provenance check.
+        Tests only: ``head_commit_for_tests`` stands in for the real HEAD check. Production code
+        uses ``for_repository``, which wires require_clean_worktree (ADR-0016).
         """
         self._executor = executor
         self._skill = skill
-        self._head_commit = head_commit
+        self._head_commit = head_commit_for_tests
+
+    @classmethod
+    def for_repository(cls, executor: JobExecutor, skill: Skill, repo_root: Path) -> TrainingJobController:
+        """The default controller: HEAD must be clean and equal to the request's commit."""
+        from cv_agent.experiments.provenance import require_clean_worktree  # ADR-0019 §2 exception
+
+        root = Path(repo_root)
+        return cls(executor, skill, head_commit_for_tests=lambda: require_clean_worktree(root))
 
     def preflight(self, request: TrainingJobRequest, approval: TrainingApproval | None) -> list[str]:
         """Every problem that blocks a start. Empty list means the gate is open."""
@@ -318,6 +356,20 @@ class TrainingJobController:
             problems.append(
                 "explicit owner approval is required before any training run ([P§24]); none supplied"
             )
+        else:
+            if approval.scope != SUPPORTED_APPROVAL_SCOPE:
+                problems.append(
+                    f"unsupported approval scope {approval.scope!r}; only {SUPPORTED_APPROVAL_SCOPE!r} is supported"
+                )
+            if approval.experiment_id != request.experiment_id:
+                problems.append(
+                    f"approval {approval.approval_ref} is for {approval.experiment_id}, not "
+                    f"{request.experiment_id}; an approval is non-transferable (docs/APPROVALS.md)"
+                )
+            for name in ("gpu_hours", "wall_hours"):
+                asked, ceiling = getattr(request.cost, name), getattr(approval.approved_cost, name)
+                if asked > ceiling:
+                    problems.append(f"request {name} {asked} exceeds the approved ceiling {ceiling}")
         if not self._executor.can_start(self._skill.skill_id):
             problems.append(
                 f"no verified binding with a registered job runtime for skill '{self._skill.skill_id}'"
@@ -338,7 +390,7 @@ class TrainingJobController:
         """Return a TrainingJob. State is 'refused' (nothing started) or 'started'/'failed'."""
         problems = self.preflight(request, approval)
         if problems:
-            return TrainingJob(request, approval, self._executor, None, "refused", tuple(problems))
+            return TrainingJob(request, approval, self._executor, None, "refused", tuple(problems), _issuer=_ISSUER)
         assert approval is not None
         exec_request = SkillExecutionRequest(
             inputs={
@@ -362,6 +414,6 @@ class TrainingJobController:
             state: TrainingState = "failed" if job_result.status == "failed" else "refused"
             return TrainingJob(
                 request, approval, self._executor, None, state,
-                (f"{job_result.status}: {reason}",),
+                (f"{job_result.status}: {reason}",), _issuer=_ISSUER,
             )
-        return TrainingJob(request, approval, self._executor, handle, "started")
+        return TrainingJob(request, approval, self._executor, handle, "started", _issuer=_ISSUER)
