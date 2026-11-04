@@ -2318,3 +2318,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** The rtk output hook is disabled for this repository through a local, untracked settings file (`.claude/settings.local.json`, excluded via `.git/info/exclude`), as reported by the operator. `ExperimentRecord` has no class-set or split field; the split lives inside `dataset_version`. D-080 conflicts with ADR-0018 §6 ("fresh owner approval reference") and with the `docs/APPROVALS.md` gated-actions table until ADR-0018 is amended.
 
 **Left open:** ADR-0019 acceptance; Q32(a), (c) and (d); Q33; the ADR-0018 amendment for D-080; a Linux/WSL full-suite baseline; the PR-stack audit before the D-083 merges. Commits are local; nothing pushed, no PR.
+
+## 2026-11-04 — ADR-0019 accepted; merge sequence started (feature/claude/76-training-execution-pipeline)
+
+**Did:** Recorded the owner's acceptance of ADR-0019 (D-084) and the merge/fixture decisions (D-085). ADR-0019 status is now Accepted; it approves the design, not any GPU run.
+
+**Audit (2026-11-04):** origin/main f7cd28d. #69 head 8f29618 (base main, MERGEABLE/CLEAN, CI green). #71 head a4a6f9b (base main, CI green; conflicts if merged alone after #69). #73 head 1531344 (base adr-0009-second-binding, no CI). experiment-provenance-recovery f745afe contains #73 and #71 with conflicts resolved in 4f93d0d; no PR. The #76 branch a3207a9 sits on it; no PR. All merges predicted clean by git merge-tree. Hygiene check: GO for both ranges.
+
+**Merge plan (D-083, D-085):** merge #69 (merge commit); retarget #73 to main without merging; open and merge the provenance-recovery PR (brings #71 and #73), each gated on green CI; then open the #76 PR as one PR. #71 and #73 are never merged directly. Stop at the first failure. Merging launches no GPU workload.
+
+**Left open:** Q32(a), (c), (d); Q27; Q31; Q33; ADR-0018 amendment for D-080; Linux/WSL baseline. No GPU job was run, ledger unchanged.

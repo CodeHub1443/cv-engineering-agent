@@ -1,6 +1,6 @@
 # ADR-0019: Training execution pipeline — approval-gated jobs and candidate acceptance
 
-- **Status:** Proposed (2026-10-14). Implemented on `feature/claude/76-training-execution-pipeline`; not merged. Review fixes 2026-11-04 (D-081) applied; still Proposed. Acceptance does not approve any GPU run.
+- **Status:** Accepted (2026-11-04, owner; D-084). Proposed 2026-10-14; implemented on `feature/claude/76-training-execution-pipeline`; review fixes 2026-11-04 (D-081) applied. Acceptance does not approve any GPU run.
 - **Date:** 2026-10-14
 - **Layer:** execution (job lifecycle) + experiments (acceptance comparison)
 - **Canon:** `[P§24]` (human approval), `[P§25]` (reproducibility), `[P§29.2]`, `[P§29.3]`, `[P§29.5]`, `[P§29.8]`, `[P§34]`
