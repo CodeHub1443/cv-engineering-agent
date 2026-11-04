@@ -297,6 +297,22 @@ against the real binding — including the true-XOR "both supplied" rejection
 path — is now written and passing (skipped, not faked, on a machine without
 the skill installed) — see ADR-0009 §12/§13, ADR-0010 §14/§15, D-027, D-028.
 
+**Q26. (2026-09-30) How should standard benchmark datasets (COCO, VOC, ImageNet, etc.) be
+registered in `DatasetManifest` without requiring perceptual hash computation as a
+prerequisite?** `DatasetManifest` construction raises `LeakageError` when any item has
+`perceptual_hash=None` (the near-duplicate check is fail-closed). For a 5000-image
+dataset like COCO val2017, computing perceptual hashes would require loading all 5000
+images — a separate operation not part of the evaluation pipeline. Options: (a) compute
+hashes in a separate step before `DatasetManifest` creation; (b) add an explicit
+`skip_near_duplicate_check=True` flag to `DatasetManifest` (requires a recorded rationale,
+e.g., "public benchmark with known provenance — near-duplicate check is not the leakage
+concern for this split"); (c) a separate `BenchmarkDatasetRef` type that does not require
+leakage checks for publicly-released, externally-validated datasets; (d) record the
+dataset reference as a plain string in `ExperimentRecord.dataset_version` only, with
+provenance in notes (current approach for D-061/EXP-20260930-01). **Current status:**
+using approach (d) for now (D-061). This question blocks full `DatasetManifest`
+registration of COCO val2017 and any future benchmark dataset.
+
 ~~**Q18.** When ADR-0010's V1 selection rule finds **more than one** executable
 `SkillLink` candidate for a task component, it explicitly produces no plan rather than
 silently picking one (`[P§35]`) — surfaced via `AgentState.planning_result.

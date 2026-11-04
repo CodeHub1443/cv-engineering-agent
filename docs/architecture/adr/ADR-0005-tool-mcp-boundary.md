@@ -686,3 +686,146 @@ Q6, Q10 (now answered separately, D-045), Q16, Q19, Q23 remain untouched by this
 source(s)/API(s) are used, a `ToolSpec` registration, or any acquisition code — all
 explicitly out of scope for the session that recorded this decision (issue #63). See
 `docs/state/DECISIONS.md` D-048.
+
+## 13. Amendment — first concrete ToolSpec: web-research-fetch (architect decision, 2026-09-28, D-051)
+
+§8(b) named this as a revisit trigger ("Phase 2 (knowledge/research) needs its first real
+tool... a first real `ToolSpec`/`ToolInvoker` is registered"). That trigger has now fired.
+§12/D-048 authorized the mechanism (web research, `ToolInvoker`, no MCP SDK). This section
+records the architect decision on the first concrete `ToolSpec` shape, the HTTP client
+choice, the `ToolOutcome.output` schema, and the mapping-responsibility boundary —
+constituting the full pre-implementation record CLAUDE.md §5 requires before
+`cv_agent/tools/web_research.py` is written.
+
+**No existing interface, type, or accepted section of this ADR is changed.** This section
+is additive; every boundary constraint in §2–§11 continues to apply to the implementation
+it authorizes.
+
+### ToolSpec
+
+```python
+ToolSpec(
+    tool_id=ToolId("web-research-fetch"),
+    name="Web Research Fetch",
+    description=(
+        "Fetch a single URL over HTTP and return its decoded body text, "
+        "content type, and access timestamp. Read-only. No side effects. "
+        "The calling graph node is responsible for claim extraction and "
+        "KnowledgeItem construction — this invoker returns raw content only. "
+        "See ADR-0005 §13."
+    ),
+    transport="http",
+    side_effecting=False,
+    approval_policy="allowed",    # APPROVALS.md: "Read-only research, retrieval, analysis → ✅ free"
+    input_schema=(
+        ToolInputField(name="url",          required=True,  description="The URL to fetch (HTTP or HTTPS)."),
+        ToolInputField(name="context_hint", required=False, description="Optional caller annotation for logging; not sent in the request."),
+    ),
+    verified=False,    # set to True only after the implementation has been personally
+                       # inspected by the author of cv_agent/tools/web_research.py —
+                       # the same verified=True discipline ADR-0009 §8 already applies
+                       # to ExecutionBinding. False is the correct default here because
+                       # no implementation exists at the time of this amendment.
+)
+```
+
+### ToolOutcome.output schema (contract for the calling graph node)
+
+When `ToolOutcome.success is True`:
+
+```python
+{
+    "url":           str,   # URL actually fetched (after any HTTP redirects)
+    "content_text":  str,   # decoded response body (UTF-8, errors="replace")
+    "content_type":  str,   # Content-Type header value (e.g. "text/html; charset=utf-8")
+    "date_accessed": str,   # ISO 8601 UTC timestamp (e.g. "2026-09-28T14:32:01Z")
+    "http_status":   int,   # final HTTP response status code
+}
+```
+
+When `ToolOutcome.success is False`, the invoker must still return a `ToolOutcome` (not
+raise), and `ToolOutcome.error_message` carries the failure description. An empty dict
+`{}` is acceptable as `output` on failure — the executor will produce
+`ToolResultStatus="failed"` / `ToolErrorCategory="transport_error"` (§5's step 9).
+
+This schema is the contract between `cv_agent/tools/web_research.py` (the invoker) and the
+research graph node (the caller). Any extension to this output schema (e.g. adding
+`redirect_chain`, `response_headers`, or a structured `metadata` dict) is an amendment to
+this section, not a silent change to `ToolOutcome.output`'s contents.
+
+### HTTP client: Python stdlib `urllib` — no new dependency
+
+V1 uses `urllib.request.urlopen()` from the Python standard library. No entry is added to
+`pyproject.toml`'s `dependencies` list. This is sufficient for targeted HTTP GET requests
+to specific, known documentation, paper, and model-repository URLs — the only kind of
+request the reasoning layer needs to make (it constructs specific URLs; this invoker fetches
+them). A third-party HTTP client (`httpx`, `requests`) is not introduced:
+
+- Keeps the `cv_agent` package free of a new runtime dependency for a boundary already
+  defined as transport-agnostic.
+- Consistent with `validate_pipeline.py`'s own stdlib-only property (D-050).
+- `ToolInvoker.invoke()` is synchronous; async HTTP is not needed.
+
+**Revisit trigger:** if `urllib` proves insufficient for any source actually required (e.g.
+a target requiring a session cookie, JavaScript rendering, or a non-trivial auth flow), or
+if a **search-by-query capability** (returning candidate URL lists rather than fetching a
+single known URL) becomes necessary. Neither scenario is required for V1; neither is decided
+against here.
+
+### Mapping responsibility — the invoker/graph node split
+
+`cv_agent/tools/web_research.py`'s `ToolInvoker` does exactly one thing: fetch the URL and
+return raw content in `ToolOutcome.output`. It never:
+
+- constructs a `KnowledgeItem` or `Provenance` (ADR-0006),
+- calls `KnowledgeStore.put()`,
+- assigns a `SourceClass` or `EvidenceWeight`,
+- or performs any claim extraction.
+
+Those steps belong to the research orchestration graph node (a separate issue under
+ADR-0003). That node will:
+
+1. Receive a URL from its upstream reasoning (the reasoning layer decides *which* URL to
+   fetch — consistent with §9 rule 5 and `[P§19]`: "LLM provides reasoning").
+2. Call `ToolExecutor.invoke(ToolId("web-research-fetch"), ToolRequest(inputs={"url": url}))`.
+3. Use an LLM call to extract a specific `claim` from `content_text` and identify
+   `conditions` and `staleness_horizon_days` — reasoning that must not live in the invoker.
+4. Construct `Provenance(url=..., source_class=..., date_published=...,
+   date_accessed=output["date_accessed"], author_or_org=...)` — `source_class` is assigned
+   by the caller's knowledge of the source type, never inferred by the invoker.
+5. Construct `KnowledgeItem(...)` — fail-closed per ADR-0006 §3.
+6. Call `KnowledgeStore.put(item)`.
+
+This split is the typed enforcement of `[P§19]`: "RAG provides knowledge; the LLM provides
+reasoning; they do not merge." The invoker is the transport. The graph node is the reasoner.
+
+### Implementation module
+
+`cv_agent/tools/web_research.py` — new module, modeled after the `trt_perf_analysis.py` and
+`deepstream_validate_pipeline.py` precedents in `cv_agent/execution/runtimes/`: exports
+`build_spec() -> ToolSpec`, a concrete `WebResearchFetchInvoker` class implementing the
+`ToolInvoker` Protocol, and an explicit `register(registry: ToolRegistry) -> None`
+function. No implementation body is part of this ADR section (CLAUDE.md §5: architect
+mode = types and signatures, no bodies). `verified=True` is set in the live `ToolSpec`
+returned by `build_spec()` only after the author has personally inspected the
+implementation and confirmed the `urllib` contract empirically — not by this amendment.
+
+### What this amendment does NOT decide
+
+- **URL selection at runtime** — which URLs to fetch is a runtime reasoning decision, never
+  hardcoded in the invoker or this section. The agent selects URLs from
+  `docs/RESEARCH_POLICY.md`'s standing watch list per its own research judgment `[P§16]`.
+- **Search-by-query capability** — a tool that accepts a free-text query and returns
+  candidate URLs is a distinct, additional `ToolSpec` not designed here. V1 fetches a
+  single, caller-specified URL only.
+- **Durable `KnowledgeStore` backend** — `InMemoryKnowledgeStore` (ADR-0006) is the V1
+  store; the durable-backend revisit trigger in ADR-0006 §8 remains open and untouched.
+- **Research graph node implementation** — the orchestration node described above is a
+  separate issue under ADR-0003; this section defines what the invoker returns, not what
+  the node does with it.
+- **Model-selection logic** — the research-acquisition mechanism informs candidate
+  shortlisting only; model selection is the reasoning layer's output after evaluating a
+  `ContextBundle`, and belongs to a separate session after knowledge items are populated.
+- **Which specific URLs the agent will fetch** — those are the agent's own runtime research
+  judgments per `docs/RESEARCH_POLICY.md`'s 7-step pipeline `[P§18]`, not a design choice
+  this amendment can or should encode.

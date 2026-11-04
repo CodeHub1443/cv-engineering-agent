@@ -31,6 +31,9 @@ class HostProfile:
     was detected."""
     driver_version: str | None
     """Reported driver version string, or None if not detected."""
+    vram_mb: int | None = None
+    """Total VRAM of GPU 0 in MiB, or None if not detected or not applicable.
+    Populated by _measure_vram_mb() when an NVIDIA GPU is present."""
 
 
 @dataclass(frozen=True)
@@ -68,23 +71,71 @@ class HostVerifier(Protocol):
 # Concrete verifier: Linux + NVIDIA GPU (D-044)
 # ---------------------------------------------------------------------------
 
+def _parse_vram_mb(raw_line: str) -> int | None:
+    """
+    Parse total VRAM (MiB) from one line of nvidia-smi CSV output.
+
+    Expects the single-integer string produced by:
+      nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits
+    e.g. "12288" for a 12 GB GPU.
+
+    Returns None for any input that cannot be interpreted as a positive integer
+    (empty string, "[N/A]", non-numeric text, zero, negative values).
+    Never raises.
+    """
+    stripped = raw_line.strip()
+    if not stripped:
+        return None
+    try:
+        value = int(stripped)
+        return value if value > 0 else None
+    except ValueError:
+        return None
+
+
+def _measure_vram_mb() -> int | None:
+    """
+    Query total VRAM of the first GPU via nvidia-smi.
+
+    Runs: nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits
+    The `nounits` flag makes nvidia-smi emit a bare integer (MiB).
+
+    Returns None on any failure — command not found, non-zero exit, timeout,
+    unparseable output. Never raises; failure is reported as None (fail-closed
+    per ADR-0013 §3.3).
+    """
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        lines = result.stdout.strip().splitlines()
+        if not lines:
+            return None
+        return _parse_vram_mb(lines[0])
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+
+
 def _detect_host_profile() -> HostProfile:
     """
     Detect the current host. Never raises — detection failure yields
-    conservative (gpu_available=False) values.
+    conservative (gpu_available=False, vram_mb=None) values.
     """
     os_name = platform.system().lower()
-    # Normalise to the three common families; leave anything else as-is.
-    if os_name == "linux":
-        pass
-    elif os_name == "darwin":
-        pass
-    elif os_name == "windows":
-        pass
 
     gpu_available = False
     gpu_vendor: str | None = None
     driver_version: str | None = None
+    vram_mb: int | None = None
 
     try:
         result = subprocess.run(
@@ -99,6 +150,7 @@ def _detect_host_profile() -> HostProfile:
                 gpu_available = True
                 gpu_vendor = "nvidia"
                 driver_version = raw.splitlines()[0].strip() or None
+                vram_mb = _measure_vram_mb()
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         pass
 
@@ -107,6 +159,7 @@ def _detect_host_profile() -> HostProfile:
         gpu_available=gpu_available,
         gpu_vendor=gpu_vendor,
         driver_version=driver_version,
+        vram_mb=vram_mb,
     )
 
 
@@ -159,13 +212,19 @@ class LinuxNvidiaHostVerifier:
         if requirement.min_vram_mb is not None:
             if not profile.gpu_available:
                 return False, "Job requires minimum VRAM but no GPU is available."
-            # VRAM measurement is not yet implemented; fail closed rather than
-            # pass a requirement we cannot verify.
-            return (
-                False,
-                f"Job requires {requirement.min_vram_mb} MB VRAM but VRAM "
-                "measurement is not yet implemented; cannot verify the "
-                "requirement. (V1 limitation — fail closed per ADR-0013 §3.3.)",
-            )
+            if profile.vram_mb is None:
+                return (
+                    False,
+                    f"Job requires {requirement.min_vram_mb} MB VRAM but VRAM "
+                    "could not be measured (nvidia-smi query failed or returned "
+                    "unparseable output); cannot verify the requirement "
+                    "(fail closed per ADR-0013 §3.3).",
+                )
+            if profile.vram_mb < requirement.min_vram_mb:
+                return (
+                    False,
+                    f"Host GPU has {profile.vram_mb} MB VRAM; "
+                    f"job requires at least {requirement.min_vram_mb} MB.",
+                )
 
         return True, ""

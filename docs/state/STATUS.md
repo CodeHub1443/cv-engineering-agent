@@ -3,41 +3,52 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-09-28 · **Phase:** 0 → 1 (partial) → 2 (partial) → 3 (partial) →
-4 (partial) → 5a (complete) → 5b (decisions + ADR-0013 accepted + job foundation + workflow integration PR open) ·
+**Updated:** 2026-09-30 · **Phase:** 5c — evaluation milestone COMPLETE ·
 **Health:** green
 
 ## Where we are
 
-ADR-0013 is fully implemented through the workflow layer:
-- `cv_agent/execution/host.py` — `HostVerifier`, `LinuxNvidiaHostVerifier` (PR #67, merged)
-- `cv_agent/execution/jobs/` — `JobRuntime`, `JobExecutor`, `LinuxNvidiaJobRuntime` (PR #67, merged)
-- `cv_agent/graph/state.py` — `pending_job`, `job_approval_decision`, `active_job_handle`, `job_result` fields (this PR, open)
-- `cv_agent/graph/workflow.py` — `build_job_workflow_graph()` + four graph nodes (this PR, open)
-- `cv_agent/runtime/agent.py` — `CVAgent(job_executor=...)`, `start_job_workflow()`, `resume_job_workflow()` (this PR, open)
+D-043 evaluation milestone complete. yolo11n evaluated on COCO val2017 (5000 images,
+truly held-out). EXP-20260930-01 written to ledger. Branch
+`feature/claude/adr-0009-second-binding` ready for PR.
 
-**Job workflow integration complete:** The graph can represent a CV job request through the full approval/pin integrity path. `_node_start_job` passes the exact approved `job_execution_pin` to `JobExecutor.start_job()`. E1 rule preserved. Host verification inside `JobExecutor`. No direct runtime invocation from graph nodes. `SkillExecutor`/`ExecutionRuntime`/existing workflow graph unchanged.
+**EXP-20260929-01** — baseline (SELF): yolo11n + ByteTrack, RTX 3060, 2862 frames,
+8.8ms inference/frame, 91% detection rate, val_metrics=NOT MEASURED (video-only baseline).
 
-## In flight
+**EXP-20260930-01** — evaluation: yolo11n on COCO val2017, RTX 3060, 5000 images,
+mAP@0.5:0.95=**0.459**, precision=0.791, recall=0.661, mAP@0.5=0.635,
+FPS=99.9 e2e / 188.7 inf-only, VRAM peak=596 MiB.
 
-| Item | Issue | State |
-|---|---|---|
-| ADR-0013 workflow integration | #67 (follow-on) | PR open on `feature/claude/adr-0013-workflow-integration`; 1048/1048 tests pass |
-| `workflow` CLI real-skill reachability | #44 | tracked; needs owner decision (Q23) |
+1541 tests, 4 skipped. Ruff clean. Mypy clean. All new files linted.
+
+## Completed this session (2026-09-30)
+
+| D | Work |
+|---|---|
+| D-060 | `cv_agent/execution/jobs/runtimes/yolo_eval.py` — yolo-eval binding, `parse_metrics()` |
+| D-061 | COCO val2017 selected as evaluation dataset; images downloaded + extracted |
+| D-062 | EXP-20260930-01 — real mAP/FPS/VRAM metrics produced and written to ledger |
+| Q26 | Opened: how to register standard benchmark datasets in DatasetManifest without pHash |
+
+## Completed prior session (2026-09-29)
+
+| D | Fix |
+|---|---|
+| D-058 | Pipe-buffer deadlock in `LinuxNvidiaJobRuntime` — drain threads in `start()` |
+| D-059 | `open_ledger(DB_PATH)` → `open_ledger(db_path=DB_PATH)` + first real baseline |
 
 ## Next 3 actions
 
-1. Owner merges workflow-integration PR.
-2. Register a real CV skill binding (individually verified per ADR-0009 §8 — same precedent as D-014's `trt-perf-analysis`).
-3. Establish the first baseline run (person detection + tracking, zero-shot inference, `ExperimentRecord` with `baseline_id="SELF"`).
+1. **Open PR** for `feature/claude/adr-0009-second-binding` (D-052 → D-062 inclusive)
+2. **After merge:** close issue(s) for ADR-0009 second binding and D-043 eval milestone
+3. **Next milestone:** tracking metrics (MOT metrics) require a labelled MOT dataset — open separate issue
 
 ## Blockers
 
-- Q10 (dataset storage backend) still open — blocks first real baseline.
-- Q3 (restart-survivable checkpointer) remains open but does not block the first baseline.
+- ANTHROPIC_API_KEY not set (FakeLLMProvider acceptable for current work)
+- faster-coco-eval secondary check skipped (instances_val2017.json not downloaded); primary metrics are valid
 
 ## Do not start yet
 
-Training, NAS, or optimization runs; cost estimation beyond D-047; a second LLM provider;
-merging the two graphs; embeddings/vector search; downloading models or datasets; a
-durable `KnowledgeStore`; multi-provider routing — `[P§34]`.
+Training, NAS, optimization, TensorRT, DeepStream, AgentState wiring for model
+selection (requires ADR if shape changes), second LLM provider, embeddings/vector search `[P§34]`.
