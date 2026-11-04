@@ -22,9 +22,13 @@ dev = [
     "ruff==0.15.19",
     "mypy==2.1.0",
     "anthropic>=0.40,<1",
+    "Pillow>=10",
 ]
 anthropic = [
     "anthropic>=0.40,<1",
+]
+diagnosis = [
+    "Pillow>=10",
 ]
 
 [project.scripts]
