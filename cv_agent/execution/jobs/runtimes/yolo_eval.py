@@ -19,7 +19,7 @@ completed 2026-09-30):
   Required args: `model=<path>`, `data=<yaml_path>`.
   Optional relevant args:
     classes=[0]           — filter to COCO class 0 (person) only
-    conf=0.25             — detection confidence threshold
+    conf=0.001            — standard mAP protocol (Q28, D-067); not an operating point
     imgsz=640             — inference resolution
     device=0              — GPU device
     project=<dir>         — output root directory
@@ -61,7 +61,10 @@ BINDING_ID = "yolo11n-person-val-linux-job-v1"
 RUNTIME_ID = _LINUX_NVIDIA_RUNTIME_ID
 
 DEFAULT_MODEL = "yolo11n.pt"
-DEFAULT_CONF = 0.25
+# Q28 (owner-accepted 2026-10-04, D-067): mAP is computed at the standard ultralytics
+# validation threshold so the PR curve is not truncated. The fixed-threshold operating
+# point is NOT chosen here (Q30 is open); see scripts/run_fixed_threshold_strata.py.
+DEFAULT_CONF = 0.001
 DEFAULT_IMGSZ = 640
 DEFAULT_CLASSES = [0]  # COCO class 0 = person
 DEFAULT_YOLO_EXECUTABLE = "yolo"
@@ -86,7 +89,7 @@ def build_command(inputs: dict[str, Any]) -> list[str]:
 
     Optional inputs:
         model: str        — model name or path (default: "yolo11n.pt")
-        conf: float       — confidence threshold (default: 0.25)
+        conf: float       — confidence threshold (default: 0.001, standard mAP protocol, Q28)
         imgsz: int        — inference image size (default: 640)
         classes: list[int]— class IDs to evaluate (default: [0] = person)
         device: str       — compute device: "0" for GPU 0, "cpu" (default: "0")
@@ -286,7 +289,10 @@ def build_binding(
                 name="conf",
                 required=False,
                 default=DEFAULT_CONF,
-                description="Detection confidence threshold (default: 0.25).",
+                description=(
+                    "Detection confidence threshold (default: 0.001, the standard mAP "
+                    "protocol per Q28). Not an operating point; Q30 is open."
+                ),
             ),
             InputField(
                 name="imgsz",

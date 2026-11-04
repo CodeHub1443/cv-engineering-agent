@@ -3,52 +3,58 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-09-30 · **Phase:** 5c — evaluation milestone COMPLETE ·
-**Health:** green
+**Updated:** 2026-10-14 · **Phase:** 5d — measurement series persisted (10-record ledger); failure-analysis report
+and code committed (#75); annotation-label review in progress (47 of 63 labelled).
+**Health:** Last recorded full suite: 1755 passed, 4 skipped (JOURNAL, 2026-10-04). Not re-run this session. The #75
+code (failure_analysis, annotation_review) has no recorded run in JOURNAL.
 
 ## Where we are
 
-D-043 evaluation milestone complete. yolo11n evaluated on COCO val2017 (5000 images,
-truly held-out). EXP-20260930-01 written to ledger. Branch
-`feature/claude/adr-0009-second-binding` ready for PR.
+Branch `feature/claude/experiment-provenance-recovery` (worktree `/home/dev/cv-engineering-agent-sweep`).
+Local HEAD was 2028ab1 when written; the origin tracking ref matched it as of a fetch on 2026-10-12 18:15 (+0600).
+The remote was not re-checked after that fetch. Not merged. The report, JOURNAL and this file change in the commit
+that follows 2028ab1 and were not pushed when written.
 
-**EXP-20260929-01** — baseline (SELF): yolo11n + ByteTrack, RTX 3060, 2862 frames,
-8.8ms inference/frame, 91% detection rate, val_metrics=NOT MEASURED (video-only baseline).
+**Ledger: 10 records, unchanged** (sha256 `9251eb0c…8fef8fa`, full value in JOURNAL; integrity ok). No #75 row.
 
-**EXP-20260930-01** — evaluation: yolo11n on COCO val2017, RTX 3060, 5000 images,
-mAP@0.5:0.95=**0.459**, precision=0.791, recall=0.661, mAP@0.5=0.635,
-FPS=99.9 e2e / 188.7 inf-only, VRAM peak=596 MiB.
+**Done:**
+- **EXP-20261004-01..04** persisted (measurement only): `-01` (640, SELF), `-02` (960), `-03` (1280), `-04` (FP32 640
+  control, baseline `-01`, mAP@0.5:0.95 0.518, FPS 81.9). Details: EXPERIMENTS.md.
+  - **Approval deviation:** the `-04` approval record was documented **after** the GPU run. The gate was not
+    satisfied before execution, and nothing claims otherwise.
+  - A contaminated FP32 attempt is quarantined and **not ledger-eligible, permanently.** ADR-0018 accepted (D-075),
+    NoMachine exemption D-076. Issue #74 was open as of 2026-10-04; its current state is not verified.
+- **Failure analysis** (ADR-0015 §9, #75): report and code committed; read-only, descriptive, no GPU run; issue
+  status not verified. Report: `docs/experiments/FAILURE-ANALYSIS-EXP-20261004.md`.
+- **Annotation-label review** of 63 primary-sample candidates (50 high_conf_fp, 2 near_dup_gt_pair, 11
+  degenerate_gt). Report: `docs/experiments/ANNOTATION-REVIEW-EXP-20261004-01.md`, reconciled to the CSV 2026-10-13.
+  - **Labels:** valid_annotation 34, annotation_error 5, ambiguous 8, not_reviewable 0, crowd_region_unresolved 0,
+    **unlabelled 16**. Single reviewer (Tanvir).
+  - Ranks 001–050 were reviewed 2026-10-13. Ranks **011, 013, 027** have observation notes but **no assigned label**.
+  - Ranks **025** (`annotation_error`, mapped from the owner's `invalid_annotation`) and **041** (`ambiguous`) were
+    resolved by explicit owner confirmation.
+  - Ranks **051–063** remain unreviewed and unlabelled.
+  - Crowd status is `q27_unresolved` for all 63. The sample is **not representative** (fixed rules, seeded draw);
+    no error rate is claimed. It contains no missed GT box, so it does not test the small-box bottleneck.
 
-1541 tests, 4 skipped. Ruff clean. Mypy clean. All new files linted.
+## Open (owner)
 
-## Completed this session (2026-09-30)
+1. **D-069** — whether any AP change should drive a decision. Answered for the FP32 control only
+   (measurement-only). Stays OPEN generally.
+2. **Q30** — precision floor and operating point. "Not yet." Stays OPEN. Needed before any production choice.
+3. **Q27** — official size-stratified mAP and crowd status need `instances_val2017.json`. Stays OPEN.
+4. **Q31** — repository versus skill ownership of the trt-perf-analysis contract. Stays OPEN.
 
-| D | Work |
-|---|---|
-| D-060 | `cv_agent/execution/jobs/runtimes/yolo_eval.py` — yolo-eval binding, `parse_metrics()` |
-| D-061 | COCO val2017 selected as evaluation dataset; images downloaded + extracted |
-| D-062 | EXP-20260930-01 — real mAP/FPS/VRAM metrics produced and written to ledger |
-| Q26 | Opened: how to register standard benchmark datasets in DatasetManifest without pHash |
+**Blockers:** none for the repository. Any production or precision decision waits on Q30 and D-069.
 
-## Completed prior session (2026-09-29)
+## Next actions
 
-| D | Fix |
-|---|---|
-| D-058 | Pipe-buffer deadlock in `LinuxNvidiaJobRuntime` — drain threads in `start()` |
-| D-059 | `open_ledger(DB_PATH)` → `open_ledger(db_path=DB_PATH)` + first real baseline |
-
-## Next 3 actions
-
-1. **Open PR** for `feature/claude/adr-0009-second-binding` (D-052 → D-062 inclusive)
-2. **After merge:** close issue(s) for ADR-0009 second binding and D-043 eval milestone
-3. **Next milestone:** tracking metrics (MOT metrics) require a labelled MOT dataset — open separate issue
-
-## Blockers
-
-- ANTHROPIC_API_KEY not set (FakeLLMProvider acceptable for current work)
-- faster-coco-eval secondary check skipped (instances_val2017.json not downloaded); primary metrics are valid
+1. Owner: review the uncommitted report, journal and STATUS edits; approve a commit and push.
+2. Owner: decide labels (or leave unlabelled) for ranks 011, 013, 027; decide whether to review ranks 051–063.
+3. Owner: decide on issue #74 and any further GPU series (fresh approval reference, clean GPU check, ADR-0018 §6).
 
 ## Do not start yet
 
-Training, NAS, optimization, TensorRT, DeepStream, AgentState wiring for model
-selection (requires ADR if shape changes), second LLM provider, embeddings/vector search `[P§34]`.
+Any GPU job without a fresh owner approval reference. Training. Model swaps (Q25). NMS or crowd experiments.
+TensorRT, DeepStream, Model Optimizer. Stopping or controlling another project's processes.
+Pushing or merging this branch without owner review.

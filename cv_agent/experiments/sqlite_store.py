@@ -18,6 +18,7 @@ V1 schema.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -107,6 +108,22 @@ _COLUMNS = (
     "notes",
 )
 
+
+_COMMIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _upsert_assignment(col: str) -> str:
+    """The ON CONFLICT ... DO UPDATE assignment for one column.
+
+    ``commit_sha`` is write-once. A later write with no SHA (for example, an execute path
+    that forgot to pass one) must not erase a SHA already on the row. Without this, the
+    prepare-time SHA of the sweep rows was overwritten with NULL (LEDGER-RECOVERY.md §5.1).
+    Every other column takes the incoming value, as before.
+    """
+    if col == "commit_sha":
+        return "commit_sha=COALESCE(excluded.commit_sha, experiments.commit_sha)"
+    return f"{col}=excluded.{col}"
+
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
@@ -163,10 +180,19 @@ class SqliteExperimentLedger:
                 "by a new row plus a note.\""
             )
 
+        # ADR-0016 §3: every record of a run that actually started must name the code it ran.
+        # Proposed records may omit it (planning only). Existing rows are never rewritten here.
+        if record.status != "proposed":
+            if record.commit is None or not _COMMIT_SHA_RE.match(record.commit):
+                raise ExperimentLedgerError(
+                    f"Record '{record.exp_id}' (status {record.status!r}) has no valid commit SHA. "
+                    "Evidence records must name the commit they ran from (ADR-0016)."
+                )
+
         values = _record_to_row(record)
         placeholders = ", ".join("?" for _ in _COLUMNS)
         update_clause = ", ".join(
-            f"{col}=excluded.{col}" for col in _COLUMNS if col != "exp_id"
+            _upsert_assignment(col) for col in _COLUMNS if col != "exp_id"
         )
         try:
             with self._conn:

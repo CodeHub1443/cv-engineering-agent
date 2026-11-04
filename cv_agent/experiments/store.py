@@ -43,18 +43,30 @@ class ExperimentLedgerError(Exception):
 
 def default_db_path(workspace_root: Path | None = None) -> Path:
     """
-    The default, gitignored, project-local path for this workspace's
-    experiment ledger — same directory family as project memory
-    (`cv_agent.memory.store.default_db_path()`), a different file.
+    The experiment ledger path.
 
-    Resolves nothing on its own beyond joining `workspace_root` (or
-    `Path.cwd()` as a convenience default for direct/standalone use only,
-    identical contract to `cv_agent.memory.store.default_db_path()` —
-    ADR-0004 §1 item 13/D-019's workspace-root resolution rule applies here
-    too, even though this package is not yet wired into `CVAgent`).
+    - With ``workspace_root``: ``<workspace_root>/.cv_agent/experiments.sqlite``, explicit and unchanged.
+    - Without it: the **repository's** ledger, ``<main checkout>/.cv_agent/experiments.sqlite``,
+      resolved from the package location (never the current directory). Every worktree of the
+      repository maps to the same file, so a run from a worktree cannot create a silent empty ledger.
+
+    Fails closed (ExperimentLedgerError) when the package is not inside a git repository.
+    See docs/architecture/adr/ADR-0016-experiment-provenance.md §3.
     """
-    root = workspace_root if workspace_root is not None else Path.cwd()
-    return root / DEFAULT_EXPERIMENTS_DIRNAME / DEFAULT_DB_FILENAME
+    if workspace_root is not None:
+        return workspace_root / DEFAULT_EXPERIMENTS_DIRNAME / DEFAULT_DB_FILENAME
+    from cv_agent.experiments.provenance import (  # noqa: PLC0415 — avoid import cost/cycle
+        ProvenanceError,
+        repository_state_root,
+    )
+
+    try:
+        state_root = repository_state_root()
+    except ProvenanceError as exc:
+        raise ExperimentLedgerError(
+            f"cannot resolve the repository's experiment ledger location: {exc}"
+        ) from exc
+    return state_root / DEFAULT_DB_FILENAME
 
 
 class ExperimentLedger(Protocol):
@@ -101,16 +113,28 @@ class ExperimentLedger(Protocol):
 
 
 def open_ledger(
-    *, workspace_root: Path | None = None, db_path: Path | None = None
+    *,
+    workspace_root: Path | None = None,
+    db_path: Path | None = None,
+    create: bool = False,
 ) -> ExperimentLedger:
     """
     Construct the V1 `ExperimentLedger` (SQLite — `OPEN_QUESTIONS.md` Q16)
     without the caller needing to import a SQLite-specific type. Mirrors
     `cv_agent.memory.store.open_store()`'s factory pattern exactly.
+
+    By default an **existing** ledger file is required. A missing file raises
+    ExperimentLedgerError instead of silently creating an empty ledger (the failure mode that
+    produced empty ledgers in worktrees). Pass ``create=True`` only when a new ledger is intended.
     """
     from cv_agent.experiments.sqlite_store import (  # noqa: PLC0415 — deferred to avoid a module-level import cycle (sqlite_store imports ExperimentLedgerError from this module)
         SqliteExperimentLedger,
     )
 
     path = db_path if db_path is not None else default_db_path(workspace_root=workspace_root)
+    if not create and not path.exists():
+        raise ExperimentLedgerError(
+            f"no experiment ledger at {path}; refusing to create an empty one "
+            "(pass create=True only for a deliberately new ledger)"
+        )
     return SqliteExperimentLedger(path)

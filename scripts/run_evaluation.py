@@ -52,6 +52,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(REPO_ROOT))
 
+# Provenance: refuse to produce evidence from an uncommitted tree (no GPU job has started yet).
+from cv_agent.experiments.provenance import (  # noqa: E402
+    ProvenanceError,
+    repository_state_root,
+    require_clean_worktree,
+)
+
+try:
+    RUN_COMMIT = require_clean_worktree(REPO_ROOT)
+except ProvenanceError as exc:
+    raise SystemExit(f"REFUSED: {exc}") from exc
+
+STATE_ROOT = repository_state_root()  # main checkout's .cv_agent/ (worktree-safe)
+
 # ── Dataset configuration ──────────────────────────────────────────────────
 
 DATASETS_DIR = Path("/home/dev/Documents/data_cleaner/datasets")
@@ -60,10 +74,10 @@ VAL_IMAGES_DIR = COCO_ROOT / "images" / "val2017"
 VAL_LABELS_DIR = COCO_ROOT / "labels" / "val2017"
 VAL_TXT = COCO_ROOT / "val2017.txt"
 
-MODEL_PATH   = REPO_ROOT / ".cv_agent" / "models" / "yolo11n.pt"
-OUTPUT_ROOT  = REPO_ROOT / ".cv_agent" / "evaluations"
+MODEL_PATH   = STATE_ROOT / "models" / "yolo11n.pt"
+OUTPUT_ROOT  = STATE_ROOT / "evaluations"
 RUN_NAME     = "eval-yolo11n-coco-val2017-20260930"
-DB_PATH      = REPO_ROOT / ".cv_agent" / "experiments.sqlite"
+DB_PATH      = STATE_ROOT / "experiments.sqlite"
 
 # COCO class names (all 80 COCO classes — required for YOLO to map class indices)
 COCO_NAMES = {
@@ -196,7 +210,9 @@ inputs: dict = {
     "output_dir"     : str(OUTPUT_ROOT.absolute()),
     "run_name"       : RUN_NAME,
     "model"          : str(MODEL_PATH.absolute()),
-    "conf"           : 0.25,
+    # Q28 (D-067): mAP is evaluated at the standard protocol threshold. The historical
+    # EXP-20260930-01 record was produced at conf=0.25 (legacy, truncated); see EXPERIMENTS.md.
+    "conf"           : 0.001,
     "imgsz"          : 640,
     "classes"        : [0],
     "device"         : "0",
@@ -360,6 +376,7 @@ dataset_ref = (
 
 context = ExperimentContext(
     exp_id="EXP-20260930-01",
+    commit=RUN_COMMIT,
     baseline_id="EXP-20260929-01",
     dataset_version="coco-val2017-5k",
     hypothesis=(

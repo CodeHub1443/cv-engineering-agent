@@ -22,6 +22,9 @@ from cv_agent.experiments.store import (
 )
 
 
+_SHA = "a" * 40
+
+
 def _record(**overrides: object) -> ExperimentRecord:
     fields: dict[str, object] = {
         "exp_id": "EXP-20260901-01",
@@ -32,6 +35,9 @@ def _record(**overrides: object) -> ExperimentRecord:
         "created_at": "2026-09-01T10:00:00",
     }
     fields.update(overrides)
+    if fields["status"] != "proposed":
+        # ADR-0016 §3: a run that started must name the commit it ran from.
+        fields.setdefault("commit", _SHA)
     return ExperimentRecord(**fields)  # type: ignore[arg-type]
 
 
@@ -480,7 +486,7 @@ class TestDefaultDbPathAndFactory:
         assert MEMORY_DB_FILENAME != EXPERIMENTS_DB_FILENAME
 
     def test_open_ledger_with_explicit_workspace_root(self, tmp_path: Path) -> None:
-        ledger = open_ledger(workspace_root=tmp_path)
+        ledger = open_ledger(workspace_root=tmp_path, create=True)
         try:
             expected = tmp_path / ".cv_agent" / "experiments.sqlite"
             assert expected.exists()
@@ -489,7 +495,7 @@ class TestDefaultDbPathAndFactory:
 
     def test_open_ledger_with_explicit_db_path_bypasses_default(self, tmp_path: Path) -> None:
         custom_path = tmp_path / "custom" / "ledger.db"
-        ledger = open_ledger(db_path=custom_path)
+        ledger = open_ledger(db_path=custom_path, create=True)
         try:
             assert custom_path.exists()
         finally:
@@ -497,7 +503,7 @@ class TestDefaultDbPathAndFactory:
 
     def test_open_ledger_satisfies_protocol_and_persists(self, tmp_path: Path) -> None:
         db_path = tmp_path / "e.sqlite"
-        ledger: ExperimentLedger = open_ledger(db_path=db_path)
+        ledger: ExperimentLedger = open_ledger(db_path=db_path, create=True)
         record = _record()
         ledger.record_experiment(record)
         ledger.close()  # type: ignore[attr-defined]

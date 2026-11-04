@@ -32,6 +32,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(REPO_ROOT))
 
+# Provenance: refuse to produce evidence from an uncommitted tree (no GPU job has started yet).
+from cv_agent.experiments.provenance import (  # noqa: E402
+    ProvenanceError,
+    repository_state_root,
+    require_clean_worktree,
+)
+
+try:
+    RUN_COMMIT = require_clean_worktree(REPO_ROOT)
+except ProvenanceError as exc:
+    raise SystemExit(f"REFUSED: {exc}") from exc
+
+STATE_ROOT = repository_state_root()  # main checkout's .cv_agent/ (worktree-safe)
+
 # ── 1. Model Selection — read from existing research, do not assume YOLO ──────
 
 print("=== 1. Model Selection (D-053) ===")
@@ -47,11 +61,11 @@ print(f"  is_proposal              : {rec.is_proposal}")
 
 # ── 2. Resolve paths ───────────────────────────────────────────────────────────
 
-MODEL_PATH   = REPO_ROOT / ".cv_agent" / "models" / "yolo11n.pt"
+MODEL_PATH   = STATE_ROOT / "models" / "yolo11n.pt"
 VIDEO_PATH   = REPO_ROOT / "tests" / "fixtures" / "person_detection_sample.mp4"
-OUTPUT_ROOT  = REPO_ROOT / ".cv_agent" / "baselines"
+OUTPUT_ROOT  = STATE_ROOT / "baselines"
 RUN_NAME     = "baseline-yolo11n-person-track-20260929"
-DB_PATH      = REPO_ROOT / ".cv_agent" / "experiments.sqlite"
+DB_PATH      = STATE_ROOT / "experiments.sqlite"
 
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -104,6 +118,8 @@ inputs: dict = {
     "run_name"        : RUN_NAME,
     "model"           : str(MODEL_PATH.absolute()),
     "tracker"         : "bytetrack.yaml",
+    # Tracking baseline operating point (inference binding default). Not a mAP protocol value;
+    # the operating-point choice is open (Q30). See docs/EVALUATION.md.
     "conf"            : 0.25,
     "imgsz"           : 640,
     "classes"         : [0],
@@ -220,6 +236,7 @@ from cv_agent.graph.experiment_wiring import ExperimentContext, job_result_to_ex
 
 context = ExperimentContext(
     exp_id="EXP-20260929-01",
+    commit=RUN_COMMIT,
     baseline_id="SELF",
     hypothesis=(
         "YOLO11n with ByteTrack can detect and track persons in a real-time video "

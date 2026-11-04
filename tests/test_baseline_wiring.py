@@ -119,6 +119,9 @@ def _completed_result(
     )
 
 
+_TEST_SHA = "a" * 40  # ADR-0016 §3: evidence records must name a commit
+
+
 def _context(
     *,
     exp_id: str = _EXP_ID,
@@ -130,6 +133,7 @@ def _context(
 ) -> ExperimentContext:
     return ExperimentContext(
         exp_id=exp_id,
+        commit=_TEST_SHA,
         baseline_id=baseline_id,
         hypothesis=hypothesis,
         success_criteria=success_criteria,
@@ -419,7 +423,7 @@ class TestNoFabricatedMetrics:
 class TestLedgerPersistence:
     def test_record_can_be_written_and_read_back(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite")
+            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
             rec = job_result_to_experiment_record(
                 _completed_result(), context=_context()
             )
@@ -431,7 +435,7 @@ class TestLedgerPersistence:
 
     def test_written_record_appears_in_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite")
+            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
             rec = job_result_to_experiment_record(
                 _completed_result(), context=_context()
             )
@@ -442,9 +446,10 @@ class TestLedgerPersistence:
 
     def test_all_populated_fields_survive_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite")
+            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
             ctx = ExperimentContext(
                 exp_id=_EXP_ID,
+                commit=_TEST_SHA,
                 baseline_id="SELF",
                 hypothesis="Baseline person detection.",
                 success_criteria="Exit 0.",
@@ -524,7 +529,7 @@ class TestArchitectureBoundary:
 class TestDuplicateRecord:
     def test_writing_terminal_record_twice_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite")
+            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
             rec = job_result_to_experiment_record(
                 _completed_result(), context=_context()
             )
@@ -534,7 +539,7 @@ class TestDuplicateRecord:
 
     def test_writing_terminal_record_twice_leaves_original_intact(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite")
+            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
             rec = job_result_to_experiment_record(
                 _completed_result(), context=_context()
             )
@@ -774,6 +779,7 @@ class TestHardwareContext:
     def test_hardware_populated_when_both_provided(self) -> None:
         ctx = ExperimentContext(
             exp_id=_EXP_ID,
+            commit=_TEST_SHA,
             baseline_id="SELF",
             hypothesis="h",
             success_criteria="s",
@@ -788,6 +794,7 @@ class TestHardwareContext:
     def test_hardware_none_when_only_training_given(self) -> None:
         ctx = ExperimentContext(
             exp_id=_EXP_ID,
+            commit=_TEST_SHA,
             baseline_id="SELF",
             hypothesis="h",
             success_criteria="s",

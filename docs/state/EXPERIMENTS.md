@@ -153,3 +153,272 @@ The table below is a condensed rollup view for scanning; full row records live i
 | `artifacts` | `.cv_agent/evaluations/eval-yolo11n-coco-val2017-20260930-2/` · `predictions.json` · `eval-yolo11n-coco-val2017-20260930-2.csv` (YOLO run outputs) · `.cv_agent/experiments.sqlite` |
 | `decision` | D-043 evaluation milestone complete. yolo11n person detection confirmed viable on COCO val2017 (mAP@0.5:0.95=0.459, FPS=99.9 on RTX 3060). Baseline EXP-20260929-01 now has a labelled accuracy companion. |
 | `notes` | yolo val command: `yolo val model=yolo11n.pt data=coco-person-val.yaml classes=[0] conf=0.25 imgsz=640 batch=1 device=0`. "all" and "person" rows in yolo val output have identical metrics because classes=[0] filters evaluation to only person class. YAML required `train:` key (added, pointing to val2017.txt) to pass ultralytics check_det_dataset. Run directory auto-incremented to -2 because first attempt (missing train: key) created the base directory before failing. |
+| EXP-20261001-01 | conf=0.10 — does lowering threshold recover missed persons? | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.495** ⚠ conf-truncated, see [sweep result](#sweep-result--exp-20261001-0104-completed-2026-10-02) | 0.651 (ultralytics, max-F1 point) · **0.773 at conf=0.10** (fixed-threshold matcher, P=0.541) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 695 MiB peak | N/A | — | fixed-threshold recall +10.3 pts, precision −23.5 pts; mAP rise is a protocol artifact, not a finding |
+| EXP-20261001-02 | conf=0.15 — same question | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.483** ⚠ conf-truncated | 0.651 (ultralytics) · 0.733 at conf=0.15 (fixed-threshold matcher, P=0.642) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 668 MiB peak | N/A | — | as above; intermediate point on the same trade-off curve |
+| EXP-20261001-03 | conf=0.25 — control, reproduce baseline | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.459** (identical to baseline) | 0.661 (identical to baseline) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 615 MiB peak | N/A | — | **baseline reproduced exactly** (P, R, mAP50, mAP50-95 all equal); harness deterministic at this config |
+| EXP-20261001-04 | conf=0.50 — does raising threshold trade recall for precision? | EXP-20260930-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 | RTX 3060 12GB | **0.390** ⚠ conf-truncated | 0.521 (ultralytics) · 0.521 at conf=0.50 (fixed-threshold matcher, P=0.927) | 108.6 (wall) | 6.2 e2e / 5.3 inf | 614 MiB peak | N/A | — | yes, trade-off confirmed: precision 0.927 at recall 0.521; small-object recall falls to 0.104 |
+| EXP-20261004-01 | Measurement only (no pass/fail, D-069): imgsz 640, control of the series, Q28 protocol conf=0.001 | SELF | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 requested (quantize=16); NOT like-for-like with FP32 history | RTX 3060 12GB | **0.517** | ref. only, P 0.777 / R 0.670 @0.25 | 84.0 | 6.9 e2e / 5.8 inf | 748 MiB peak / 2190 MiB RAM | N/A | 0.0165 (derived) | measured; no decision |
+| EXP-20261004-02 | Measurement only (no pass/fail, D-069): imgsz 960 | EXP-20261004-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 requested (quantize=16); NOT like-for-like with FP32 history | RTX 3060 12GB | **0.532** | ref. only, P 0.727 / R 0.733 @0.25 | 78.6 | 7.6 e2e / 6.1 inf | 797 MiB peak / 2267 MiB RAM | N/A | 0.0177 (derived) | measured; no decision |
+| EXP-20261004-03 | Measurement only (no pass/fail, D-069): imgsz 1280 | EXP-20261004-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP16 requested (quantize=16); NOT like-for-like with FP32 history | RTX 3060 12GB | **0.489** | ref. only, P 0.661 / R 0.741 @0.25 | 71.6 | 8.5 e2e / 6.4 inf | 772 MiB peak / 2357 MiB RAM | N/A | 0.0194 (derived) | measured; no decision |
+| EXP-20261004-04 | Measurement only (no pass/fail, D-069): FP32 control at imgsz 640 (precision is the only variable vs EXP-20261004-01; ADR-0018) | EXP-20261004-01 | yolo11n (yolo11n.pt) | coco-val2017-5k | FP32 requested (quantize unset); NOT like-for-like with FP16-requested series in this respect | RTX 3060 12GB | **0.518** | ref. only, P 0.776 / R 0.670 @0.25 | 81.9 | 6.9 e2e / 5.7 inf | 858 MiB peak (device-wide; NoMachine node present) / 1940 MiB RAM | N/A | 0.0170 (derived) | measured; no decision; see section below |
+
+### EXP-20261004-01 series — completed, measurement only (2026-10-04)
+
+**Status: completed and persisted. Measurement only. There is NO pass/fail criterion, no decision, and no
+production winner.** The series answers "how do these metrics change with image size?" and nothing more
+(proposal §2, D-069). Q30 (operating point), Q31 (skill versioning) and Q27 (official size-stratified mAP)
+remain OPEN.
+
+- **Protocol (identical across the three, only imgsz varies):** YOLO11n, COCO val2017 persons (5000 images,
+  10777 GT persons), GPU 0 (RTX 3060 12GB, driver 535.309.01), batch 1, conf 0.001 (Q28, full PR curve),
+  `quantize=16` requested (ultralytics does not log actual inference precision).
+- **Commit:** `ab686f3` for all three. **Approval reference:** `EXP-20261004-01-OWNER-20261004` for all three.
+- **Ledger:** three records, `EXP-20261004-01` (640, baseline `SELF`), `EXP-20261004-02` (960, baseline
+  `EXP-20261004-01`), `EXP-20261004-03` (1280, baseline `EXP-20261004-01`). Status `completed`.
+
+Measured values, exactly as persisted in the ledger (full precision):
+
+| ID | imgsz | mAP@0.5 | mAP@0.5:0.95 | AP@0.5 small | AP@0.5 medium | AP@0.5 large |
+|---|---|---|---|---|---|---|
+| EXP-20261004-01 | 640 | 0.75 | 0.517 | 0.3556127289636236 | 0.7258519584743843 | 0.9410025862808117 |
+| EXP-20261004-02 | 960 | 0.779 | 0.532 | 0.4589332098392696 | 0.7653011604353135 | 0.9279873500830851 |
+| EXP-20261004-03 | 1280 | 0.75 | 0.489 | 0.4828370936880764 | 0.7474949410527787 | 0.8736214232519381 |
+
+System metrics, as recorded (memory in MiB; `gpu_hours` is derived from wall time, not a separate meter):
+
+| ID | FPS (e2e) | latency e2e / inference (ms) | VRAM peak | RAM peak | gpu_hours (derived) | power | train_time | flops |
+|---|---|---|---|---|---|---|---|---|
+| EXP-20261004-01 | 84.0039649871474 | 6.9 / 5.8 | 748.0 | 2190.2 | 0.01653361111111111 | not measured | not measured | not recorded |
+| EXP-20261004-02 | 78.59040254004181 | 7.6 / 6.1 | 797.0 | 2266.5 | 0.0176725 | not measured | not measured | not recorded |
+| EXP-20261004-03 | 71.55839880926824 | 8.5 / 6.4 | 772.0 | 2356.6 | 0.01940916666666667 | not measured | not measured | not recorded |
+
+Fixed-threshold P/R at conf 0.25 are **reference only** (`fixed_thr@0.25/*`). They are not mAP, not an
+operating point, and not part of any decision. Recorded values: precision 0.7768 / 0.7273 / 0.6607;
+recall 0.6701 / 0.7329 / 0.7412; recall on small persons 0.2700 / 0.4232 / 0.4937.
+
+**Descriptive reading (no decision drawn):**
+
+- mAP@0.5:0.95 is 0.517 at 640, 0.532 at 960, and 0.489 at 1280. It rises, then falls. 960 is the highest
+  of the three on this metric. This is a measured difference, not a winner: the series has one model, one
+  dataset, one run per size, and no uncertainty estimate.
+- AP@0.5 for small persons rises with image size: 0.356 → 0.459 → 0.483. The gain from 960 to 1280 is smaller.
+- AP@0.5 for medium persons is non-monotonic: 0.726 → 0.765 → 0.748.
+- AP@0.5 for large persons falls monotonically: 0.941 → 0.928 → 0.874.
+- mAP@0.5 is 0.750 / 0.779 / 0.750, also non-monotonic.
+- Throughput falls monotonically with image size (84.0 → 78.6 → 71.6 FPS), as expected.
+
+Not decided here: which size, if any, should be used in production. That depends on an operating point and a
+precision target that are not defined (Q30 OPEN), and on the target hardware (Q25). D-069 stays OPEN, so
+no success threshold is set and no optimization follows from these numbers.
+
+**Three separate populations. Do not mix them.**
+
+1. **The three persisted attempt-2 ledger records** (`EXP-20261004-01..03`, commit `ab686f3`, the table above).
+   These are the evidence for this series.
+2. **The attempt-1 measurements under commit `8f9baaa`.** These were run, verified after the fact, and then
+   refused by the writer because of two verifier defects fixed in `ab686f3`. They are **not** ledger records
+   and cannot become ledger records, because ADR-0016 binds a record to the commit it ran from. They are
+   archived outside the repository at `/home/dev/cv-engineering-evidence/EXP-20261004-01/attempt1-commit-8f9baaa/`
+   (45 files, read-only). `MANIFEST.sha256` reports 45/45 OK. Their predictions files are byte-identical to
+   attempt 2 for each size, so the measurements reproduce; only the logs and run metadata differ, as expected.
+   The rerun note is `RERUN-NOTE.md` in the same archive.
+3. **The historical FP32 records** (`EXP-20260930-01`, and the `EXP-20261001-01..04` sweep rows). These ran
+   FP32 because no precision argument was supplied, and their mAP was computed at conf 0.25 (truncated protocol).
+   They are not like-for-like with this series. See the precision correction above.
+
+### Sweep result — EXP-20261001-01..04 (completed 2026-10-02)
+
+Ledger values (`.cv_agent/experiments.sqlite`, read-only). "Fixed-threshold" columns come
+from `scripts/run_fixed_threshold_strata.py` on each run's saved `predictions.json`:
+IoU ≥ 0.5, greedy score-ordered matching, predictions with score ≥ threshold only. This
+is not the COCO evaluator.
+
+| run | conf | ultralytics P | ultralytics R | mAP@.5 | mAP@.5:.95 | fixed P | fixed R | fixed small R | fixed dense R |
+|---|---|---|---|---|---|---|---|---|---|
+| EXP-20260930-01 (baseline) | 0.25 | 0.791 | 0.661 | 0.635 | 0.459 | 0.776 | 0.670 | 0.268 | 0.606 |
+| EXP-20261001-01 | 0.10 | 0.809 | 0.651 | 0.709 | 0.495 | 0.541 | **0.773** | **0.430** | 0.734 |
+| EXP-20261001-02 | 0.15 | 0.809 | 0.651 | 0.685 | 0.483 | 0.642 | 0.733 | 0.364 | 0.685 |
+| EXP-20261001-03 | 0.25 (control) | 0.791 | 0.661 | 0.635 | 0.459 | 0.776 | 0.670 | 0.268 | 0.606 |
+| EXP-20261001-04 | 0.50 | 0.927 | 0.521 | 0.514 | 0.390 | 0.927 | 0.521 | 0.104 | 0.423 |
+
+**Findings (measured):**
+
+1. **Control reproduces the baseline exactly** (EXP-20261001-03 = EXP-20260930-01 on all
+   four ultralytics metrics). The harness is deterministic at this configuration.
+2. **Recall at a fixed threshold does improve with lower conf.** Fixed-threshold recall
+   goes 0.670 (conf=0.25) → 0.773 (conf=0.10), a +10.3-point gain, paid for by precision
+   0.776 → 0.541. The earlier statement "recall does not improve over the baseline" is
+   **only true at ultralytics' reported operating point**, not at a fixed threshold (see
+   finding 4). It should not be cited as the threshold result.
+3. **The mAP@.5:.95 ranking is a measurement artifact, not evidence that conf=0.10 is
+   optimal.** The binding runs `yolo val` at `conf=0.25` (`DEFAULT_CONF` in
+   `yolo_eval.py`). Ultralytics' validation default is `conf=0.001`. Verified on the saved
+   files: the baseline's lowest person score is exactly 0.2500 with zero predictions below
+   it; the conf=0.10 run contains 6,100 person predictions below 0.25. The PR curve is built
+   from what survives the threshold, so mAP rises monotonically as conf falls
+   (0.390 → 0.459 → 0.483 → 0.495). 0.495 is the best of the four tested points, not an
+   optimum. Under the standard protocol the true mAP is unmeasured, and **the baseline's
+   0.459 understates it.** Do not compare 0.459 with published yolo11n numbers.
+4. **Ultralytics P and R are not values at the `conf` threshold.** `ap_per_class` reports
+   the max-F1 point of each curve (`ultralytics/utils/metrics.py`). This explains why
+   ultralytics recall at conf=0.10 (0.651) looks lower than at conf=0.25 (0.661), when the
+   fixed-threshold recall rises. The fixed-threshold columns are the right comparison.
+5. **Threshold alone is not an adequate recall fix.** Conf=0.10 lifts small-object recall
+   only from 0.268 to 0.430, so 57% of small persons are still missed, and it costs 23.5
+   points of precision. Whether any point on this curve is acceptable depends on a
+   precision floor that the project has not defined (OPEN_QUESTIONS Q30).
+6. **Conf=0.50 confirms the expected trade-off:** precision 0.927 at recall 0.521, and
+   small-object recall 0.104.
+
+**Evaluation protocol (Q28, accepted 2026-10-04, D-067):**
+
+- **mAP is reported at `conf=0.001`** (standard ultralytics validation threshold). The
+  `yolo_eval` binding default is now `0.001`.
+- **Fixed-threshold precision and recall are a separate measurement**, produced by
+  `scripts/run_fixed_threshold_strata.py`, and are labelled as such. They are never reported as mAP.
+- **Threshold-free AP per size stratum** (`stratum_ap50`, same script) is computed from the
+  full curve. It is valid only for files whose lowest score is ≤ 0.002 (the script flags others as TRUNCATED).
+- **The operating point is not chosen.** Q30 is open. Nothing here sets a precision floor or a
+  reported threshold.
+- **Legacy values:** all mAP values at `conf=0.25` (EXP-20260930-01 and the sweep rows) are
+  truncated-protocol values. They are not comparable with Q28-protocol mAP.
+- **Script defaults:** `scripts/run_evaluation.py` (the mAP run) now configures `conf=0.001`. The
+  historical EXP-20260930-01 row is unchanged, and a rerun would be refused as terminal anyway.
+  `scripts/run_baseline.py` (tracking) keeps `conf=0.25`, an operating point (Q30 open).
+
+**Corrections to earlier wording (2026-10-04):**
+
+- **Ultralytics P and R are max-F1 values, not values at the `conf` threshold.** The "recall
+  0.661" in EXP-20260930-01, and the 0.651 and 0.521 in the sweep rows, are the max-F1 point
+  of each curve. They are not recall at conf=0.25 or at any other threshold. The fixed-threshold
+  recall at conf=0.25 is **0.670** (IoU-matched analysis). Any statement that "recall does not
+  change with conf" based on the ultralytics columns is wrong.
+- **"Recall does not improve over the baseline" is withdrawn** for fixed-threshold recall. It
+  holds only at ultralytics' max-F1 point. At a fixed threshold, recall rises from 0.670 to 0.773
+  when conf goes 0.25 → 0.10, at a precision cost (see finding 2).
+- **The diagnosis derived TP/FP/FN from the reported P/R** (ADR-0015 §5, limitation 1, on PR #71's
+  branch). Those reported values are max-F1 points, so the derived counts are not counts at
+  the conf=0.25 operating point. The IoU-matched analysis supersedes them for fixed-threshold
+  statements. An erratum is drafted in ADR-0015 on PR #71's branch (uncommitted).
+- **Crowding:** the earlier "crowd-related failure pattern" is withdrawn. ADR-0015's
+  "677 high-density images contain 64% of GT persons" is a prevalence statistic, not a failure
+  rate. The measured dense/sparse gap is explained by size composition (proposal §1).
+- **Strongest current failure mode:** small persons, which are 52.5% of misses from 23.7% of GT
+  (recall 0.268 at conf=0.25; 0.430 at conf=0.10).
+- **"conf=0.10 gives the highest mAP"** is true only of the four legacy points tested. It is not
+  a Q28-protocol result, and it is not an optimum.
+
+**Precision correction (2026-10-04, ADR-0017 §3a). Historical FP16 labels are wrong.**
+
+- **EXP-20260930-01 and the 20261001 sweep rows (EXP-20261001-01..04) ran FP32, not FP16.** Their
+  `precision` field says "FP16", but no precision argument was supplied. Ultralytics `quantize`
+  defaulted to None, so the model ran at FP32 (`engine/validator.py:191,195`). The historical rows are
+  **not edited**. This note is the correction.
+- **EXP-20261004-01 is FP16-requested via `quantize=16` and is NOT like-for-like with those runs.**
+  Any precision comparison against EXP-20260930-01 or the sweep rows must say so. The precision label
+  on new records is the requested setting, not a measured inference precision.
+- **Precision of the new series is requested, not measured.** Ultralytics does not log actual inference
+  precision. `half` is deprecated in 8.4.138 and is mapped to `quantize`, so the protocol uses `quantize=16`.
+- The 640 control names EXP-20260930-01 as the legacy FP32 reference in its record notes.
+
+**Validity status (`[P§25]` rules):**
+
+- `commit_sha` is **NULL on all six ledger rows**, including the baseline. Rule 4 requires
+  a commit SHA, so these rows cannot yet be reproduced from record. The sweep execute path
+  does not pass `commit` into `job_result_to_experiment_record`. Corrections go in new rows
+  (Rule 1); the existing rows are not edited.
+- `dataset_version = coco-val2017-5k` is a name, not a registered `DatasetManifest` (Q26).
+- The baseline row's `baseline_id` is `EXP-20260929-01` (a video-tracking run with no
+  metrics), not `SELF`. Rule 2 wants the accuracy baseline to name itself. Q29.
+- The `commit` field in the baseline's rollup entry names a branch, not a SHA.
+- (Historical, as of 2026-10-04 before recovery; restored to the main checkout's `.cv_agent/` the same day, see LEDGER-RECOVERY.md §4a.) The ledger file had been in the Trash (`~/.local/share/Trash/files/cv-engineering-agent/.cv_agent/`),
+  not in the repository. Its contents were read without modification.
+- The `predictions.json` artifacts and the baseline eval directory are in the same Trash
+  location.
+- FPS (108.6 vs 99.9 for an identical workload) is run-to-run wall-clock variance, not a
+  speed effect. Use inference-only latency (5.3 ms in every run) for speed comparisons.
+- Only one model and one dataset. IoU 0.5 only. Matching is approximate (see above).
+- **Inferred, not recorded, commits** (never written to `commit_sha`; see
+  [LEDGER-RECOVERY.md](../experiments/LEDGER-RECOVERY.md) §5.2): EXP-20261001-01..04 ≈ `1531344`
+  (most likely; the execute-time working tree is unknown). EXP-20260930-01 ≈ `8f29618`, but its
+  code was **uncommitted at run time**: the `yolo_eval` binding first appears in `8f29618`, committed
+  five minutes after the run. No single commit reproduces the baseline exactly.
+
+### FP32 640 control — first attempt quarantined, NOT ledger-eligible (2026-10-04)
+
+**No row was written for this attempt, and it must not be cited as a measurement.** The FP32 640 control
+(`e1-yolo11n-coco-val2017-imgsz640-conf0001-fp32`, commit `5861718`, owner reference
+`EXP-20261004-FP32-640-OWNER-20261004`) ran while another project's training job shared the GPU. Its device-wide
+VRAM (baseline 1164 MiB, peak 1629 MiB), FPS (35.5) and latency (7.4 ms inference) are invalid. The archive
+(`/home/dev/cv-engineering-evidence/EXP-20261004-FP32-640/contaminated-concurrent-gpu/`) holds the artifacts,
+`CONTAMINATED.md` and a verified manifest, and is read-only. ADR-0018 §3.9 and D-074 record the decision. The
+clean rerun is gated (ADR-0018 §6) and needs a fresh owner approval reference. Its id is `EXP-20261004-04`,
+which is not allocated until a record is written. Series rows above are unchanged. **Update 2026-10-04:** the clean rerun was executed and written as `EXP-20261004-04`; see the section below. Their GPU idleness is
+inferred from baseline VRAM, not verified from process snapshots (ADR-0018 §3.13).
+
+### EXP-20261004-04 — FP32 640 control, persisted (completed 2026-10-04, measurement only)
+
+**Status: completed and persisted. Measurement only (D-069). No pass/fail criterion, no decision, no production
+choice.** This is the precision control for EXP-20261004-01: the same protocol at imgsz 640, with `quantize` unset
+(FP32) instead of `quantize=16`. Q30 (operating point and precision floor) and D-069 remain OPEN. Nothing here
+decides whether FP16 or FP32 is acceptable.
+
+- **Ledger record:** `EXP-20261004-04`, baseline `EXP-20261004-01`, commit `74a3cc2403788c7a1745b101371127fffa5bf3ea`,
+  approval `EXP-20261004-FP32-640-RERUN-OWNER-20261004`. Written by `scripts/record_evaluation_runs.py --fp32-control`
+  on 2026-10-04 after a reviewed dry run.
+- **Approval chronology (deviation, recorded in JOURNAL):** the approval record required by ADR-0018 §6 item 5 was
+  documented **after** the GPU run, not before it. The run is not evidence that the gate was satisfied before
+  execution. The approval record is documented in JOURNAL with this explicit deviation.
+- **Protocol:** YOLO11n, COCO val2017 persons (5000 images, 10777 GT persons), RTX 3060 12GB (driver 535.309.01),
+  batch 1, device 0, conf 0.001 (Q28, full PR curve), `quantize` unset (ultralytics `fp16=False`). Actual inference
+  precision is not logged by ultralytics, so the label is the request.
+- **Run:** wall 61.058 s, exit 0, started 2026-10-04T17:18:30.563932+00:00, ended 2026-10-04T17:19:31.621467+00:00.
+
+Measured values, exactly as persisted in the ledger:
+
+| Metric | Value |
+|---|---|
+| mAP@0.5 | 0.75 |
+| mAP@0.5:0.95 | 0.518 |
+| AP@0.5 small / medium / large | 0.35468745409468344 / 0.7259676696869994 / 0.9409535908564703 |
+| fixed_thr@0.25 precision / recall (reference only) | 0.7763794772507261 / 0.6697596733784912 |
+| fixed_thr@0.25 recall small / medium / large / dense / sparse (reference only) | 0.2676332288401254 / 0.655733261046354 / 0.9074074074074074 / 0.6059106128985297 / 0.781985670419652 |
+| FPS (e2e) | 81.88935110878181 |
+| latency end-to-end / inference (ms) | 6.9 / 5.7 |
+| VRAM peak (device-wide) / RAM peak | 858.0 MiB / 1939.9 MiB |
+| VRAM baseline (device-wide, pre-run) | 592 MiB |
+| gpu_hours (derived: wall / 3600) | 0.016960555555555555 |
+| predictions min person score | 0.001 (full curve, Q28 gate satisfied) |
+
+**Comparison with EXP-20261004-01 (FP16 requested, same protocol).** Descriptive only, one run each:
+
+| Metric | EXP-20261004-01 (quantize=16) | EXP-20261004-04 (FP32) |
+|---|---|---|
+| mAP@0.5 / mAP@0.5:0.95 | 0.75 / 0.517 | 0.75 / 0.518 |
+| AP@0.5 small / medium / large | 0.3556 / 0.7259 / 0.9410 | 0.3547 / 0.7260 / 0.9410 |
+| fixed P / R at 0.25 (reference) | 0.7768 / 0.6701 | 0.7764 / 0.6698 |
+| inference latency (ms) | 5.8 | 5.7 |
+
+The accuracy values agree within about 0.001 at this single size. That is an observation about this one
+comparison, not evidence of a general FP16 or FP32 property, and it is not a production choice.
+
+**Caveats (read these before using any system metric):**
+
+1. **NoMachine exemption (ADR-0018 §3.16, D-076).** The GPU-process rule exempts exactly one process name,
+   `/usr/NX/bin/nxnode.bin` (NoMachine remote desktop, pid 3884). It was present at start, during polling (every
+   sample), and at end. It is not counted as a foreign workload. Its GPU memory and compute are inside the device-wide
+   VRAM value, and its effect on FPS and latency is not measured.
+2. **Device-wide metrics.** VRAM is `nvidia-smi memory.used` for the whole device (ADR-0017). The pre-run baseline
+   was 592 MiB here, against 413–433 MiB for the EXP-20261004-01..03 series. So the VRAM values are not directly
+   comparable across the two series, and no memory conclusion is drawn.
+3. **Process observation.** During polling the run's own process appeared under pid 15596 (`/usr/bin/python3`) and
+   was recognized as the run's own process, which confirms the own-pid assumption on a real run (ADR-0018 §3.10). Only
+   the NoMachine node and that own process were observed. No other process appeared in any sample. Polling is at 1 s,
+   so a process that started and exited between polls would not be seen.
+4. **Not verified.** The EXP-20261004-01..03 records have no process snapshots, so their idle state remains inferred
+   from baseline VRAM, not process-verified (ADR-0018 §3.13).
+5. **Contaminated attempt.** The earlier FP32 640 run (`5861718`) is not part of this record. It is quarantined and
+   permanently not ledger-eligible (section above).
+
+**Not done here:** no production winner, no pass/fail threshold, no precision floor, no operating point (Q30 open),
+no change to D-069 (OPEN). No ADR was modified.

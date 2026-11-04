@@ -124,6 +124,12 @@ class TestBuildCommand:
         cmd = build_command(self._base_inputs(conf=0.5))
         assert "conf=0.5" in cmd
 
+    def test_default_conf_is_standard_map_protocol(self) -> None:
+        # Q28 (D-067): mAP is computed at conf=0.001, not the truncated 0.25.
+        cmd = build_command(self._base_inputs())
+        assert "conf=0.001" in cmd
+        assert "conf=0.25" not in cmd
+
     def test_device_in_command(self) -> None:
         cmd = build_command(self._base_inputs(device="0"))
         assert "device=0" in cmd
