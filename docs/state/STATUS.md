@@ -10,16 +10,16 @@ known Linux-only failures (the Windows-only baseline). Linux CI is the authorita
 
 ## Where we are
 
-origin/main = 20910cb (merge of #84, D0, checked 2026-11-12). In flight: issue #85, slice C1 on branch
-`feature/claude/85-env-ignore-deny` (`.env` ignore, Read deny rules, rule 8 secrets sentence); merged under D-090 once CI is green. If this file disagrees with `git log origin/main`, trust git and
-rewrite this file.
+origin/main = 3b4dbf2 (C1 merged, checked 2026-11-12). In flight: issue #87, slice C2 on branch
+`feature/claude/87-llm-credentials` (credential loader, CLI load, adapter switch to `CV_AGENT_ANTHROPIC_API_KEY`); merged
+under D-090 once CI is green. If this file disagrees with `git log origin/main`, trust git and rewrite this file.
 
 **Ledger: 10 records, unchanged** (sha256 `9251eb0c…8fef8fa`, full value in JOURNAL).
 
 **LLM gateway v2 (D0):** [ADR-0021](../architecture/adr/ADR-0021-llm-credential-source.md) Accepted (D-088: key
 `CV_AGENT_ANTHROPIC_API_KEY`, `.env`, no `ANTHROPIC_API_KEY`). [ADR-0020](../architecture/adr/ADR-0020-llm-gateway-v2.md)
 **Proposed** (two tiers, $5/day, 100 calls/day, UTC+06:00 day, call log, default-deny privacy, thinking counted in the
-4000-token cap). Hosted tiers: owner's Windows PC only (it alone holds the key). D-089 model choice (haiku-5-5 fast, opus-5-5 strong). D-090 merge permission for LLM-layer PRs **is in force (D0 merged)**. D-091: both PCs are measured CV hosts, no local LLM. No code changed; all on the mock.
+4000-token cap). Hosted tiers: owner's Windows PC only (it alone holds the key). D-089 model choice (haiku-5-5 fast, opus-5-5 strong). D-090 merge permission for LLM-layer PRs **is in force (D0 merged)**. D-091: both PCs are measured CV hosts, no local LLM. C2 adds the credential loader; the gateway still runs on the mock.
 
 **Done earlier:**
 - **EXP-20261004-01..04** (measurement only) and the failure analysis (#75) / annotation-label review: see `docs/experiments/`.
@@ -44,8 +44,8 @@ rewrite this file.
 
 ## Next actions
 
-1. Finish slice **C1** (issue #85): CI green, then merge under D-090.
-2. Slice **C2**: credentials implementation per ADR-0021 (own issue).
+1. Finish slice **C2** (issue #87): CI green, then merge under D-090.
+2. Owner puts `CV_AGENT_ANTHROPIC_API_KEY` in the project `.env` on the Windows PC (never printed or committed).
 3. Owner decision on **ADR-0020**; then G1–G7.
 
 ## Do not start yet
