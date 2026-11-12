@@ -51,6 +51,8 @@ an external provider (LLM API, research tool, third-party service) unless the
 operation is authorized, the provider is permitted, and the data-handling policy
 allows it.
 
+LLM calls specifically (ADR-0020, Proposed; owner answer Q-S): API spend within the daily ceiling ($5 per day, whole agent) is pre-authorized and spend above it is refused; project data reaches a hosted LLM only for the data classes the owner has allowed in `[llm.privacy]` (default-deny). This sets nothing for other spend; the thresholds below stay `TBD`.
+
 ## Scoped exceptions
 
 **First V1 baseline run (owner decision, 2026-09-28, D-047 — `docs/state/

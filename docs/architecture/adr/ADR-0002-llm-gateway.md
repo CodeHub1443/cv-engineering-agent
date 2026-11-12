@@ -275,3 +275,12 @@ section documents why it changed). No interface, adapter logic, or test *shape*
 changed — only the literal model-ID string used throughout. See `docs/state/
 DECISIONS.md` D-034 for the recorded correction (D-033 itself is left unedited,
 per this project's append-only decision-ledger convention).
+
+## 10. Amended by ADR-0020 / ADR-0021 (2026-11-12)
+
+This ADR's text above is kept unchanged. It is amended as follows (nothing above is rewritten):
+
+- **[ADR-0021](ADR-0021-llm-credential-source.md) (Accepted, D-088)** replaces the credential source in §3 and §4: the key is `CV_AGENT_ANTHROPIC_API_KEY`, read from the process environment and a git-ignored project `.env`; `ANTHROPIC_API_KEY` is ignored by design. This supersedes D-033(5).
+- **[ADR-0020](ADR-0020-llm-gateway-v2.md) (Proposed)** amends §3 "single configured model" (two tiers by task class), §5 "`LLMRequest`/`LLMResponse` unchanged" (`temperature` removed, `data_classes`, `stop_reason`, `request_id`, `call_id` added) and §6 "no call/iteration budget" (a $5 per day ceiling and call log). It takes effect only if the owner accepts it.
+- The configured model is no longer `claude-sonnet-5`: owner decision D-089 (2026-11-12) chooses `claude-haiku-5-5` (fast) and `claude-opus-5-5` (strong), superseding D-033(3) and D-034 for the model ID.
+- Kept: no automatic provider or model fallback (D-033(4)); `FakeLLMProvider` stays the default (D-033(6)).
