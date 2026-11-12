@@ -35,7 +35,7 @@ max_tokens = 4000
 [models."claude-opus-5-5"]
 provider = "anthropic"
 thinking_can_disable = false          # 400 on "disabled" (ADR-0020 §1, docs 2026-11-12)
-max_output_tokens = 64000             # UNVERIFIED for 5.5, see Q52; the effective cap is [llm.budget] (4000)
+max_output_tokens = 128000           # per Anthropic model docs retrieved 2026-11-12 (owner-supplied); the effective cap is [llm.budget] (4000)
 prices_as_of = "2026-11-12"
 prices_source = "https://docs.claude.com/en/docs/about-claude/pricing"
 
@@ -47,7 +47,7 @@ output_usd_per_mtok = 20.00
 provider = "anthropic"
 thinking_can_disable = true
 thinking_disable_max_effort = "high"  # 400 at xhigh or max when disabled
-max_output_tokens = 64000             # UNVERIFIED for 5.5, see Q52; the effective cap is [llm.budget] (4000)
+max_output_tokens = 128000           # per Anthropic model docs retrieved 2026-11-12 (owner-supplied); the effective cap is [llm.budget] (4000)
 prices_as_of = "2026-11-12"
 prices_source = "https://docs.claude.com/en/docs/about-claude/pricing"
 
