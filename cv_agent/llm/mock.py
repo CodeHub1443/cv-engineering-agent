@@ -2,7 +2,7 @@
 cv_agent.llm.mock — Deterministic fake LLM provider for tests and offline use.
 
 FakeLLMProvider requires no API keys, no network access, and returns
-predictable responses.  It is the default provider in config/default.toml.
+predictable responses.  It is the ``offline`` tier of the gateway catalog, the route every task class has by default.
 """
 
 from __future__ import annotations

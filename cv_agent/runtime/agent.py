@@ -32,7 +32,8 @@ from cv_agent.graph.builder import build_graph
 from cv_agent.graph.state import AgentState
 from cv_agent.graph.workflow import build_job_workflow_graph, build_requirements_workflow_graph
 from cv_agent.llm.base import LLMProvider
-from cv_agent.llm.registry import get_provider
+from cv_agent.llm.policy import TaskClass
+from cv_agent.llm.router import build_router
 from cv_agent.memory.models import ProjectUnderstandingRevision, SessionRecord
 from cv_agent.memory.store import ProjectMemoryStore, open_store
 from cv_agent.requirements.analyzer import RequirementsAnalyzer
@@ -80,10 +81,12 @@ class CVAgent:
         job_executor: Optional[JobExecutor] = None,
     ) -> None:
         self._config: AgentConfig = config or load_config()
-        self._llm: LLMProvider = get_provider(
-            self._config.llm.provider,
-            self._config.llm.model,
-        )
+        # ADR-0020: routing, tiers and limits come from [llm] and the gateway catalog. The router
+        # is validated here (no network, no key, no store); a hosted route is built only on first
+        # use, so a missing key never breaks startup. The analyzer's narrative is the one call
+        # site reachable from this class; it gets a provider that resolves its route on first use.
+        self._router = build_router(self._config.llm, state_dir=None)
+        self._llm: LLMProvider = self._router.lazy_for_task(TaskClass.NARRATIVE)
         self._registry: CapabilityRegistry = CapabilityRegistry(
             self._config.registry_path
         )
@@ -144,10 +147,6 @@ class CVAgent:
     @property
     def config(self) -> AgentConfig:
         return self._config
-
-    @property
-    def llm(self) -> LLMProvider:
-        return self._llm
 
     @property
     def registry(self) -> CapabilityRegistry:
@@ -682,10 +681,11 @@ class CVAgent:
         Checks:
             - LangGraph availability and version
             - Capability registry loadability and count
-            - Configured provider and model
+            - LLM routes: task class -> tier -> provider/model, and whether the
+              route is hosted (read from config; builds nothing, needs no key)
 
         Returns:
-            dict with keys: status, provider, model, capability_count,
+            dict with keys: status, llm_routes, capability_count,
             langgraph_available, langgraph_version, registry_ok.
         """
         # LangGraph check
@@ -713,8 +713,16 @@ class CVAgent:
 
         return {
             "status": overall,
-            "provider": self._llm.provider_name,
-            "model": self._llm.model_name,
+            "llm_routes": [
+                {
+                    "task_class": r.task_class.value,
+                    "tier": r.tier,
+                    "provider": r.provider,
+                    "model": r.model,
+                    "hosted": r.hosted,
+                }
+                for r in self._router.routes()
+            ],
             "capability_count": cap_count,
             "langgraph_available": lg_ok,
             "langgraph_version": lg_version,

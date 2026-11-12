@@ -44,8 +44,13 @@ def _health_check() -> int:
 
     print("CV Engineering Agent — Health Check")
     print(f"  Runtime status  : {health['status'].upper()}")
-    print(f"  Provider        : {health['provider']}")
-    print(f"  Model           : {health['model']}")
+    print("  LLM routes      :")
+    for route in health["llm_routes"]:
+        where = "hosted" if route["hosted"] else "local"
+        print(
+            f"    {route['task_class']:<11} -> {route['tier']:<8} "
+            f"{route['provider']}/{route['model']} ({where})"
+        )
     print(f"  Capabilities    : {health['capability_count']} registered")
     print(f"  LangGraph       : {lg_label}")
 

@@ -9,7 +9,7 @@ try:
 except ImportError:  # pragma: no cover - exercised on Python < 3.12
     from importlib.abc import Traversable  # Python 3.10-3.11
 
-from cv_agent.config.settings import AgentConfig, LLMConfig, LLMOverride, load_config
+from cv_agent.config.settings import AgentConfig, LLMConfig, load_config
 
 
 class TestLoadConfigDefaults:
@@ -20,17 +20,10 @@ class TestLoadConfigDefaults:
         cfg = load_config(nonexistent)
         assert isinstance(cfg, AgentConfig)
 
-    def test_default_provider_is_mock(self, tmp_path: Path) -> None:
+    def test_every_route_is_offline_by_default(self, tmp_path: Path) -> None:
         cfg = load_config(tmp_path / "missing.toml")
-        assert cfg.llm.provider == "mock"
-
-    def test_default_model(self, tmp_path: Path) -> None:
-        cfg = load_config(tmp_path / "missing.toml")
-        assert cfg.llm.model == "fake-1"
-
-    def test_no_overrides_by_default(self, tmp_path: Path) -> None:
-        cfg = load_config(tmp_path / "missing.toml")
-        assert cfg.llm.overrides == {}
+        assert set(cfg.llm.routing.values()) == {"offline"}
+        assert set(cfg.llm.routing) == {"extraction", "selection", "narrative"}
 
     def test_registry_path_is_path_object(self, tmp_path: Path) -> None:
         cfg = load_config(tmp_path / "missing.toml")
@@ -46,27 +39,11 @@ class TestLoadConfigFromFile:
         p.write_text(content, encoding="utf-8")
         return p
 
-    def test_reads_provider_and_model(self, tmp_path: Path) -> None:
-        p = self._write_toml(
-            tmp_path,
-            '[llm]\nprovider = "openai"\nmodel = "gpt-4o"\n',
-        )
+    def test_reads_routing(self, tmp_path: Path) -> None:
+        p = self._write_toml(tmp_path, '[llm.routing]\nextraction = "fast"\n')
         cfg = load_config(p)
-        assert cfg.llm.provider == "openai"
-        assert cfg.llm.model == "gpt-4o"
-
-    def test_reads_overrides(self, tmp_path: Path) -> None:
-        p = self._write_toml(
-            tmp_path,
-            '[llm]\nprovider = "mock"\nmodel = "fake-1"\n'
-            '[llm.overrides.planner]\nprovider = "anthropic"\nmodel = "claude-opus-4-5"\n',
-        )
-        cfg = load_config(p)
-        assert "planner" in cfg.llm.overrides
-        override = cfg.llm.overrides["planner"]
-        assert isinstance(override, LLMOverride)
-        assert override.provider == "anthropic"
-        assert override.model == "claude-opus-4-5"
+        assert cfg.llm.routing["extraction"] == "fast"
+        assert cfg.llm.routing["narrative"] == "offline"
 
     def test_custom_registry_path(self, tmp_path: Path) -> None:
         custom = tmp_path / "my_registry.json"
@@ -80,13 +57,34 @@ class TestLoadConfigFromFile:
     def test_default_toml_is_valid(self) -> None:
         """The committed config/default.toml must be parseable."""
         cfg = load_config()  # uses default path
-        assert cfg.llm.provider == "mock"
-        assert cfg.llm.model == "fake-1"
+        assert cfg.llm == LLMConfig()
+        assert set(cfg.llm.routing.values()) == {"offline"}
+
+    def test_both_default_toml_copies_are_identical(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        top = (root / "config" / "default.toml").read_bytes()
+        packaged = (root / "cv_agent" / "resources" / "config" / "default.toml").read_bytes()
+        assert top == packaged
+
+    def test_no_provider_or_model_string_in_config_files(self) -> None:
+        """ADR-0020 §3.2 / CLAUDE.md §3.8: only the gateway catalog names a provider or model."""
+        root = Path(__file__).resolve().parents[1]
+        files = [
+            root / "config" / "default.toml",
+            root / "cv_agent" / "resources" / "config" / "default.toml",
+            *sorted((root / "cv_agent" / "config").glob("*.py")),
+        ]
+        assert len(files) >= 3
+        for f in files:
+            text = f.read_text(encoding="utf-8").lower()
+            assert "claude-" not in text, f
+            assert "anthropic" not in text, f
 
 
 class TestLLMConfig:
     def test_defaults(self) -> None:
         llm = LLMConfig()
-        assert llm.provider == "mock"
-        assert llm.model == "fake-1"
-        assert llm.overrides == {}
+        assert llm.routing == {"extraction": "offline", "selection": "offline", "narrative": "offline"}
+        assert llm.budget.daily_usd_ceiling == 5.0
+        assert llm.privacy.hosted_allowed_data_classes == ("PUBLIC_WEB", "PROJECT_METADATA")
+        assert llm.log.store_text is False

@@ -2,9 +2,9 @@
 cv_agent.llm.governed — GovernedProvider (ADR-0020 §3 items 5-6, slices G2 and G3).
 
 Responsibility: wrap one adapter so that every call is privacy-checked, length-capped, budgeted,
-timed and logged exactly once, failing closed when the books cannot be written. Not here yet:
-tier lookup, routing and config-file parsing (G5). It is not wired into
-``CVAgent`` or any call site, and it is never built for the mock provider.
+timed and logged exactly once, failing closed when the books cannot be written. Tier lookup,
+routing and config parsing live in ``router`` and ``config.settings`` (G5): ``LLMRouter`` builds
+one of these per hosted route and never builds one for the mock provider.
 
 ``complete()`` runs, in order:
 0. privacy (G4): if ``hosted``, every declared data class (empty means ``{PROJECT_DATA}``) must be
@@ -12,8 +12,10 @@ tier lookup, routing and config-file parsing (G5). It is not wired into
    no reservation, no budget row, no adapter call. A refusal is NOT written to ``llm_calls``,
    deliberately: no call was sent, and the log records calls (ADR-0020 §3 item 6);
 1. input cap: ``len(system or "") + len(prompt) <= max_input_chars`` else ``LLMInputTooLargeError``;
-2. output cap: ``request.max_tokens`` is required and ``1 <= max_tokens <= max_output_tokens``
-   (thinking included) else ``LLMConfigError``;
+2. output cap: ``request.max_tokens`` (``None`` means the tier's ``tier_max_tokens``; with no tier
+   value it is required) must satisfy ``1 <= max_tokens <= min(tier, max_output_tokens)`` (thinking
+   included) else ``LLMConfigError``; an explicit value above the tier is refused, never clamped.
+   The adapter always receives the resolved integer;
 3. reserve the worst case against the day's USD ceiling and call limit (``LLMCallStore.reserve``:
    ``LLMBudgetExceededError``, ``LLMCallLimitError`` or ``LLMClockSkewError``, no network);
 4. the adapter call;
@@ -43,14 +45,14 @@ import dataclasses
 import hashlib
 import json
 import logging
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from cv_agent.config.settings import LLMBudgetConfig
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
 from cv_agent.llm.catalog import Catalog, ModelFacts, load_catalog, price_for
-from cv_agent.llm.clock import Clock, SystemClock
+from cv_agent.llm.clock import Clock, SystemClock, parse_utc_offset
 from cv_agent.llm.errors import (
     LLMCallError,
     LLMConfigError,
@@ -66,46 +68,18 @@ _log = logging.getLogger(__name__)
 
 FRAMING_RESERVE_TOKENS = 512
 CLOCK_SKEW_TOLERANCE_S = 300.0
-_OFFSET = re.compile(r"^([+-])(\d{2}):(\d{2})$")
-
-
-@dataclasses.dataclass(frozen=True)
-class LLMBudgetConfig:
-    """Daily budget and length limits (D-092). Defaults are the owner's decisions; reading
-    them from a config file arrives with G5."""
-
-    daily_usd_ceiling: float = 5.0
-    daily_call_limit: int = 100
-    max_input_chars: int = 24_000
-    max_output_tokens: int = 4_000
-    day_boundary_utc_offset: str = "+06:00"
-
-    def __post_init__(self) -> None:
-        if self.daily_usd_ceiling <= 0 or self.daily_call_limit < 1:
-            raise ValueError("daily_usd_ceiling and daily_call_limit must be positive")
-        if self.max_input_chars < 1 or self.max_output_tokens < 1:
-            raise ValueError("max_input_chars and max_output_tokens must be positive")
-        _parse_offset(self.day_boundary_utc_offset)
-
-
-def _parse_offset(text: str) -> timezone:
-    match = _OFFSET.match(text)
-    if match is None or int(match[2]) > 23 or int(match[3]) > 59:
-        raise ValueError(f"UTC offset {text!r} must look like '+06:00'")
-    delta = timedelta(hours=int(match[2]), minutes=int(match[3]))
-    return timezone(-delta if match[1] == "-" else delta)
 
 
 def day_key_for(ts_utc: datetime, utc_offset: str) -> str:
     """The budget day of ``ts_utc``: its calendar date at a fixed UTC offset, e.g. ``2026-11-12+06:00``."""
     if ts_utc.tzinfo is None:
         raise ValueError("ts_utc must be timezone-aware")
-    return f"{ts_utc.astimezone(_parse_offset(utc_offset)).date().isoformat()}{utc_offset}"
+    return f"{ts_utc.astimezone(parse_utc_offset(utc_offset)).date().isoformat()}{utc_offset}"
 
 
 def resets_at_utc_for(ts_utc: datetime, utc_offset: str) -> str:
     """When the day of ``ts_utc`` ends (the next local midnight), as an ISO UTC timestamp."""
-    local = ts_utc.astimezone(_parse_offset(utc_offset))
+    local = ts_utc.astimezone(parse_utc_offset(utc_offset))
     midnight = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     return midnight.astimezone(timezone.utc).isoformat()
 
@@ -172,8 +146,8 @@ class GovernedProvider(LLMProvider):
     ``hosted`` says whether the adapter sends data off this machine; it is required, so no caller
     can forget the privacy question. When hosted, only ``allowed_hosted`` classes may be carried
     (default: public web and project metadata; the owner widens it by a PR with a D-entry).
-    ``task_class`` and ``tier`` are plain strings until G5 types them. ``thinking`` and
-    ``effort`` are the tier's settings, recorded as given (G5 supplies them from the catalog).
+    ``task_class`` and ``tier`` are the strings the router passes (the ``TaskClass`` value and the
+    tier name). ``thinking`` and ``effort`` are the tier's settings, recorded as given.
     The adapter's model must be in the catalog (its prices price the call), else
     ``LLMConfigError`` at construction.
     """
@@ -193,7 +167,9 @@ class GovernedProvider(LLMProvider):
         budget: Optional[LLMBudgetConfig] = None,
         catalog: Optional[Catalog] = None,
         allowed_hosted: frozenset[DataClass] = DEFAULT_HOSTED_ALLOWED,
+        tier_max_tokens: Optional[int] = None,
     ) -> None:
+        self._tier_max_tokens = tier_max_tokens
         self._hosted = hosted
         self._allowed_hosted = allowed_hosted
         self._task_class = task_class
@@ -234,6 +210,8 @@ class GovernedProvider(LLMProvider):
     def complete(self, request: LLMRequest) -> LLMResponse:
         self._check_privacy(request)
         max_tokens = self._check_caps(request)
+        if request.max_tokens != max_tokens:
+            request = dataclasses.replace(request, max_tokens=max_tokens)  # the tier default, now explicit
         call_id = uuid.uuid4().hex
         now = self._clock.now_utc()
         offset = self._budget.day_boundary_utc_offset
@@ -304,11 +282,14 @@ class GovernedProvider(LLMProvider):
         if chars > self._budget.max_input_chars:
             raise LLMInputTooLargeError(chars=chars, limit=self._budget.max_input_chars)
         limit = self._budget.max_output_tokens
-        if request.max_tokens is None:
-            raise LLMConfigError("max_tokens is required (tier defaults arrive with slice G5).")
-        if not 1 <= request.max_tokens <= limit:
-            raise LLMConfigError(f"max_tokens {request.max_tokens} is outside 1..{limit} (thinking included).")
-        return request.max_tokens
+        if self._tier_max_tokens is not None:
+            limit = min(limit, self._tier_max_tokens)
+        wanted = request.max_tokens if request.max_tokens is not None else self._tier_max_tokens
+        if wanted is None:
+            raise LLMConfigError("max_tokens is required: the request gave none and this provider has no tier value.")
+        if not 1 <= wanted <= limit:
+            raise LLMConfigError(f"max_tokens {wanted} is outside 1..{limit} (thinking included).")
+        return wanted
 
     def _actual(self, usage: dict[str, int], reserved_usd: float, call_id: str) -> Optional[float]:
         if "prompt_tokens" not in usage and "completion_tokens" not in usage:

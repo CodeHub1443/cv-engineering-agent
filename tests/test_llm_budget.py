@@ -30,9 +30,9 @@ from cv_agent.llm.errors import (
     LLMStoreError,
     LLMTruncatedError,
 )
+from cv_agent.config.settings import LLMBudgetConfig
 from cv_agent.llm.governed import (
     GovernedProvider,
-    LLMBudgetConfig,
     actual_cost_usd,
     day_key_for,
     worst_case_usd,

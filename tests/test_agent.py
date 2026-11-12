@@ -25,6 +25,56 @@ def test_cvagent_run_completes_with_mock_provider() -> None:
     assert result["error"] is None
 
 
+def test_health_check_reports_llm_routes_not_a_single_provider() -> None:
+    health = CVAgent().health_check()
+
+    assert "provider" not in health and "model" not in health
+    assert health["llm_routes"] == [
+        {"task_class": tc, "tier": "offline", "provider": "mock", "model": "fake-1", "hosted": False}
+        for tc in ("extraction", "selection", "narrative")
+    ]
+
+
+def test_hosted_narrative_route_never_breaks_startup_or_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CV_AGENT_ANTHROPIC_API_KEY", raising=False)
+    cfg = AgentConfig()
+    cfg.llm.routing["narrative"] = "fast"
+
+    agent = CVAgent(cfg)  # no key, no store: still constructs
+    health = agent.health_check()
+
+    assert health["status"] == "ok"
+    narrative = [r for r in health["llm_routes"] if r["task_class"] == "narrative"][0]
+    assert narrative["tier"] == "fast" and narrative["hosted"] is True
+    assert narrative["provider"] == "anthropic" and narrative["model"] == "claude-haiku-5-5"
+    assert agent.run("smoke test")["status"] == "ready"  # nothing on this path calls an LLM
+
+
+def test_hosted_narrative_route_fails_closed_on_use_without_a_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cv_agent.llm.errors import LLMCredentialError
+
+    monkeypatch.delenv("CV_AGENT_ANTHROPIC_API_KEY", raising=False)
+    cfg = AgentConfig()
+    cfg.llm.routing["narrative"] = "fast"
+    with pytest.raises(LLMCredentialError):
+        CVAgent(cfg).analyze_requirements("detect defects on a conveyor")  # no fallback to offline
+
+
+def test_unknown_tier_in_config_fails_at_construction() -> None:
+    from cv_agent.llm.errors import LLMConfigError
+
+    cfg = AgentConfig()
+    cfg.llm.routing["narrative"] = "turbo"
+    with pytest.raises(LLMConfigError):
+        CVAgent(cfg)
+
+
+def test_cvagent_has_no_single_provider_property() -> None:
+    assert not hasattr(CVAgent(), "llm")
+
+
 def test_cvagent_run_preserves_explicit_session_id() -> None:
     agent = CVAgent()
     result = agent.run("smoke test", session_id="session-123")

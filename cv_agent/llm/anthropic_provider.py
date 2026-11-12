@@ -28,6 +28,7 @@ from typing import Any, Literal, Optional
 import anthropic
 
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
+from cv_agent.llm.catalog import EFFORTS, THINKING_MODES, Effort, ThinkingMode
 from cv_agent.llm.credentials import get_credential
 from cv_agent.llm.errors import (
     LLMConfigError,
@@ -41,12 +42,9 @@ from cv_agent.llm.registry import register_provider
 
 ADAPTER_VERSION: str = "anthropic/2"
 
-ThinkingMode = Literal["adaptive", "disabled"]
-Effort = Literal["low", "medium", "high", "xhigh", "max"]
-
 _API_KEY_ENV_VAR = "CV_AGENT_ANTHROPIC_API_KEY"
-_THINKING_MODES = ("adaptive", "disabled")
-_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+_THINKING_MODES = THINKING_MODES
+_EFFORTS = EFFORTS
 _NORMAL_STOPS = ("end_turn", "stop_sequence")
 
 _logger = logging.getLogger(__name__)
