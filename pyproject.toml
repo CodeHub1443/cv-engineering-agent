@@ -37,6 +37,9 @@ cv-agent = "cv_agent.__main__:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "live_llm: makes a real, paid LLM call; skipped unless CV_AGENT_LIVE_LLM=1 and CI is unset (ADR-0020, D-092)",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["cv_agent"]

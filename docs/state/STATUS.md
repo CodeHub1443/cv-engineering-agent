@@ -3,17 +3,16 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-11-12 · **Phase:** 5e/6 — ADR-0019 foundation on main (fake runtimes only); LLM gateway v2: G1 to G4 merged, G5 in flight. Annotation review paused (47/63).
+**Updated:** 2026-11-12 · **Phase:** 5e/6 — ADR-0019 foundation on main (fake runtimes only); LLM gateway v2: G1 to G5 merged, G6 in flight. Annotation review paused (47/63).
 **Health:** Linux CI is authoritative (the G5 PR run replaces the last measured #80: ruff clean, mypy ok, pytest 1893 passed /
 26 skipped). Windows local: the known Linux-only failures (same on origin/main) and one Windows-only mypy `SIGKILL` error.
 
 ## Where we are
 
-Baseline origin/main = 3e990bb (G4 merged, checked 2026-11-12). In flight: issue #97, slice **G5** on branch
-`feature/claude/97-llm-routing`: tiers and model facts in `catalog.toml`; `[llm]` holds only routing, budget, privacy, log
-(no provider or model string; `provider`/`model`/`overrides` deleted); `cv_agent/llm/router.py` validates config and
-builds hosted tiers lazily; `CVAgent` builds the router; `health_check` reports `llm_routes`. Merged under D-090 once CI
-is green. If this disagrees with `git log origin/main`, trust git.
+Baseline origin/main = 8954d12 (G5 merged, checked 2026-11-12). In flight: issue #99, slice **G6** on branch
+`feature/claude/99-llm-contract`: marker `live_llm` (skipped unless `CV_AGENT_LIVE_LLM=1` and `CI` unset), contract suite
+over the mock and the Anthropic adapter with a fake client, one owner-run live test, Q52 answered (128000). Merged under
+D-090 once CI is green. If this disagrees with `git log origin/main`, trust git.
 
 **Ledger: 10 records, unchanged** (sha256 `9251eb0c…8fef8fa`, full value in JOURNAL).
 **LLM gateway v2:** [ADR-0021](../architecture/adr/ADR-0021-llm-credential-source.md) Accepted (D-088: key
@@ -22,7 +21,7 @@ is green. If this disagrees with `git log origin/main`, trust git.
 $5/day, 100 calls/day, UTC+06:00 day, call log with `request_id`, default-deny privacy, thinking counted in the 4000-token
 cap. Hosted tiers: owner's Windows PC only (it holds the key). D-089 model choice (haiku-5-5 fast, opus-5-5 strong).
 D-090 merge permission in force. D-091: both PCs are measured CV hosts, no local LLM. Built: C2 credentials, G1 adapter v2, G2
-call log, G3 budget and prices, G4 privacy (merged); G5 routing and wiring (this branch). No real call is made yet.
+call log, G3 budget and prices, G4 privacy, G5 routing and wiring (merged); G6 contract suite and live test (this branch). No real call is made yet.
 
 **Done earlier:** EXP-20261004-01..04 (measurement only), failure analysis (#75), annotation-label review: see `docs/experiments/`.
 ADR-0019 training pipeline foundation (D-079, D-081, D-084): approval-gated job lifecycle, acceptance comparer; fake runtimes only.
@@ -39,14 +38,14 @@ ADR-0019 training pipeline foundation (D-079, D-081, D-084): approval-gated job 
 
 ## Open (owner)
 
-1. **ADR-0020** open questions Q38–Q41, Q46–Q49, Q52 (safe defaults recorded).
+1. **ADR-0020** open questions Q38–Q41, Q46–Q49 (safe defaults recorded).
 2. **Q32** (a) variance, (c) delta rationale, (d) meaning of "improve"; gains stay provisional. **Q27**, **Q31**, **Q33**
    (typed identities); M4 wording PR; annotation labels for ranks 011, 013, 027.
 
 ## Next actions
 
-1. Finish slice **G5** (issue #97): CI green, then merge under D-090.
-2. Slices **G6** (live-test marker, contract suite) and **G7** (research extraction on the fast tier), one issue each.
+1. Finish slice **G6** (issue #99): CI green, then merge under D-090.
+2. Slice **G7** (research extraction on the fast tier), its own issue.
 3. Owner puts `CV_AGENT_ANTHROPIC_API_KEY` in the project `.env` on the Windows PC (never printed or committed) before any
    hosted route is switched on, plus `cv-agent llm-log init`. Nothing creates the store implicitly.
 

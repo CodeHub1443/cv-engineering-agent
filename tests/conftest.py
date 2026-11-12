@@ -8,6 +8,7 @@ module state is reset around each test. A test that exercises the real loader re
 
 from __future__ import annotations
 
+import os
 from typing import Iterator
 
 import pytest
@@ -32,3 +33,22 @@ def _isolate_credentials(
         monkeypatch.setattr(cli, "_load_project_credentials", lambda: None)
     yield
     credentials._reset_for_tests()
+
+
+def _live_llm_skip_reason(env: "os._Environ[str] | dict[str, str]") -> str | None:
+    """Why a ``live_llm`` test must be skipped, or None when it may run (ADR-0020 G6, D-092)."""
+    if env.get("CI"):
+        return "live_llm: never runs when CI is set"
+    if env.get("CV_AGENT_LIVE_LLM") != "1":
+        return "live_llm: set CV_AGENT_LIVE_LLM=1 to run this paid test"
+    return None
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    reason = _live_llm_skip_reason(os.environ)
+    if reason is None:
+        return
+    skip = pytest.mark.skip(reason=reason)
+    for item in items:
+        if item.get_closest_marker("live_llm") is not None:
+            item.add_marker(skip)
