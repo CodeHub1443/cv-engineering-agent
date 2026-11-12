@@ -2430,7 +2430,7 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 
 **Did:** Recorded the merges since the last STATUS (a8e61b9 era): #82 (77d3eaa); gateway v2 #84–#102 (D-088 to D-093; ADR-0020 and ADR-0021); #104 (ADR-0023 accepted, D-094 and D-095); #109 housekeeping-2 (CLAUDE.md 153 to 149 lines, `git stash` denied, M4 wording, Q47 docstring); #108 (S2, schema v3, `llm-log migrate`); #112, #113 and #114 (S1a/b/c). Independent review of S1 found 10 defects (2 critical, 3 high), all fixed test-first. Added D-096 (parallel worktree batches), D-097 (ADR-0023 amendment), Q53 (Windows `test_baseline_wiring`) and Q54 (durable KnowledgeStore backend). ADR-0023 gained an append-only amendment section; ADR-0017 gained one note on the `fixed_thr@0.25` floor (D-077); the `yolo_eval.py` comment now cites D-077 (comment only). `docs/experiments/EXP-20261004-01-proposal.md` is historical and unchanged. STATUS rewritten.
 
-**Owner confirmed:** `python -m cv_agent llm-log migrate` was run on the Windows PC.
+**Owner confirmed (2026-11-12):** `python -m cv_agent llm-log migrate` was run on the Windows PC.
 
 **Found:** The brief expected Q50 for the new question, but Q50 was already answered, so the new question is Q53 and the store question is Q54. D-096 cites "operating rules §5"; no file of that name exists in this repository, so the citation is as the owner specified and needs a home. The plan's `yolo_eval.py` anchor was off (the block is lines 64–66); the stale "(Q30 is open)" wording now points to D-077.
 
