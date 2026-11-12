@@ -61,6 +61,34 @@ def test_environ_write_detector_catches_writes() -> None:
     assert len(_environ_writes(ast.parse(src))) == 4
 
 
+def _imports_sqlite3(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(
+            a.name.split(".")[0] == "sqlite3" for a in node.names
+        ):
+            return True
+        if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "sqlite3":
+            return True
+    return False
+
+
+def test_sqlite3_in_llm_package_only_in_sqlite_store() -> None:
+    llm_root = _PACKAGE_ROOT / "llm"
+    offenders = sorted(
+        py.relative_to(llm_root).as_posix()
+        for py in llm_root.rglob("*.py")
+        if _imports_sqlite3(ast.parse(py.read_text(encoding="utf-8"), filename=str(py)))
+    )
+    assert offenders == ["sqlite_store.py"]
+
+
+def test_sqlite_import_detector_catches_both_import_forms() -> None:
+    assert _imports_sqlite3(ast.parse("import sqlite3\n"))
+    assert _imports_sqlite3(ast.parse("import sqlite3 as db\n"))
+    assert _imports_sqlite3(ast.parse("from sqlite3 import connect\n"))
+    assert not _imports_sqlite3(ast.parse("import json\nfrom pathlib import Path\n"))
+
+
 def test_generic_anthropic_key_name_only_in_credentials_module() -> None:
     pattern = re.compile(r"(?<![A-Z0-9_])ANTHROPIC_API_KEY")
     offenders = [

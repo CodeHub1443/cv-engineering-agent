@@ -3,17 +3,16 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-11-12 · **Phase:** 5e/6 — ADR-0019 foundation on main (fake runtimes only); LLM gateway v2 accepted, slice G1 in flight.
-Annotation review paused (47 of 63 labelled).
-**Health:** Linux CI (#80, last measured): ruff clean, mypy ok (85 files), pytest 1893 passed / 26 skipped. Windows local after G1: 31
-known Linux-only failures (unchanged baseline), 1946 passed. Linux CI is authoritative; the G1 PR run replaces these numbers.
+**Updated:** 2026-11-12 · **Phase:** 5e/6 — ADR-0019 foundation on main (fake runtimes only); LLM gateway v2: G1 merged, G2 in flight. Annotation review paused (47/63).
+**Health:** Linux CI (#80, last measured): ruff clean, mypy ok (85 files), pytest 1893 passed / 26 skipped. Windows local after G2: 31 known
+Linux-only failures (baseline), 1979 passed, one Windows-only mypy `SIGKILL` error (baseline). Linux CI is authoritative; the G2 PR run replaces this.
 
 ## Where we are
 
-origin/main = 1559d50 (C2 merged, checked 2026-11-12). In flight: issue #89, slice **G1** on branch
-`feature/claude/89-llm-adapter-v2` (adapter v2: no `temperature`, stop-reason policy, usage/request-ID reporting,
-`max_retries=0`, the typed `LLMCallError` family) plus the recorded acceptance of ADR-0020; merged under D-090 once CI is
-green. If this file disagrees with `git log origin/main`, trust git and rewrite this file.
+origin/main = 3fce51b (G1 merged, checked 2026-11-12). In flight: issue #91, slice **G2** on branch
+`feature/claude/91-llm-call-log`: the SQLite call log (`LLMCallStore`, tables `llm_calls` and `meta`), `cv-agent llm-log init`,
+the `Clock` protocol and a `GovernedProvider` skeleton (times the call, writes one row, fails closed); merged under D-090 once CI
+is green. `GovernedProvider` is not wired into `CVAgent` or any call site. If this disagrees with `git log origin/main`, trust git.
 
 **Ledger: 10 records, unchanged** (sha256 `9251eb0c…8fef8fa`, full value in JOURNAL).
 
@@ -22,7 +21,7 @@ green. If this file disagrees with `git log origin/main`, trust git and rewrite 
 **Accepted** by the owner 2026-11-12 (D-092; Q34, Q35, Q36, Q42, Q43, Q44, Q50 answered with the safe defaults): two tiers,
 $5/day, 100 calls/day, UTC+06:00 day, call log with `request_id`, default-deny privacy, thinking counted in the 4000-token
 cap. Hosted tiers: owner's Windows PC only (it alone holds the key). D-089 model choice (haiku-5-5 fast, opus-5-5 strong).
-D-090 merge permission in force. D-091: both PCs are measured CV hosts, no local LLM. Built: C2 credential loader; G1 adapter v2
+D-090 merge permission in force. D-091: both PCs are measured CV hosts, no local LLM. Built: C2 credential loader; G1 adapter v2 (merged); G2 call log
 (this branch). The gateway still runs on the mock; nothing governs a real call until G5.
 
 **Done earlier:**
@@ -47,9 +46,10 @@ D-090 merge permission in force. D-091: both PCs are measured CV hosts, no local
 
 ## Next actions
 
-1. Finish slice **G1** (issue #89): CI green, then merge under D-090.
-2. Owner puts `CV_AGENT_ANTHROPIC_API_KEY` in the project `.env` on the Windows PC (never printed or committed).
-3. Slices **G2** (SQLite call store, `llm-log init`) to **G7**, one issue each.
+1. Finish slice **G2** (issue #91): CI green, then merge under D-090.
+2. Slice **G3**: budget, reservation and prices (adds a `llm_budget` table with a schema bump); then G4 to G7, one issue each.
+3. Owner puts `CV_AGENT_ANTHROPIC_API_KEY` in the project `.env` on the Windows PC (never printed or committed) and runs
+   `cv-agent llm-log init` once, before any hosted call exists (G5 earliest). Nothing creates the store implicitly.
 
 ## Do not start yet
 
