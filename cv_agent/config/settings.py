@@ -12,11 +12,11 @@ Environment variable overrides are intentionally deferred to a later step.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from importlib import resources
 from importlib.resources import files as resource_files
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 try:
     # Real stdlib module, but typeshed gates it to Python 3.11+ (see
@@ -30,6 +30,10 @@ if sys.version_info >= (3, 11):
     import tomllib  # stdlib from 3.11+
 else:
     import tomli as tomllib  # type: ignore[no-redef]
+
+from cv_agent.llm.clock import parse_utc_offset
+from cv_agent.llm.errors import LLMConfigError
+from cv_agent.llm.policy import DataClass, TaskClass
 
 _RESOURCE_PACKAGE = "cv_agent.resources"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -54,22 +58,54 @@ def _default_registry_path() -> Path | Traversable:
     return _DEFAULT_REGISTRY_RESOURCE if _DEFAULT_REGISTRY_RESOURCE.is_file() else _REPO_ROOT / "spec" / "capability_registry.json"
 
 
-@dataclass
-class LLMOverride:
-    """Provider/model override for a specific named agent role."""
+@dataclass(frozen=True)
+class LLMBudgetConfig:
+    """Daily budget and length limits (ADR-0020 §3.6, D-092); the defaults are the owner's decisions.
+    Invalid values raise ``ValueError`` here and ``LLMConfigError`` when read from a file."""
 
-    provider: str
-    model: str
+    daily_usd_ceiling: float = 5.0
+    daily_call_limit: int = 100
+    max_input_chars: int = 24_000
+    max_output_tokens: int = 4_000
+    day_boundary_utc_offset: str = "+06:00"
+
+    def __post_init__(self) -> None:
+        if self.daily_usd_ceiling <= 0 or self.daily_call_limit < 1:
+            raise ValueError("daily_usd_ceiling and daily_call_limit must be positive")
+        if self.max_input_chars < 1 or self.max_output_tokens < 1:
+            raise ValueError("max_input_chars and max_output_tokens must be positive")
+        parse_utc_offset(self.day_boundary_utc_offset)
+
+
+@dataclass(frozen=True)
+class LLMPrivacyConfig:
+    """Data classes (``DataClass`` member names) a hosted tier may receive; default-deny otherwise."""
+
+    hosted_allowed_data_classes: tuple[str, ...] = ("PUBLIC_WEB", "PROJECT_METADATA")
+
+
+@dataclass(frozen=True)
+class LLMLogConfig:
+    store_text: bool = False
+
+
+def _default_routing() -> dict[str, str]:
+    return {tc.value: "offline" for tc in TaskClass}
 
 
 @dataclass
 class LLMConfig:
-    """LLM provider configuration."""
+    """Project LLM settings (ADR-0020 §3): routing, budget, privacy and log, nothing else.
 
-    provider: str = "mock"
-    model: str = "fake-1"
-    # Keyed by agent role name (e.g. "planner", "critic")
-    overrides: dict[str, LLMOverride] = field(default_factory=dict)
+    No provider or model is named here: ``routing`` maps a task class to a tier name, and the
+    gateway-owned ``cv_agent/llm/catalog.toml`` says what each tier is. Every task class routes
+    to ``offline`` until the owner changes it.
+    """
+
+    routing: dict[str, str] = field(default_factory=_default_routing)
+    budget: LLMBudgetConfig = field(default_factory=LLMBudgetConfig)
+    privacy: LLMPrivacyConfig = field(default_factory=LLMPrivacyConfig)
+    log: LLMLogConfig = field(default_factory=LLMLogConfig)
 
 
 @dataclass
@@ -119,22 +155,7 @@ def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
     with path.open("rb") as fh:
         raw = tomllib.load(fh)
 
-    llm_raw: dict = raw.get("llm", {})
-    overrides_raw: dict = llm_raw.get("overrides", {})
-
-    overrides: dict[str, LLMOverride] = {
-        role: LLMOverride(
-            provider=role_cfg.get("provider", "mock"),
-            model=role_cfg.get("model", "fake-1"),
-        )
-        for role, role_cfg in overrides_raw.items()
-    }
-
-    llm = LLMConfig(
-        provider=llm_raw.get("provider", "mock"),
-        model=llm_raw.get("model", "fake-1"),
-        overrides=overrides,
-    )
+    llm = _llm_from_raw(raw.get("llm", {}))
 
     registry_path_raw: Optional[str] = raw.get("registry_path")
     registry_path = (
@@ -147,3 +168,72 @@ def load_config(path: Optional[Path | Traversable] = None) -> AgentConfig:
     skill_paths = tuple(Path(p) for p in skill_paths_raw)
 
     return AgentConfig(llm=llm, registry_path=registry_path, skill_paths=skill_paths)
+
+
+# ── [llm] parsing: shape and values only; checks that need the catalog are in the router ──────
+
+
+def _table(where: str, value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise LLMConfigError(f"{where} must be a table.")
+    return value
+
+
+def _only_keys(where: str, table: dict[str, Any], allowed: tuple[str, ...]) -> None:
+    unknown = sorted(set(table) - set(allowed))
+    if unknown:
+        raise LLMConfigError(f"{where}: unknown key(s) {unknown}; allowed: {list(allowed)}.")
+
+
+def _kind(where: str, key: str, value: Any, kinds: tuple[type, ...], label: str) -> None:
+    if isinstance(value, bool) != (kinds == (bool,)) or not isinstance(value, kinds):
+        raise LLMConfigError(f"{where}: {key} must be {label}, got {value!r}.")
+
+
+def _llm_from_raw(raw: Any) -> LLMConfig:
+    """Parse ``[llm]``; ``LLMConfigError`` for an unknown key anywhere or a bad value."""
+    top = _table("[llm]", raw)
+    _only_keys("[llm]", top, ("routing", "budget", "privacy", "log"))
+
+    routing = _default_routing()
+    given = _table("[llm.routing]", top.get("routing", {}))
+    _only_keys("[llm.routing]", given, tuple(routing))
+    for task_class, tier in given.items():
+        _kind("[llm.routing]", task_class, tier, (str,), "a tier name")
+        routing[task_class] = tier
+
+    budget_raw = _table("[llm.budget]", top.get("budget", {}))
+    _only_keys("[llm.budget]", budget_raw, tuple(f.name for f in fields(LLMBudgetConfig)))
+    for key, kinds, label in (
+        ("daily_usd_ceiling", (int, float), "a number"),
+        ("daily_call_limit", (int,), "an integer"),
+        ("max_input_chars", (int,), "an integer"),
+        ("max_output_tokens", (int,), "an integer"),
+        ("day_boundary_utc_offset", (str,), "a string like '+06:00'"),
+    ):
+        if key in budget_raw:
+            _kind("[llm.budget]", key, budget_raw[key], kinds, label)
+    try:
+        budget = LLMBudgetConfig(**budget_raw)
+    except ValueError as exc:
+        raise LLMConfigError(f"[llm.budget]: {exc}") from exc
+
+    privacy_raw = _table("[llm.privacy]", top.get("privacy", {}))
+    _only_keys("[llm.privacy]", privacy_raw, ("hosted_allowed_data_classes",))
+    privacy = LLMPrivacyConfig()
+    if "hosted_allowed_data_classes" in privacy_raw:
+        names = privacy_raw["hosted_allowed_data_classes"]
+        if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+            raise LLMConfigError("[llm.privacy]: hosted_allowed_data_classes must be a list of names.")
+        unknown = sorted(set(names) - set(DataClass.__members__))
+        if unknown:
+            raise LLMConfigError(
+                f"[llm.privacy]: unknown data class(es) {unknown}; known: {sorted(DataClass.__members__)}."
+            )
+        privacy = LLMPrivacyConfig(tuple(names))
+
+    log_raw = _table("[llm.log]", top.get("log", {}))
+    _only_keys("[llm.log]", log_raw, ("store_text",))
+    if "store_text" in log_raw:
+        _kind("[llm.log]", "store_text", log_raw["store_text"], (bool,), "true or false")
+    return LLMConfig(routing, budget, privacy, LLMLogConfig(**log_raw))

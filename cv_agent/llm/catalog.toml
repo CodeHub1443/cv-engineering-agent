@@ -1,12 +1,41 @@
-# Gateway-owned model facts (ADR-0020 §3 item 2, D-092). The only file that names a hosted
-# model and its price; changing a model or a price is a PR to this file.
-# Tiers (which model serves which task class) arrive with slice G5.
+# Gateway-owned tiers, model facts and prices (ADR-0020 §3 item 2, D-089, D-092). The only
+# file that names a model, a provider for it, or a price; changing any of them is a PR to this
+# file. Project config (`[llm.routing]`) only maps a task class to a tier name below.
 #
-# Prices are USD per million tokens. `price_steps` are ascending by `up_to_input_tokens`
-# (inclusive upper bound on the call's TOTAL input tokens); the last step has no bound.
+# [tiers.<name>]: provider, model, hosted (does the call leave this machine), max_tokens (the
+# tier's output cap, thinking included). `thinking` is "adaptive" or "disabled"; omitted means
+# the provider default (adaptive). `effort` is omitted (provider default, medium). Nothing else
+# is accepted: no temperature, top_p, top_k, tools, tool_choice or budget_tokens.
+#
+# [models.<name>] capability facts: `thinking_can_disable`, `thinking_disable_max_effort` (the
+# highest effort at which disabling is accepted), `max_output_tokens`. A tier that breaks them
+# is rejected at load. Prices are USD per million tokens. `price_steps` are ascending by
+# `up_to_input_tokens` (inclusive upper bound on the call's TOTAL input tokens); the last step
+# has no bound.
+
+[tiers.offline]
+provider = "mock"
+model = "fake-1"
+hosted = false
+max_tokens = 1024
+
+[tiers.fast]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+hosted = true
+max_tokens = 1024
+thinking = "disabled"
+
+[tiers.strong]
+provider = "anthropic"
+model = "claude-opus-5-5"
+hosted = true
+max_tokens = 4000
 
 [models."claude-opus-5-5"]
 provider = "anthropic"
+thinking_can_disable = false          # 400 on "disabled" (ADR-0020 §1, docs 2026-11-12)
+max_output_tokens = 64000             # UNVERIFIED for 5.5, see Q52; the effective cap is [llm.budget] (4000)
 prices_as_of = "2026-11-12"
 prices_source = "https://docs.claude.com/en/docs/about-claude/pricing"
 
@@ -16,6 +45,9 @@ output_usd_per_mtok = 20.00
 
 [models."claude-haiku-5-5"]
 provider = "anthropic"
+thinking_can_disable = true
+thinking_disable_max_effort = "high"  # 400 at xhigh or max when disabled
+max_output_tokens = 64000             # UNVERIFIED for 5.5, see Q52; the effective cap is [llm.budget] (4000)
 prices_as_of = "2026-11-12"
 prices_source = "https://docs.claude.com/en/docs/about-claude/pricing"
 

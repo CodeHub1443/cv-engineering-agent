@@ -1,9 +1,26 @@
-[llm]
-provider = "mock"
-model    = "fake-1"
+# Project settings. Not read at all by the offline tier; every LLM route stays offline until the
+# owner switches it. No provider or model is named here: tiers (provider, model, thinking, caps,
+# prices) live in the gateway's cv_agent/llm/catalog.toml (ADR-0020, D-092).
 
-# Per-agent overrides: [llm.overrides.<agent_name>]
-# Example:
-# [llm.overrides.planner]
-# provider = "anthropic"
-# model    = "claude-sonnet-5"
+[llm.routing]
+# Task class -> tier name (offline, fast, strong). A hosted tier needs the API key in .env and an
+# initialised call log (`cv-agent llm-log init`). Only extraction may usefully be switched to
+# fast; selection and narrative send PROJECT_DATA and are refused by default-deny (Q40).
+extraction = "offline"
+selection  = "offline"
+narrative  = "offline"
+
+[llm.budget]
+daily_usd_ceiling       = 5.00
+daily_call_limit        = 100
+max_input_chars         = 24000
+max_output_tokens       = 4000
+day_boundary_utc_offset = "+06:00"
+
+[llm.privacy]
+# Data classes a hosted tier may receive. PROJECT_DATA is blocked; allowing it is an owner
+# decision recorded as a D-entry, and there is no env-var or CLI override.
+hosted_allowed_data_classes = ["PUBLIC_WEB", "PROJECT_METADATA"]
+
+[llm.log]
+store_text = false

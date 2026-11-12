@@ -9,7 +9,7 @@ get_provider(); it never imports a concrete adapter directly.
 from __future__ import annotations
 
 import importlib
-from typing import Type
+from typing import Any, Type
 
 from cv_agent.llm.base import LLMProvider
 from cv_agent.llm.mock import FakeLLMProvider
@@ -45,13 +45,16 @@ def register_provider(name: str, cls: Type[LLMProvider]) -> None:
     _REGISTRY[name] = cls
 
 
-def get_provider(name: str, model: str) -> LLMProvider:
+def get_provider(name: str, model: str, **adapter_options: Any) -> LLMProvider:
     """
     Instantiate a provider by name and model.
 
     Args:
         name:  Provider identifier (e.g. 'mock', 'anthropic', 'openai').
         model: Model identifier passed to the provider constructor.
+        adapter_options: Keyword options for that adapter's constructor, passed through
+            unchanged (e.g. ``thinking`` and ``effort`` for the Anthropic adapter). The
+            router supplies them from the catalog tier; nothing else should.
 
     Returns:
         Configured LLMProvider instance.
@@ -88,7 +91,7 @@ def get_provider(name: str, model: str) -> LLMProvider:
     # to accept `model` as shown; mypy cannot verify that through a bare
     # `Type[LLMProvider]`, so this is a real, load-bearing runtime contract,
     # not a bug — a provider that violates it fails loudly here, uncaught.
-    return cls(model=model)  # type: ignore[call-arg]
+    return cls(model=model, **adapter_options)  # type: ignore[call-arg]
 
 
 def list_providers() -> list[str]:

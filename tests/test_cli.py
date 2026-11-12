@@ -36,13 +36,12 @@ class TestCLISmoke:
         result = self._run_cli()
         assert "Runtime status" in result.stdout
 
-    def test_cli_prints_provider(self) -> None:
+    def test_cli_prints_every_llm_route_as_offline_by_default(self) -> None:
         result = self._run_cli()
-        assert "Provider" in result.stdout
-
-    def test_cli_prints_model(self) -> None:
-        result = self._run_cli()
-        assert "Model" in result.stdout
+        assert "LLM routes" in result.stdout
+        for task_class in ("extraction", "selection", "narrative"):
+            line = next(ln for ln in result.stdout.splitlines() if ln.strip().startswith(task_class))
+            assert "offline" in line and "mock/fake-1" in line and "local" in line
 
     def test_cli_prints_capabilities(self) -> None:
         result = self._run_cli()
