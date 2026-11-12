@@ -3,8 +3,9 @@ cv_agent.llm.errors — exception types for the LLM gateway.
 
 Responsibility: name the gateway's failure modes so callers can catch them without
 importing a provider module. Credential failures come from ADR-0021; configuration and
-after-send call failures from ADR-0020 slice G1, the call-log store failure from G2. Budget,
-privacy and clock-skew errors arrive with their own slices (G3 onward).
+after-send call failures from ADR-0020 slice G1, the call-log store failure from G2, budget,
+call-limit, input-size and clock-skew refusals from G3. Privacy errors arrive with G4. None of
+these messages ever carries prompt text.
 """
 
 from __future__ import annotations
@@ -29,6 +30,49 @@ class LLMStoreError(LLMError):
 
     The gateway fails closed on it: a call that cannot be logged is not handed out.
     """
+
+
+class LLMClockSkewError(LLMError):
+    """The clock reads earlier than the last recorded call by more than the tolerance."""
+
+
+class LLMInputTooLargeError(LLMError):
+    """``len(system) + len(prompt)`` exceeds the input cap. Raised before any network I/O."""
+
+    def __init__(self, *, chars: int, limit: int) -> None:
+        super().__init__(f"LLM input is {chars} characters; the limit is {limit}.")
+        self.chars = chars
+        self.limit = limit
+
+
+class LLMBudgetExceededError(LLMError):
+    """Today's spend plus this call's worst case would pass the daily ceiling. Nothing was sent."""
+
+    def __init__(
+        self, *, day_key: str, ceiling_usd: float, spent_usd: float, call_worst_usd: float, resets_at_utc: str
+    ) -> None:
+        super().__init__(
+            f"LLM daily budget refused: day {day_key}, spent ${spent_usd:.6f} of ${ceiling_usd:.2f}, "
+            f"this call could cost up to ${call_worst_usd:.6f}; resets at {resets_at_utc}."
+        )
+        self.day_key = day_key
+        self.ceiling_usd = ceiling_usd
+        self.spent_usd = spent_usd
+        self.call_worst_usd = call_worst_usd
+        self.resets_at_utc = resets_at_utc
+
+
+class LLMCallLimitError(LLMError):
+    """The day's call limit is used up. Nothing was sent."""
+
+    def __init__(self, *, day_key: str, limit: int, resets_at_utc: str) -> None:
+        super().__init__(
+            f"LLM daily call limit refused: day {day_key} has used {limit} of {limit} calls; "
+            f"resets at {resets_at_utc}."
+        )
+        self.day_key = day_key
+        self.limit = limit
+        self.resets_at_utc = resets_at_utc
 
 
 class LLMCallError(LLMError):

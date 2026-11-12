@@ -1,0 +1,29 @@
+# Gateway-owned model facts (ADR-0020 §3 item 2, D-092). The only file that names a hosted
+# model and its price; changing a model or a price is a PR to this file.
+# Tiers (which model serves which task class) arrive with slice G5.
+#
+# Prices are USD per million tokens. `price_steps` are ascending by `up_to_input_tokens`
+# (inclusive upper bound on the call's TOTAL input tokens); the last step has no bound.
+
+[models."claude-opus-5-5"]
+provider = "anthropic"
+prices_as_of = "2026-11-12"
+prices_source = "https://docs.claude.com/en/docs/about-claude/pricing"
+
+[[models."claude-opus-5-5".price_steps]]
+input_usd_per_mtok = 4.00
+output_usd_per_mtok = 20.00
+
+[models."claude-haiku-5-5"]
+provider = "anthropic"
+prices_as_of = "2026-11-12"
+prices_source = "https://docs.claude.com/en/docs/about-claude/pricing"
+
+[[models."claude-haiku-5-5".price_steps]]
+up_to_input_tokens = 100000
+input_usd_per_mtok = 0.10
+output_usd_per_mtok = 0.50
+
+[[models."claude-haiku-5-5".price_steps]]
+input_usd_per_mtok = 0.50
+output_usd_per_mtok = 2.50

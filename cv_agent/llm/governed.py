@@ -1,21 +1,36 @@
 """
-cv_agent.llm.governed — GovernedProvider skeleton (ADR-0020 §3 item 5, slice G2).
+cv_agent.llm.governed — GovernedProvider (ADR-0020 §3 items 5-6, slices G2 and G3).
 
-Responsibility: wrap one adapter so that every call is timed and logged exactly once, and
-fail closed when the log cannot be written. Not here yet: privacy and input caps (G4),
-budget and reservation (G3), tier lookup (G5). It is not wired into ``CVAgent`` or any call
-site, and it is never built for the mock provider.
+Responsibility: wrap one adapter so that every call is length-capped, budgeted, timed and
+logged exactly once, failing closed when the books cannot be written. Not here yet: privacy
+and data classes (G4); tier lookup, routing and config-file parsing (G5). It is not wired into
+``CVAgent`` or any call site, and it is never built for the mock provider.
 
-What is logged:
-- success: one row with the response's usage, stop reason and request ID;
-- an ``LLMCallError`` from the adapter (the request was sent): one row with the error's
+``complete()`` runs, in order:
+1. input cap: ``len(system or "") + len(prompt) <= max_input_chars`` else ``LLMInputTooLargeError``;
+2. output cap: ``request.max_tokens`` is required and ``1 <= max_tokens <= max_output_tokens``
+   (thinking included) else ``LLMConfigError``;
+3. reserve the worst case against the day's USD ceiling and call limit (``LLMCallStore.reserve``:
+   ``LLMBudgetExceededError``, ``LLMCallLimitError`` or ``LLMClockSkewError``, no network);
+4. the adapter call;
+5. settle: the reservation becomes the actual cost and one call row is written.
+Nothing in 1-3 touches the network, and none of their messages carries prompt text.
+
+Settling rules:
+- success: actual cost from usage (output price on ``completion_tokens``, which already
+  contains thinking; cache creation and cache read tokens at the FULL input rate, because the
+  cache multipliers are unverified and overcounting is the safe direction). If the actual cost
+  is above the reservation it is recorded anyway and a warning is logged (a revisit trigger).
+  A response with no usage at all keeps the reservation;
+- an ``LLMCallError`` (the request was sent): the full reservation stays counted (whether
+  failed calls are billed is unverified; safe direction), one row is written with the error's
   stop reason (or ``error:<ClassName>``), usage and request ID, then the SAME error is
   re-raised with ``call_id`` and ``tier`` filled in;
-- any other adapter exception (``LLMConfigError``, ``LLMCredentialError``, ...) is raised
-  before a request leaves the process, so it is not a call and writes no row.
-If the log write fails after the adapter ran, ``LLMStoreError`` is raised and the answer is
-not returned. If it fails while logging an adapter error, ``LLMStoreError`` is raised from
-that error (the unlogged call is the graver fault).
+- ``LLMConfigError`` / ``LLMCredentialError`` from the adapter are raised before a request leaves
+  the process: the reservation is released and no row is written;
+- any other exception leaves the reservation counted (it may have been sent).
+If the books cannot be written after the adapter ran, ``LLMStoreError`` is raised and the
+answer is not returned; while handling an adapter error it is raised from that error.
 """
 
 from __future__ import annotations
@@ -23,13 +38,103 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
+import re
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
+from cv_agent.llm.catalog import Catalog, ModelFacts, load_catalog, price_for
 from cv_agent.llm.clock import Clock, SystemClock
-from cv_agent.llm.errors import LLMCallError, LLMStoreError
+from cv_agent.llm.errors import (
+    LLMCallError,
+    LLMConfigError,
+    LLMCredentialError,
+    LLMInputTooLargeError,
+    LLMStoreError,
+)
 from cv_agent.llm.sqlite_store import CallRecord, LLMCallStore
+
+_log = logging.getLogger(__name__)
+
+FRAMING_RESERVE_TOKENS = 512
+CLOCK_SKEW_TOLERANCE_S = 300.0
+_OFFSET = re.compile(r"^([+-])(\d{2}):(\d{2})$")
+
+
+@dataclasses.dataclass(frozen=True)
+class LLMBudgetConfig:
+    """Daily budget and length limits (D-092). Defaults are the owner's decisions; reading
+    them from a config file arrives with G5."""
+
+    daily_usd_ceiling: float = 5.0
+    daily_call_limit: int = 100
+    max_input_chars: int = 24_000
+    max_output_tokens: int = 4_000
+    day_boundary_utc_offset: str = "+06:00"
+
+    def __post_init__(self) -> None:
+        if self.daily_usd_ceiling <= 0 or self.daily_call_limit < 1:
+            raise ValueError("daily_usd_ceiling and daily_call_limit must be positive")
+        if self.max_input_chars < 1 or self.max_output_tokens < 1:
+            raise ValueError("max_input_chars and max_output_tokens must be positive")
+        _parse_offset(self.day_boundary_utc_offset)
+
+
+def _parse_offset(text: str) -> timezone:
+    match = _OFFSET.match(text)
+    if match is None or int(match[2]) > 23 or int(match[3]) > 59:
+        raise ValueError(f"UTC offset {text!r} must look like '+06:00'")
+    delta = timedelta(hours=int(match[2]), minutes=int(match[3]))
+    return timezone(-delta if match[1] == "-" else delta)
+
+
+def day_key_for(ts_utc: datetime, utc_offset: str) -> str:
+    """The budget day of ``ts_utc``: its calendar date at a fixed UTC offset, e.g. ``2026-11-12+06:00``."""
+    if ts_utc.tzinfo is None:
+        raise ValueError("ts_utc must be timezone-aware")
+    return f"{ts_utc.astimezone(_parse_offset(utc_offset)).date().isoformat()}{utc_offset}"
+
+
+def resets_at_utc_for(ts_utc: datetime, utc_offset: str) -> str:
+    """When the day of ``ts_utc`` ends (the next local midnight), as an ISO UTC timestamp."""
+    local = ts_utc.astimezone(_parse_offset(utc_offset))
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return midnight.astimezone(timezone.utc).isoformat()
+
+
+def worst_case_usd(
+    facts: ModelFacts,
+    *,
+    system: Optional[str],
+    prompt: str,
+    max_tokens: int,
+    framing_reserve_tokens: int = FRAMING_RESERVE_TOKENS,
+) -> float:
+    """Upper bound on one call: ``(utf8 bytes of system + prompt + reserve) x input price +
+    max_tokens x output price``, with prices from the step the worst-case input falls into.
+
+    Bytes bound tokens from above (a token is at least one byte), so this never underestimates
+    the input; ``max_tokens`` includes thinking, so it covers the output.
+    """
+    input_tokens = len((system or "").encode("utf-8")) + len(prompt.encode("utf-8")) + framing_reserve_tokens
+    step = price_for(facts, input_tokens)
+    return (input_tokens * step.input_usd_per_mtok + max_tokens * step.output_usd_per_mtok) / 1_000_000
+
+
+def actual_cost_usd(facts: ModelFacts, usage: dict[str, int]) -> float:
+    """Cost of a finished call from its usage. Cache tokens count at the full input rate; thinking
+    is inside ``completion_tokens`` and is not added again."""
+    input_tokens = (
+        usage.get("prompt_tokens", 0)
+        + usage.get("cache_creation_input_tokens", 0)
+        + usage.get("cache_read_input_tokens", 0)
+    )
+    step = price_for(facts, input_tokens)
+    return (input_tokens * step.input_usd_per_mtok + usage.get("completion_tokens", 0) * step.output_usd_per_mtok) / (
+        1_000_000
+    )
 
 
 def prompt_payload(system: Optional[str], prompt: str) -> str:
@@ -56,10 +161,12 @@ def response_digest(content: str) -> str:
 
 
 class GovernedProvider(LLMProvider):
-    """An ``LLMProvider`` that logs every call of the wrapped adapter (see module docstring).
+    """An ``LLMProvider`` that caps, budgets and logs every call of the wrapped adapter.
 
     ``task_class`` and ``tier`` are plain strings until G5 types them. ``thinking`` and
     ``effort`` are the tier's settings, recorded as given (G5 supplies them from the catalog).
+    The adapter's model must be in the catalog (its prices price the call), else
+    ``LLMConfigError`` at construction.
     """
 
     def __init__(
@@ -73,6 +180,8 @@ class GovernedProvider(LLMProvider):
         clock: Optional[Clock] = None,
         thinking: Optional[str] = None,
         effort: Optional[str] = None,
+        budget: Optional[LLMBudgetConfig] = None,
+        catalog: Optional[Catalog] = None,
     ) -> None:
         self._task_class = task_class
         self._tier = tier
@@ -82,6 +191,8 @@ class GovernedProvider(LLMProvider):
         self._clock: Clock = clock or SystemClock()
         self._thinking = thinking
         self._effort = effort
+        self._budget = budget or LLMBudgetConfig()
+        self._facts = (catalog or load_catalog()).facts_for(adapter.model_name)
 
     @property
     def provider_name(self) -> str:
@@ -108,8 +219,24 @@ class GovernedProvider(LLMProvider):
         return self._tier
 
     def complete(self, request: LLMRequest) -> LLMResponse:
+        max_tokens = self._check_caps(request)
         call_id = uuid.uuid4().hex
-        ts_utc = self._clock.now_utc().isoformat()
+        now = self._clock.now_utc()
+        offset = self._budget.day_boundary_utc_offset
+        reservation = self._store.reserve(
+            call_id=call_id,
+            now_utc=now,
+            day_key=day_key_for(now, offset),
+            worst_usd=worst_case_usd(
+                self._facts, system=request.system, prompt=request.prompt, max_tokens=max_tokens
+            ),
+            ceiling_usd=self._budget.daily_usd_ceiling,
+            call_limit=self._budget.daily_call_limit,
+            skew_tolerance_s=CLOCK_SKEW_TOLERANCE_S,
+            prices_as_of=self._facts.prices_as_of,
+            resets_at_utc=resets_at_utc_for(now, offset),
+        )
+        ts_utc = now.isoformat()
         started = self._clock.monotonic()
         try:
             response = self._adapter.complete(request)
@@ -128,9 +255,12 @@ class GovernedProvider(LLMProvider):
                 content=None,
             )
             try:
-                self._store.append(record)
+                self._store.settle(reservation, record, None)  # the full reservation stays counted
             except LLMStoreError as store_exc:
                 raise store_exc from exc
+            raise
+        except (LLMConfigError, LLMCredentialError):
+            self._store.release(reservation)  # refused before a request left the process
             raise
         latency_ms = self._latency_ms(started)
         record = self._record(
@@ -143,8 +273,35 @@ class GovernedProvider(LLMProvider):
             request_id=response.request_id,
             content=response.content,
         )
-        self._store.append(record)  # LLMStoreError propagates: no unlogged answer is returned
+        actual = self._actual(response.usage, reservation.reserved_usd, call_id)
+        self._store.settle(reservation, record, actual)  # LLMStoreError propagates: no unlogged answer
         return dataclasses.replace(response, call_id=call_id)
+
+    def _check_caps(self, request: LLMRequest) -> int:
+        chars = len(request.system or "") + len(request.prompt)
+        if chars > self._budget.max_input_chars:
+            raise LLMInputTooLargeError(chars=chars, limit=self._budget.max_input_chars)
+        limit = self._budget.max_output_tokens
+        if request.max_tokens is None:
+            raise LLMConfigError("max_tokens is required (tier defaults arrive with slice G5).")
+        if not 1 <= request.max_tokens <= limit:
+            raise LLMConfigError(f"max_tokens {request.max_tokens} is outside 1..{limit} (thinking included).")
+        return request.max_tokens
+
+    def _actual(self, usage: dict[str, int], reserved_usd: float, call_id: str) -> Optional[float]:
+        if "prompt_tokens" not in usage and "completion_tokens" not in usage:
+            return None  # no usage reported: keep the reservation rather than count zero
+        actual = actual_cost_usd(self._facts, usage)
+        if actual > reserved_usd:
+            _log.warning(
+                "LLM cost overshoot: call_id=%s model=%s reserved=$%.6f actual=$%.6f "
+                "(the bytes-based estimate was too low; revisit ADR-0020)",
+                call_id,
+                self._adapter.model_name,
+                reserved_usd,
+                actual,
+            )
+        return actual
 
     def _latency_ms(self, started: float) -> int:
         return round((self._clock.monotonic() - started) * 1000)
