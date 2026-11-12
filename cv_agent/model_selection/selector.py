@@ -23,6 +23,7 @@ import json
 
 from cv_agent.knowledge.models import KnowledgeItem
 from cv_agent.llm.base import LLMProvider, LLMRequest
+from cv_agent.llm.policy import DataClass
 from cv_agent.model_selection.models import (
     CandidateComparison,
     ConflictNote,
@@ -283,6 +284,7 @@ def select_candidate(
             prompt=prompt,
             system=_SELECTION_SYSTEM,
             max_tokens=1024,
+            data_classes=frozenset({DataClass.PROJECT_DATA}),
         )
     )
 

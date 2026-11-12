@@ -26,6 +26,7 @@ import re
 from typing import Optional
 
 from cv_agent.llm.base import LLMProvider, LLMRequest
+from cv_agent.llm.policy import DataClass
 from cv_agent.requirements.models import (
     CapabilityLink,
     ClarificationQuestion,
@@ -295,7 +296,7 @@ class RequirementsAnalyzer:
             f"Candidate task components: {tasks}\n"
             f"Open questions: {len(clarifications)}\n"
         )
-        response = self._llm.complete(LLMRequest(prompt=prompt, max_tokens=1024))
+        response = self._llm.complete(LLMRequest(prompt=prompt, max_tokens=1024, data_classes=frozenset({DataClass.PROJECT_DATA})))
         return response.content
 
 

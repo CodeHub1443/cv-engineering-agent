@@ -1,12 +1,16 @@
 """
 cv_agent.llm.governed — GovernedProvider (ADR-0020 §3 items 5-6, slices G2 and G3).
 
-Responsibility: wrap one adapter so that every call is length-capped, budgeted, timed and
-logged exactly once, failing closed when the books cannot be written. Not here yet: privacy
-and data classes (G4); tier lookup, routing and config-file parsing (G5). It is not wired into
+Responsibility: wrap one adapter so that every call is privacy-checked, length-capped, budgeted,
+timed and logged exactly once, failing closed when the books cannot be written. Not here yet:
+tier lookup, routing and config-file parsing (G5). It is not wired into
 ``CVAgent`` or any call site, and it is never built for the mock provider.
 
 ``complete()`` runs, in order:
+0. privacy (G4): if ``hosted``, every declared data class (empty means ``{PROJECT_DATA}``) must be
+   in ``allowed_hosted`` else ``LLMDataClassNotAllowedError``. This runs before everything else:
+   no reservation, no budget row, no adapter call. A refusal is NOT written to ``llm_calls``,
+   deliberately: no call was sent, and the log records calls (ADR-0020 §3 item 6);
 1. input cap: ``len(system or "") + len(prompt) <= max_input_chars`` else ``LLMInputTooLargeError``;
 2. output cap: ``request.max_tokens`` is required and ``1 <= max_tokens <= max_output_tokens``
    (thinking included) else ``LLMConfigError``;
@@ -14,7 +18,7 @@ and data classes (G4); tier lookup, routing and config-file parsing (G5). It is 
    ``LLMBudgetExceededError``, ``LLMCallLimitError`` or ``LLMClockSkewError``, no network);
 4. the adapter call;
 5. settle: the reservation becomes the actual cost and one call row is written.
-Nothing in 1-3 touches the network, and none of their messages carries prompt text.
+Nothing in 0-3 touches the network, and none of their messages carries prompt text.
 
 Settling rules:
 - success: actual cost from usage (output price on ``completion_tokens``, which already
@@ -51,9 +55,11 @@ from cv_agent.llm.errors import (
     LLMCallError,
     LLMConfigError,
     LLMCredentialError,
+    LLMDataClassNotAllowedError,
     LLMInputTooLargeError,
     LLMStoreError,
 )
+from cv_agent.llm.policy import DEFAULT_HOSTED_ALLOWED, UNDECLARED_DATA_CLASSES, DataClass
 from cv_agent.llm.sqlite_store import CallRecord, LLMCallStore
 
 _log = logging.getLogger(__name__)
@@ -163,6 +169,9 @@ def response_digest(content: str) -> str:
 class GovernedProvider(LLMProvider):
     """An ``LLMProvider`` that caps, budgets and logs every call of the wrapped adapter.
 
+    ``hosted`` says whether the adapter sends data off this machine; it is required, so no caller
+    can forget the privacy question. When hosted, only ``allowed_hosted`` classes may be carried
+    (default: public web and project metadata; the owner widens it by a PR with a D-entry).
     ``task_class`` and ``tier`` are plain strings until G5 types them. ``thinking`` and
     ``effort`` are the tier's settings, recorded as given (G5 supplies them from the catalog).
     The adapter's model must be in the catalog (its prices price the call), else
@@ -172,6 +181,7 @@ class GovernedProvider(LLMProvider):
     def __init__(
         self,
         *,
+        hosted: bool,
         task_class: str,
         tier: str,
         adapter: LLMProvider,
@@ -182,7 +192,10 @@ class GovernedProvider(LLMProvider):
         effort: Optional[str] = None,
         budget: Optional[LLMBudgetConfig] = None,
         catalog: Optional[Catalog] = None,
+        allowed_hosted: frozenset[DataClass] = DEFAULT_HOSTED_ALLOWED,
     ) -> None:
+        self._hosted = hosted
+        self._allowed_hosted = allowed_hosted
         self._task_class = task_class
         self._tier = tier
         self._adapter = adapter
@@ -219,6 +232,7 @@ class GovernedProvider(LLMProvider):
         return self._tier
 
     def complete(self, request: LLMRequest) -> LLMResponse:
+        self._check_privacy(request)
         max_tokens = self._check_caps(request)
         call_id = uuid.uuid4().hex
         now = self._clock.now_utc()
@@ -276,6 +290,14 @@ class GovernedProvider(LLMProvider):
         actual = self._actual(response.usage, reservation.reserved_usd, call_id)
         self._store.settle(reservation, record, actual)  # LLMStoreError propagates: no unlogged answer
         return dataclasses.replace(response, call_id=call_id)
+
+    def _check_privacy(self, request: LLMRequest) -> None:
+        if not self._hosted:
+            return
+        declared = request.data_classes or UNDECLARED_DATA_CLASSES
+        blocked = declared - self._allowed_hosted
+        if blocked:
+            raise LLMDataClassNotAllowedError(self._task_class, self._tier, frozenset(blocked))
 
     def _check_caps(self, request: LLMRequest) -> int:
         chars = len(request.system or "") + len(request.prompt)

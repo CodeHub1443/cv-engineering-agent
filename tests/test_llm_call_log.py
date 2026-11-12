@@ -153,6 +153,7 @@ def _governed(
     clock: Optional[Clock] = None,
 ) -> GovernedProvider:
     return GovernedProvider(
+        hosted=False,
         task_class="narrative",
         tier="fast",
         adapter=adapter,

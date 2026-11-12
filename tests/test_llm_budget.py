@@ -121,6 +121,7 @@ def _governed(
     budget: Optional[LLMBudgetConfig] = None,
 ) -> GovernedProvider:
     return GovernedProvider(
+        hosted=False,
         task_class="extraction",
         tier="fast",
         adapter=adapter,

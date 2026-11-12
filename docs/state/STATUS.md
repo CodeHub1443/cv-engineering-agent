@@ -3,17 +3,18 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-11-12 · **Phase:** 5e/6 — ADR-0019 foundation on main (fake runtimes only); LLM gateway v2: G1 and G2 merged, G3 in flight. Annotation review paused (47/63).
-**Health:** Linux CI (#80, last measured): ruff clean, mypy ok, pytest 1893 passed / 26 skipped. Windows local after G3: the 31 known
-Linux-only failures (same on origin/main) and one Windows-only mypy `SIGKILL` error. Linux CI is authoritative; the G3 PR run replaces this.
+**Updated:** 2026-11-12 · **Phase:** 5e/6 — ADR-0019 foundation on main (fake runtimes only); LLM gateway v2: G1 to G3 merged, G4 in flight. Annotation review paused (47/63).
+**Health:** Linux CI is authoritative (the G4 PR run replaces the last measured #80: ruff clean, mypy ok, pytest 1893 passed /
+26 skipped). Windows local: the known Linux-only failures (same on origin/main) and one Windows-only mypy `SIGKILL` error.
 
 ## Where we are
 
-Baseline origin/main = 368aa9a (G2 merged, checked 2026-11-12). In flight: issue #93, slice **G3** on branch
-`feature/claude/93-llm-budget`: `catalog.toml` + `catalog.py` (model facts and prices), the `llm_budget` table (store schema
-version 2, `reserve` / `settle` / `release`), `LLMBudgetConfig` ($5.00/day, 100 calls/day, 24,000 input chars, 4,000 output
-tokens, UTC+06:00 day), `worst_case_usd`, and the checks in `GovernedProvider.complete` (input cap, output cap, reserve,
-adapter, settle + log); merged under D-090 once CI is green. `GovernedProvider` is wired nowhere. If this disagrees with
+Baseline origin/main = 928fee7 (G3 merged, checked 2026-11-12). In flight: issue #95, slice **G4** on branch
+`feature/claude/95-llm-privacy`: `cv_agent/llm/policy.py` (`TaskClass`, `DataClass`, default hosted allow-set),
+`LLMRequest.data_classes` (empty means `{PROJECT_DATA}`), `LLMDataClassNotAllowedError`, and the privacy check as step 0 of
+`GovernedProvider.complete` (required `hosted` flag, `allowed_hosted` default `{PUBLIC_WEB, PROJECT_METADATA}`); the three
+call sites declare their classes (research `{PUBLIC_WEB, PROJECT_METADATA}`, selector and analyzer narrative
+`{PROJECT_DATA}`). Merged under D-090 once CI is green. `GovernedProvider` is wired nowhere. If this disagrees with
 `git log origin/main`, trust git.
 
 **Ledger: 10 records, unchanged** (sha256 `9251eb0c…8fef8fa`, full value in JOURNAL).
@@ -23,7 +24,7 @@ adapter, settle + log); merged under D-090 once CI is green. `GovernedProvider` 
 $5/day, 100 calls/day, UTC+06:00 day, call log with `request_id`, default-deny privacy, thinking counted in the 4000-token
 cap. Hosted tiers: owner's Windows PC only (it alone holds the key). D-089 model choice (haiku-5-5 fast, opus-5-5 strong).
 D-090 merge permission in force. D-091: both PCs are measured CV hosts, no local LLM. Built: C2 credentials, G1 adapter v2, G2
-call log (merged); G3 budget and prices (this branch). The gateway still runs on the mock; nothing governs a real call until G5.
+call log, G3 budget and prices (merged); G4 privacy (this branch). The gateway still runs on the mock; nothing governs a real call until G5.
 
 **Done earlier:** EXP-20261004-01..04 (measurement only), failure analysis (#75), annotation-label review: see `docs/experiments/`.
 ADR-0019 training pipeline foundation (D-079, D-081, D-084): approval-gated job lifecycle, acceptance comparer; fake runtimes only.
@@ -46,10 +47,9 @@ ADR-0019 training pipeline foundation (D-079, D-081, D-084): approval-gated job 
 
 ## Next actions
 
-1. Finish slice **G3** (issue #93): CI green, then merge under D-090.
-2. Slice **G4** (privacy), then G5 (tiers, router, config parsing, `CVAgent` wiring) to G7, one issue each.
-3. Owner puts `CV_AGENT_ANTHROPIC_API_KEY` in the project `.env` on the Windows PC (never printed or committed) and runs
-   `cv-agent llm-log init` **only after G3 merges** (schema 2; an older version-1 file must be moved away first), before any
+1. Finish slice **G4** (issue #95): CI green, then merge under D-090.
+2. Slice **G5** (tiers, router, config parsing, `CVAgent` wiring) to G7, one issue each.
+3. Owner puts `CV_AGENT_ANTHROPIC_API_KEY` in the project `.env` on the Windows PC (never printed or committed) before any
    hosted call exists (G5 earliest). Nothing creates the store implicitly.
 
 ## Do not start yet
