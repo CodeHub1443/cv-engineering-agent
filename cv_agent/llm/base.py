@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from cv_agent.llm.payload import HostedPayload
 from cv_agent.llm.policy import DataClass
 
 
@@ -19,11 +20,13 @@ from cv_agent.llm.policy import DataClass
 class LLMRequest:
     """Input to an LLM completion call."""
 
-    prompt: str
-    system: Optional[str] = None
+    prompt: str = ""  # must stay "" when payload is set (ADR-0023 §3.2)
+    system: Optional[str] = None  # must stay None when payload is set
     max_tokens: Optional[int] = None  # None is legal here; adapters require an int
     # What the prompt carries (ADR-0020 §3 item 7). Empty is treated as {PROJECT_DATA}, the strictest.
+    # Must stay empty when payload is set: the payload decides the classes.
     data_classes: frozenset[DataClass] = frozenset()
+    payload: Optional[HostedPayload] = None  # a structured payload built by llm.payload.build_payload
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

@@ -1,6 +1,6 @@
 """Slice S1 acceptance tests: the structured hosted payload core.
 
-ADR-0023 §7.1 criteria 3 (PublicClaim unit cases) and 4; §7.2 S1; D-095; issues #105, #110.
+ADR-0023 §7.1 criteria 3 (PublicClaim unit cases), 4, 6, 7 and 9; §7.2 S1; D-095; issues #105, #110, #111.
 No network, no real key: every store lives under ``tmp_path``, every adapter is a fake.
 """
 
@@ -9,16 +9,31 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import sqlite3
 import textwrap
+from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 
 import pytest
 
 from cv_agent.knowledge.models import IngestPath, KnowledgeItem, Provenance
 from cv_agent.llm import payload as P
-from cv_agent.llm.errors import LLMPayloadMisuseError, PayloadFieldError
+from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
+from cv_agent.llm.catalog import load_catalog
+from cv_agent.llm.errors import (
+    LLMDataClassNotAllowedError,
+    LLMPayloadMisuseError,
+    LLMUnstructuredRequestError,
+    PayloadFieldError,
+)
+from cv_agent.llm.governed import GovernedProvider
+from cv_agent.llm.mock import FakeLLMProvider
+from cv_agent.llm.policy import DataClass
+from cv_agent.llm.sqlite_store import LLMCallStore
 
+PW, PM, PD = DataClass.PUBLIC_WEB, DataClass.PROJECT_METADATA, DataClass.PROJECT_DATA
 ER = P.ExclusionReason
 ALLOWED_MODULE = "cv_agent.requirements.structured"
 
@@ -411,3 +426,154 @@ def test_render_uses_the_constants_captured_at_registration(demo: dict[str, Any]
 def test_render_refuses_anything_but_an_issued_payload() -> None:
     with pytest.raises(LLMPayloadMisuseError):
         P.render(SimpleNamespace(schema_id="demo", schema_version=1, body_json="CANARY"))  # type: ignore[arg-type]
+
+
+# ── governed fixtures ────────────────────────────────────────────────────────
+
+
+class _Clock:
+    def now_utc(self) -> datetime:
+        return datetime(2026, 11, 12, 9, 30, tzinfo=timezone.utc)
+
+    def monotonic(self) -> float:
+        return 1.0
+
+
+class _Recorder(LLMProvider):
+    provider_name = "fakeprovider"  # type: ignore[assignment]
+    model_name = "claude-haiku-5-5"  # type: ignore[assignment]
+
+    def __init__(self) -> None:
+        self.requests: list[LLMRequest] = []
+
+    def complete(self, request: LLMRequest) -> LLMResponse:
+        self.requests.append(request)
+        return LLMResponse(
+            content="ok", model=self.model_name, provider="fakeprovider",
+            usage={"prompt_tokens": 10, "completion_tokens": 5}, stop_reason="end_turn",
+        )
+
+
+def _gov(
+    tmp_path: Path, task: str = "narrative", *, hosted: bool = True, allowed: Optional[frozenset[DataClass]] = None
+) -> tuple[GovernedProvider, _Recorder, Path]:
+    path = tmp_path / "llm_calls.sqlite"
+    LLMCallStore.initialise(path)
+    adapter = _Recorder()
+    kwargs = {} if allowed is None else {"allowed_hosted": allowed}
+    gov = GovernedProvider(
+        hosted=hosted, task_class=task, tier="fast", adapter=adapter, store=LLMCallStore(path),
+        clock=_Clock(), catalog=load_catalog(), **kwargs,
+    )
+    return gov, adapter, path
+
+
+def _rows(path: Path) -> tuple[int, int]:
+    conn = sqlite3.connect(path)
+    try:
+        return (
+            conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0],
+            conn.execute("SELECT COUNT(*) FROM llm_budget").fetchone()[0],
+        )
+    finally:
+        conn.close()
+
+
+# ── criterion 6: structured-only guard and misuse ────────────────────────────
+
+
+@pytest.mark.parametrize("task", ["selection", "narrative"])
+def test_hosted_structured_only_without_payload_is_refused_before_everything(tmp_path: Path, task: str) -> None:
+    gov, adapter, path = _gov(tmp_path, task)
+    req = LLMRequest(prompt="x" * 100_000, system="CANARY", max_tokens=100, data_classes=frozenset({PM}))
+    with pytest.raises(LLMUnstructuredRequestError) as info:
+        gov.complete(req)  # not LLMInputTooLargeError: the guard runs before the input cap
+    err = info.value
+    assert isinstance(err, LLMDataClassNotAllowedError)
+    assert err.blocked == frozenset({PD})
+    assert "structured payloads only" in str(err) and task in str(err) and "CANARY" not in str(err)
+    assert adapter.requests == [] and _rows(path) == (0, 0)  # no network, no reservation, no call row
+
+
+def test_extraction_and_unhosted_routes_keep_label_based_behaviour(tmp_path: Path) -> None:
+    (tmp_path / "b").mkdir()
+    gov, adapter, _ = _gov(tmp_path, "extraction")
+    gov.complete(LLMRequest(prompt="p", max_tokens=100, data_classes=frozenset({PW, PM})))
+    gov2, adapter2, _ = _gov(tmp_path / "b", "narrative", hosted=False)
+    gov2.complete(LLMRequest(prompt="p", max_tokens=100))
+    assert len(adapter.requests) == 1 and len(adapter2.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "extra", [{"prompt": "CANARY"}, {"system": "CANARY"}, {"data_classes": frozenset({PM})}]
+)
+def test_payload_plus_free_text_or_label_is_misuse(demo: dict[str, Any], tmp_path: Path, extra: dict[str, Any]) -> None:
+    gov, adapter, path = _gov(tmp_path)
+    req = LLMRequest(payload=P.build_payload(_inst(demo)), max_tokens=100, **extra)
+    with pytest.raises(LLMPayloadMisuseError) as info:
+        gov.complete(req)
+    assert "CANARY" not in str(info.value)
+    assert adapter.requests == [] and _rows(path) == (0, 0)
+
+
+@pytest.mark.parametrize("junk", ["CANARY-str", SimpleNamespace(task_class=None)])
+def test_a_non_payload_in_the_payload_slot_is_misuse(tmp_path: Path, junk: Any) -> None:
+    gov, adapter, path = _gov(tmp_path)
+    with pytest.raises(LLMPayloadMisuseError) as info:
+        gov.complete(LLMRequest(payload=junk, max_tokens=100))
+    assert "CANARY" not in str(info.value)
+    assert adapter.requests == [] and _rows(path) == (0, 0)
+
+
+def test_payload_task_class_must_match_the_route(demo: dict[str, Any], tmp_path: Path) -> None:
+    gov, adapter, path = _gov(tmp_path, "selection")  # the Demo payload is a NARRATIVE payload
+    with pytest.raises(LLMPayloadMisuseError):
+        gov.complete(LLMRequest(payload=P.build_payload(_inst(demo)), max_tokens=100))
+    assert adapter.requests == [] and _rows(path) == (0, 0)
+
+
+# ── criterion 7: data-class derivation ───────────────────────────────────────
+
+
+def test_derived_classes_ignore_the_caller(demo: dict[str, Any], tmp_path: Path) -> None:
+    gov, adapter, _ = _gov(tmp_path)
+    plain = P.build_payload(_inst(demo))
+    with_claim = P.build_payload(_inst(demo, claims=(_claim(),)))
+    assert plain.data_classes == frozenset({PM}) and with_claim.data_classes == frozenset({PM, PW})
+    gov.complete(LLMRequest(payload=plain, max_tokens=100))
+    gov.complete(LLMRequest(payload=with_claim, max_tokens=100))
+    assert [r.data_classes for r in adapter.requests] == [frozenset({PM}), frozenset({PM, PW})]
+    assert all(r.payload is None and r.prompt and r.system == "SYS" for r in adapter.requests)
+
+
+def test_privacy_is_checked_on_the_derived_classes(demo: dict[str, Any], tmp_path: Path) -> None:
+    gov, adapter, path = _gov(tmp_path, allowed=frozenset({PM}))
+    with pytest.raises(LLMDataClassNotAllowedError) as info:
+        gov.complete(LLMRequest(payload=P.build_payload(_inst(demo, claims=(_claim(),))), max_tokens=100))
+    assert info.value.blocked == frozenset({PW})
+    assert adapter.requests == [] and _rows(path) == (0, 0)
+
+
+def test_a_replaced_payload_cannot_narrow_the_classes(demo: dict[str, Any], tmp_path: Path) -> None:
+    gov, adapter, _ = _gov(tmp_path)
+    real = P.build_payload(_inst(demo, claims=(_claim(),)))
+    forged = dataclasses.replace(real, data_classes=frozenset({PM}))
+    with pytest.raises(LLMPayloadMisuseError):
+        gov.complete(LLMRequest(payload=forged, max_tokens=100))
+    assert adapter.requests == []
+
+
+# ── criterion 9: mock/offline parity ─────────────────────────────────────────
+
+
+def test_mock_and_hosted_receive_byte_identical_system_and_prompt(demo: dict[str, Any], tmp_path: Path) -> None:
+    payload = P.build_payload(_inst(demo, claims=(_claim(),)))
+    mock = FakeLLMProvider()
+    mock.complete(LLMRequest(payload=payload))
+    gov, adapter, _ = _gov(tmp_path)
+    gov.complete(LLMRequest(payload=payload, max_tokens=100))
+    seen = mock.last_request
+    assert seen is not None
+    expected = P.render(payload)
+    assert (seen.system, seen.prompt) == (adapter.requests[0].system, adapter.requests[0].prompt) == expected
+    assert (seen.system or "").encode("utf-8") == expected[0].encode("utf-8")

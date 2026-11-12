@@ -53,6 +53,21 @@ class LLMDataClassNotAllowedError(LLMError):
         self.blocked = blocked
 
 
+class LLMUnstructuredRequestError(LLMDataClassNotAllowedError):
+    """A hosted SELECTION or NARRATIVE request carried no payload (ADR-0023 §3.2 rule 1). Nothing was sent.
+
+    Free text on a structured-only route is a privacy refusal (it counts as ``PROJECT_DATA``), so this
+    subclasses the data-class error: existing privacy handlers keep catching it. Never carries prompt text.
+    """
+
+    def __init__(self, task_class: TaskClass, tier: str) -> None:
+        super().__init__(task_class, tier, frozenset({DataClass.PROJECT_DATA}))
+        self.args = (
+            f"LLM privacy refused: tier {tier!r} (task {task_class.value!r}) accepts structured payloads "
+            "only; nothing was sent.",
+        )
+
+
 class LLMPayloadMisuseError(LLMError):
     """A payload came with prompt, system or data classes, or was not issued by the builder, or does not
     match the route's task class. Raised before any reservation or network I/O; never carries payload text."""

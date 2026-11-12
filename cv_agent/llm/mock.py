@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
+from cv_agent.llm.payload import resolve_request
 
 
 class FakeLLMProvider(LLMProvider):
@@ -33,6 +34,7 @@ class FakeLLMProvider(LLMProvider):
         self._model = model
         self._fixed_response = fixed_response
         self._call_count: int = 0
+        self._last_request: Optional[LLMRequest] = None
 
     # ── LLMProvider interface ─────────────────────────────────────────────
 
@@ -45,6 +47,8 @@ class FakeLLMProvider(LLMProvider):
         return self._model
 
     def complete(self, request: LLMRequest) -> LLMResponse:
+        request = resolve_request(request)  # same render as the hosted path (ADR-0023 §3.2 rule 6)
+        self._last_request = request
         self._call_count += 1
         prompt_preview = request.prompt[:60].replace("\n", " ")
         content = (
@@ -67,6 +71,11 @@ class FakeLLMProvider(LLMProvider):
         )
 
     # ── Test helpers ──────────────────────────────────────────────────────
+
+    @property
+    def last_request(self) -> Optional[LLMRequest]:
+        """The last request as an adapter would see it (a payload already rendered)."""
+        return self._last_request
 
     @property
     def call_count(self) -> int:

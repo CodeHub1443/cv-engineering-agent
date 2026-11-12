@@ -7,6 +7,10 @@ routing and config parsing live in ``router`` and ``config.settings`` (G5): ``LL
 one of these per hosted route and never builds one for the mock provider.
 
 ``complete()`` runs, in order:
+-1. structured-only guard (ADR-0023 §3.2): a hosted SELECTION or NARRATIVE request with no payload
+   raises ``LLMUnstructuredRequestError``; a payload plus prompt/system/data classes, or for another
+   task class, raises ``LLMPayloadMisuseError``; otherwise the payload is rendered and its derived data
+   classes replace the caller's. All before the input cap, reservation or adapter; no call row;
 0. privacy (G4): if ``hosted``, every declared data class (empty means ``{PROJECT_DATA}``) must be
    in ``allowed_hosted`` else ``LLMDataClassNotAllowedError``. This runs before everything else:
    no reservation, no budget row, no adapter call. A refusal is NOT written to ``llm_calls``,
@@ -60,11 +64,14 @@ from cv_agent.llm.errors import (
     LLMDataClassNotAllowedError,
     LLMInputTooLargeError,
     LLMStoreError,
+    LLMUnstructuredRequestError,
 )
-from cv_agent.llm.policy import DEFAULT_HOSTED_ALLOWED, UNDECLARED_DATA_CLASSES, DataClass
+from cv_agent.llm.payload import STRUCTURED_ONLY, resolve_request
+from cv_agent.llm.policy import DEFAULT_HOSTED_ALLOWED, UNDECLARED_DATA_CLASSES, DataClass, TaskClass
 from cv_agent.llm.sqlite_store import CallRecord, LLMCallStore
 
 _log = logging.getLogger(__name__)
+_STRUCTURED_ONLY = frozenset(t.value for t in STRUCTURED_ONLY)
 
 FRAMING_RESERVE_TOKENS = 512
 CLOCK_SKEW_TOLERANCE_S = 300.0
@@ -208,6 +215,9 @@ class GovernedProvider(LLMProvider):
         return self._tier
 
     def complete(self, request: LLMRequest) -> LLMResponse:
+        if self._hosted and request.payload is None and self._task_class in _STRUCTURED_ONLY:
+            raise LLMUnstructuredRequestError(TaskClass(self._task_class), self._tier)
+        request = resolve_request(request, self._task_class)  # misuse, task mismatch, render, derive classes
         self._check_privacy(request)
         max_tokens = self._check_caps(request)
         if request.max_tokens != max_tokens:
