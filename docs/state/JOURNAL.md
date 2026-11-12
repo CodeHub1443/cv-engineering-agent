@@ -2358,3 +2358,11 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Found:** The brief's `git check-ignore -q .env .env.local` is rejected by git (`--quiet is only valid with a single pathname`, exit 128), so the test checks each path in turn. The local mypy error (`SIGKILL` on Windows) is the known Windows-only baseline.
 
 **Left open:** C2 (credentials implementation), ADR-0020 acceptance (Q50).
+
+## 2026-11-12 — LLM slice C2: project-scoped credential loader (feature/claude/87-llm-credentials, issue #87)
+
+**Did:** Implemented ADR-0021 §3 (D-088). New `cv_agent/llm/errors.py` (`LLMError`, `LLMCredentialError` only), `cv_agent/llm/credentials.py` (own `.env` parser, module-private mapping, `get_credential`, `load_project_env_file`, `searched_locations`, `_reset_for_tests`; `os.environ` is never written). `cv_agent/__main__.py` loads `<root>/.env` once before dispatch via `repository_state_root().parent`; an unresolvable root or missing file is recorded for the error message and never fails the CLI, a malformed or too-open `.env` exits 2. `AnthropicProvider` now calls `get_credential("CV_AGENT_ANTHROPIC_API_KEY")` and raises `LLMCredentialError` when the key is missing; nothing else in the adapter changed. Tests first: `tests/test_llm_credentials.py`, `tests/test_llm_structure.py`; `tests/test_llm_anthropic.py` moved to the new variable and error. New `tests/conftest.py` makes every test skip the real `.env` load (CLI tests would otherwise read the owner's file) and resets credential state.
+
+**Found:** The brief's structure check "ANTHROPIC_API_KEY only in credentials.py" is a substring trap, since `CV_AGENT_ANTHROPIC_API_KEY` contains it; the test uses a lookbehind so only the bare name counts. Added one function beyond ADR-0021 §5, `note_env_file_not_searched(reason)`, so the CLI can hand the "not searched: <reason>" text to the loader module. `AnthropicConfigError` is now unused but kept (ADR-0020 re-bases it in G1). Full suite on Windows: 31 failed (the known Linux-only baseline), 1915 passed; ruff clean; mypy shows only the known `SIGKILL` Windows error.
+
+**Left open:** ADR-0020 acceptance (Q50), then G1-G7. No LLM call, no key read, no GPU, ledger unchanged.

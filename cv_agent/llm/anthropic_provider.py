@@ -8,23 +8,25 @@ itself in cv_agent.llm.registry on import; the registry imports this module
 lazily, only when the "anthropic" provider name is actually requested, so no
 other module pays for this dependency by merely importing cv_agent.llm.
 
-Credentials: ANTHROPIC_API_KEY is read from the process environment, never
-from AgentConfig/TOML (docs/APPROVALS.md's data/privacy rule; CLAUDE.md's
-"no hard-coded API keys or secrets"). See ADR-0002.
+Credentials: CV_AGENT_ANTHROPIC_API_KEY, resolved by cv_agent.llm.credentials
+(process environment, then the project .env loaded by the CLI), never from
+AgentConfig/TOML (docs/APPROVALS.md's data/privacy rule; CLAUDE.md's "no
+hard-coded API keys or secrets"). The generic Anthropic variable is not read.
+See ADR-0021 (supersedes the credential paragraph of ADR-0002 §3).
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional
 
 import anthropic
 
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
+from cv_agent.llm.credentials import get_credential
 from cv_agent.llm.registry import register_provider
 
-_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
+_API_KEY_ENV_VAR = "CV_AGENT_ANTHROPIC_API_KEY"
 
 _logger = logging.getLogger(__name__)
 
@@ -44,8 +46,8 @@ class AnthropicProvider(LLMProvider):
     Args:
         model:       Anthropic model identifier (e.g. "claude-sonnet-5").
         api_key:     Explicit API key override. Not read from AgentConfig —
-                     the default (None) reads ANTHROPIC_API_KEY from the
-                     environment. Provided only for direct construction/tests.
+                     the default (None) resolves CV_AGENT_ANTHROPIC_API_KEY via
+                     cv_agent.llm.credentials. Provided only for direct construction/tests.
         client:      Pre-built client for dependency injection in tests. When
                      given, api_key/max_retries/timeout are ignored entirely
                      and no credential check is performed — the caller owns
@@ -54,9 +56,9 @@ class AnthropicProvider(LLMProvider):
         timeout:     Passed to anthropic.Anthropic() when no client is given.
 
     Raises:
-        AnthropicConfigError: no client was given and no API key is available
-            from either `api_key` or the ANTHROPIC_API_KEY environment
-            variable.
+        LLMCredentialError: no client was given, `api_key` is None and
+            CV_AGENT_ANTHROPIC_API_KEY is found neither in the process
+            environment nor in the loaded project .env (ADR-0021).
     """
 
     PROVIDER_NAME: str = "anthropic"
@@ -75,13 +77,7 @@ class AnthropicProvider(LLMProvider):
             self._client = client
             return
 
-        key = api_key if api_key is not None else os.environ.get(_API_KEY_ENV_VAR)
-        if not key:
-            raise AnthropicConfigError(
-                f"Anthropic provider requires an API key: set the {_API_KEY_ENV_VAR} "
-                "environment variable. Credentials are never read from AgentConfig "
-                "or a TOML config file (docs/APPROVALS.md)."
-            )
+        key = api_key if api_key is not None else get_credential(_API_KEY_ENV_VAR)
         self._client = anthropic.Anthropic(
             api_key=key, max_retries=max_retries, timeout=timeout
         )

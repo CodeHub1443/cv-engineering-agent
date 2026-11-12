@@ -844,6 +844,28 @@ def _cmd_workflow(
     return 0
 
 
+def _load_project_credentials() -> None:
+    """Load the project ``.env`` once, before dispatch (ADR-0021 §3.5). Never fails the CLI
+    for an unresolvable root; a bad ``.env`` (malformed, wrong permissions) is a loud error."""
+    from cv_agent.experiments.provenance import ProvenanceError, repository_state_root
+    from cv_agent.llm.credentials import load_project_env_file, note_env_file_not_searched
+    from cv_agent.llm.errors import LLMCredentialError
+
+    try:
+        env_path = repository_state_root().parent / ".env"
+    except ProvenanceError as exc:
+        note_env_file_not_searched(f"project root not resolvable ({exc})")
+        return
+    if not env_path.is_file():
+        note_env_file_not_searched(f"{env_path} does not exist")
+        return
+    try:
+        load_project_env_file(env_path)
+    except LLMCredentialError as exc:
+        print(f"CV Engineering Agent — credential file error\n  {exc}", file=sys.stderr)
+        raise SystemExit(2) from None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = ArgumentParser(prog="cv-agent", description="CV Engineering Agent CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -930,6 +952,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    _load_project_credentials()
 
     if args.command is None:
         return _health_check()

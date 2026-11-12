@@ -19,13 +19,13 @@ import pytest
 
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
 from cv_agent.llm.anthropic_provider import (
-    AnthropicConfigError,
     AnthropicProvider,
     AnthropicRequestError,
 )
+from cv_agent.llm.errors import LLMCredentialError
 from cv_agent.llm.registry import get_provider, list_providers
 
-_ENV_VAR = "ANTHROPIC_API_KEY"
+_ENV_VAR = "CV_AGENT_ANTHROPIC_API_KEY"
 
 
 # ── Fake Anthropic SDK objects (no network, no real types) ────────────────
@@ -99,7 +99,7 @@ class TestAnthropicProviderConstruction:
 
     def test_missing_api_key_raises_config_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(_ENV_VAR, raising=False)
-        with pytest.raises(AnthropicConfigError, match=_ENV_VAR):
+        with pytest.raises(LLMCredentialError, match=_ENV_VAR):
             AnthropicProvider("claude-sonnet-5")
 
     def test_explicit_api_key_overrides_missing_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -281,14 +281,14 @@ class TestAnthropicRegistryIntegration:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv(_ENV_VAR, raising=False)
-        with pytest.raises(AnthropicConfigError, match=_ENV_VAR):
+        with pytest.raises(LLMCredentialError, match=_ENV_VAR):
             get_provider("anthropic", "claude-sonnet-5")
 
     def test_no_automatic_fallback_to_mock_on_anthropic_failure(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv(_ENV_VAR, raising=False)
-        with pytest.raises(AnthropicConfigError):
+        with pytest.raises(LLMCredentialError):
             get_provider("anthropic", "claude-sonnet-5")
         # A failure to construct "anthropic" must not silently hand back a
         # mock/fake provider instead - the exception above is the entire
