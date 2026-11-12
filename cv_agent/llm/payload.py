@@ -25,17 +25,21 @@ import weakref
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, ClassVar, Literal, Mapping, Optional, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Mapping, Optional, Protocol, TypeVar
 from urllib.parse import urlsplit
 
 from cv_agent.knowledge.models import IngestPath, KnowledgeItem, Provenance, source_class_weight
 from cv_agent.llm.errors import LLMPayloadMisuseError, PayloadFieldError
 from cv_agent.llm.policy import DataClass, TaskClass
 
+if TYPE_CHECKING:
+    from cv_agent.llm.base import LLMRequest
+
 T = TypeVar("T")
 
 VocabOrigin = Literal["code", "packaged_resource"]
 SCHEMA_MODULES = frozenset({"cv_agent.requirements.structured", "cv_agent.model_selection.selection_payload"})
+STRUCTURED_ONLY: frozenset[TaskClass] = frozenset({TaskClass.SELECTION, TaskClass.NARRATIVE})
 # D-095: an explicit allowlist, not derived from SourceClass. professional_post and any new class are out.
 WEB_SOURCE_CLASSES: frozenset[str] = frozenset(
     {
@@ -431,3 +435,23 @@ def render(payload: HostedPayload) -> tuple[str, str]:
     if reg is None or reg.task_class is not payload.task_class:
         raise LLMPayloadMisuseError("payload was not issued by build_payload for a registered schema")
     return reg.system, f"{reg.instructions}\n\n{payload.body_json}"
+
+
+def resolve_request(request: "LLMRequest", task_class: Optional[str] = None) -> "LLMRequest":
+    """Turn a payload request into the plain ``(system, prompt, data_classes)`` request an adapter sees.
+
+    Shared by the governed provider and the mock, so both receive byte-identical text (§3.2 rule 6).
+    A request without a payload is returned unchanged. A payload with prompt, system or data classes,
+    or for another task class than the route's, is ``LLMPayloadMisuseError``.
+    """
+    payload = request.payload
+    if payload is None:
+        return request
+    if type(payload) is not HostedPayload:
+        raise LLMPayloadMisuseError("LLMRequest.payload must be a HostedPayload issued by build_payload")
+    if request.prompt or request.system or request.data_classes:
+        raise LLMPayloadMisuseError("a payload request must not also set prompt, system or data_classes")
+    if task_class is not None and payload.task_class.value != task_class:
+        raise LLMPayloadMisuseError(f"a {payload.task_class.value!r} payload was sent on a {task_class!r} route")
+    system, prompt = render(payload)
+    return dataclasses.replace(request, system=system, prompt=prompt, data_classes=payload.data_classes, payload=None)
