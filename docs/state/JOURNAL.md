@@ -2350,3 +2350,11 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** Anthropic's SDK has moved to 2.x (2.8.0 on 2026-11-10) and depends on `httpx2` (Q49). Ollama documents `keep_alive` on its native endpoints but not on `/v1` (Q46).
 
 **Left open:** ADR-0020 acceptance (Q50); Q34-Q36, Q38-Q44, Q46-Q49; Q32(a), (c), (d); Q27; Q31; Q33; M4 wording PR. Slices C1, C2, G1-G7, A1 each need their own issue. No LLM call, no key access, no GPU, ledger unchanged. `ruff`, `mypy`, `pytest` were not affected (docs only).
+
+## 2026-11-12 — LLM slice C1: ignore and deny rules for .env (feature/claude/85-env-ignore-deny, issue #85)
+
+**Did:** Confirmed PR #84 merged as a merge commit (20910cb). Added `.env` and `.env.*` to `.gitignore`, a committed `.claude/settings.json` denying `Read(./.env)` and `Read(./.env.*)`, and one secrets sentence folded into CLAUDE.md rule 8 (same two lines, CLAUDE.md stays 153 lines) and mirrored on AGENTS.md rule 8. New `tests/test_repo_hygiene.py`. Per ADR-0021 §3 items 9-11 and D-088. No `cv_agent/` code, no key access, no LLM call.
+
+**Found:** The brief's `git check-ignore -q .env .env.local` is rejected by git (`--quiet is only valid with a single pathname`, exit 128), so the test checks each path in turn. The local mypy error (`SIGKILL` on Windows) is the known Windows-only baseline.
+
+**Left open:** C2 (credentials implementation), ADR-0020 acceptance (Q50).

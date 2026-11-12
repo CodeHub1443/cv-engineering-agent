@@ -25,7 +25,7 @@ normative statement. Never edit or summarize it. Gaps go to
 5. Reproducibility — full experiment metadata or the result is void `[P§25]`.
 6. Boundary test — every module answers "what does this own, and why not elsewhere?" `[P§34]`.
 7. No layer leakage between reasoning / orchestration / knowledge / execution `[P§19]`–`[P§22]`.
-8. No provider specifics outside the LLM gateway `[P§20]`.
+8. No provider specifics outside the LLM gateway `[P§20]`. Never read, print, log or commit `.env`, `.env.*` or any API key (ADR-0021).
 9. Don't reinvent existing NVIDIA/CUDA/vendor expertise — discover and invoke `[P§15]`.
 10. Human approval for expensive, destructive, irreversible, or production-affecting
     actions, per `docs/APPROVALS.md` `[P§24]`.

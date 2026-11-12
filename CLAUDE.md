@@ -71,8 +71,8 @@ quietly and do not work around them.
    so instead of writing the code.
 7. **No layer leakage.** Reasoning, orchestration, knowledge, and execution stay
    separate `[P§19]`, `[P§21]`, `[P§22]`. See `docs/architecture/OVERVIEW.md`.
-8. **Provider agnosticism.** No LLM provider name, SDK, or model string outside the LLM
-   gateway `[P§20]`.
+8. **Provider agnosticism and secrets.** No LLM provider name, SDK, or model string outside the
+   LLM gateway `[P§20]`. Never read, print, log or commit `.env`, `.env.*` or any API key (ADR-0021).
 9. **Don't reinvent.** Discover and invoke existing NVIDIA skills, CUDA agent, TAO,
    TensorRT, DeepStream tooling rather than reimplementing their knowledge `[P§15]`,
    `[P§29.9]`.
