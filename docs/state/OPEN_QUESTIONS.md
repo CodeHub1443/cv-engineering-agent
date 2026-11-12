@@ -39,6 +39,7 @@ mutation scope)? `docs/APPROVALS.md` has placeholders. `[P§24]` — **Narrow ex
 added 2026-09-28 (owner decision, D-047):** the *first* V1 baseline run is exempt from
 needing a cost/spend estimate before execution (the normal approval gate/interrupt
 still applies); this does not set any threshold value and Q6 itself remains open.
+**Annotation 2026-11-12 (owner answer Q-S, issue #83):** for *LLM API calls only*, spend within the ADR-0020 daily ceiling ($5 per day, whole agent) is pre-authorized and spend above it is refused, not escalated. This sets no threshold for GPU-hours, other spend or dataset operations; Q6 itself remains open.
 
 ~~**Q16.** What is the persistence backend for the experiment ledger (`docs/state/
 EXPERIMENTS.md`)? Files, SQLite, or a service? — split off from the former Q8
@@ -396,3 +397,39 @@ delta sizes on this dataset; (d) whether "improve" means >= the delta or any pos
 Until answered, issue #76 encodes the thresholds as provisional-labelled configuration. Owner: Tanvir.
 
 **Q33. (2026-11-04) Should training and acceptance identifiers be typed identities rather than free strings?** `[P§32]` Review finding L3 on ADR-0019: `TrainingJobRequest` and `TrainingApproval` carry `experiment_id`, `approval_ref`, `scope`, `model`, `precision`, `dataset_version` and `hardware_target` as validated strings, and `evaluate_candidate(variable_under_test=...)` takes a string. CLAUDE.md §8 says registries hold typed identities, not free strings. Which identities become types, and which registry owns them, changes state shape and is not decided here. **Until decided:** strings stay format-validated where a format exists (EXP ids, 40-hex SHA). Owner: Tanvir.
+
+**Q34. (2026-11-12) Should `LLMRequest.temperature` be removed, or kept as an ignored field? (Q-I)** `[P§20]` Opus 5.5 rejects it (live check L-1) and the docs say to omit it. Removal touches `research.py:266`, `selector.py:286` and the temperature assertions in `tests/test_llm_anthropic.py` and `tests/test_llm_mock.py`. *Safe default:* remove it in slice G1. Real adapters never send it either way. ADR-0020 §3.9 assumes removal. Owner: Tanvir.
+
+**Q35. (2026-11-12) When `stop_reason` is `max_tokens` and some text exists, raise or return the partial text with a flag? (Q-J)** `[P§20]` Call sites parse JSON, so partial text is a silent defect. *Safe default:* raise `LLMTruncatedError`. Owner: Tanvir.
+
+**Q36. (2026-11-12) Adapter `max_retries`: 0 or 2? (Q-K)** The current adapter uses 2. With retries one `complete()` can be several HTTP attempts, which blurs the one-row-per-call log and the one-reservation budget. *Safe default:* 0 (fail closed, D3). Owner: Tanvir.
+
+~~**Q37. (2026-11-12) Add the provider request ID to the call log beyond the D4 field list? (Q-L)** *Safe default:* no, keep exactly D4; the ID stays in `LLMResponse`. Adding it helps provider support. Owner: Tanvir.~~ — **Answered 2026-11-12 (owner, issue #83):** yes, the provider `request_id` is added to the call log (the D4 fields plus `request_id`). See ADR-0020 §5.1 (Q-L).
+
+**Q38. (2026-11-12) How does an experiment record reference LLM calls? (Q-M)** `[P§25]` Option 1: a `llm_call_ids=...` token in the existing `notes` field. Option 2: a typed field, which needs an ADR-0011 amendment and a change to both `docs/state/EXPERIMENTS.md` and `cv_agent/experiments/models.py`. *Safe default:* option 1 now. Owner: Tanvir.
+
+**Q39. (2026-11-12) Which tier for the NARRATIVE task class? (Q-N)** Recommended `fast` (short prose over computed fields, never a source of fact, D-011). It stays `offline` until `PROJECT_DATA` is allowed (see Q40). *Safe default:* `fast`. Owner: Tanvir.
+
+**Q40. (2026-11-12) Selector and analyzer send free-text project data. Allow `PROJECT_DATA` for hosted tiers, or restructure the prompts? (Q-O)** `[P§24]` `select_candidate` sends `task_description` (`selector.py:273-274`) and the analyzer narrative sends the raw request (`analyzer.py:292`). Under default-deny the strong tier and the NARRATIVE route have no permitted production use until this is answered (ADR-0020 §3.1). *Safe default:* keep `PROJECT_DATA` blocked and restructure the selector prompt to structured fields later. Owner: Tanvir.
+
+**Q41. (2026-11-12) Open an issue for a user-facing research entry point? (Q-P)** `perform_research` has no production caller, so D9 (research extraction on the fast tier) can only be proven at config and test level. *Safe default:* a separate issue after slice G7. Owner: Tanvir.
+
+**Q42. (2026-11-12) Missing call-log store: explicit `cv-agent llm-log init`, or auto-create on first use? (Q-Q)** Auto-create would let a deleted file silently reset the day's spend. *Safe default:* explicit init, fail closed. Owner: Tanvir.
+
+**Q43. (2026-11-12) Call-log retention: keep forever, or prune after N days? (Q-T)** About 36,500 small rows per year at the call limit. *Safe default:* keep, append-only, no pruning. Owner: Tanvir.
+
+**Q44. (2026-11-12) Where is the project `.env` looked up: main checkout root (shared by worktrees) or the current directory? (Q-U)** ADR-0021 §3 item 2 assumes the main checkout root. *Safe default:* main checkout root. Owner: Tanvir.
+
+~~**Q45. (2026-11-12) Which machine hosts measured CV runs, and which GPU is it? (Q-V)** The brief names the Windows RTX 3050; the experiment ledger records measured runs on a Linux host with an RTX 3060 12 GB (`docs/state/EXPERIMENTS.md`). A future local LLM tier must never use a measured-run GPU (D1, D-074, ADR-0018 §6). **Not answered at the time of writing** (the owner's answer was left blank in the D0 instruction). *Safe default:* treat both GPUs as measured hosts; any local tier is CPU-only. Owner: Tanvir.~~ — **Answered 2026-11-12 (owner, issue #83):** both PCs (Windows RTX 3050 and Linux RTX 3060) are measured CV hosts and no LLM runs locally on either; the local tier and ADR-0022 stay plan-only, and if ever enabled must not use either GPU (D1, D-074). Recorded as D-091 (Q-V).
+
+**Q46. (2026-11-12) Second adapter dialects: Ollama native only for `keep_alive: 0`, or also `/v1`? (Q-W)** Ollama documents `keep_alive` on `/api/chat` and `/api/generate` but not on `/v1/chat/completions` (docs.ollama.com, retrieved 2026-11-12). The httpx-versus-openai-SDK choice belongs to ADR-0022. *Safe default:* both dialects, native for Ollama. Owner: Tanvir.
+
+**Q47. (2026-11-12) Provider-name strings outside the gateway (`CLAUDE.md` §3.8): what to do with the borderline hits?** `cv_agent/graph/state.py:40` (docstring "e.g. 'mock', 'anthropic'"); commented examples at `config/default.toml:8-9` and `cv_agent/resources/config/default.toml:8-9` (obsolete once `overrides` is deleted in slice G5); `cv_agent/resources/spec/capability_registry.json:1163-1170` ("claude-code", "OpenAI Codex" worker-runtime identities, not LLM-gateway use). *Safe default:* reword the docstring and remove the TOML examples in G5; leave the capability registry entries and ask whether §3.8 covers them. Owner: Tanvir.
+
+**Q48. (2026-11-12) The canon exists in three copies. Which to keep?** `docs/PROJECT.md` and the root `CV Engineering Agent.md` are byte-identical (1716 lines); `docs/archive/PROJECT_SOURCE_DRAFT.md` differs (1721 lines). `docs/PROJECT.md` is frozen. *Safe default:* change nothing; owner decides whether the root copy stays or is marked as a mirror. Owner: Tanvir.
+
+**Q49. (2026-11-12) The `anthropic>=0.40,<1` SDK pin: move to a newer major?** PyPI shows 1.0.0 (2026-08-20), 2.0.0 (2026-10-21) and 2.8.0 (2026-11-10, retrieved 2026-11-12); 2.x depends on `httpx2`, not `httpx`. Breaking changes are not reviewed. *Safe default:* slice G1 raises the lower bound to 0.125 and keeps `<1`; a 2.x upgrade is its own issue after a changelog review. Owner: Tanvir.
+
+**Q50. (2026-11-12) Does the owner accept ADR-0020 (LLM gateway v2, Proposed)?** The gateway-v2 D-entry waits for acceptance. Slices G1 to G7 need it; C1 and C2 need only ADR-0021 (Accepted). *Safe default:* hold until the owner has reviewed ADR-0020. Owner: Tanvir.
+
+~~**Q51. (2026-11-12) Design questions Q-A to Q-H, Q-R and Q-S of the LLM gateway v2 design.**~~ — **Answered 2026-11-12 (owner, issue #83), as recommended in the design report:** Q-A daily limit of 100 calls; Q-B at most 24,000 input characters per call; Q-C hosted tiers may receive `PUBLIC_WEB` and `PROJECT_METADATA` only (`PROJECT_DATA` blocked); Q-D delete `LLMConfig.overrides` (and `provider`/`model`) for typed tiers; Q-E accept ADR-0021 first and hold ADR-0020 until reviewed; Q-F the day boundary is calendar day at UTC+06:00; Q-G hosted tiers are used from one machine only, the owner's Windows PC, the only machine holding the project `.env` key, and on any other machine hosted calls fail closed with `LLMCredentialError` (so the $5 per day ceiling is the true whole-agent ceiling); Q-H tiers, model facts and prices live in the gateway-owned `cv_agent/llm/catalog.toml`; Q-R the credential rule is folded into an existing `CLAUDE.md` §3 line with no net line growth (slice C1); Q-S the ADR-0020 daily ceiling counts as the LLM-spend threshold (pre-authorized within, refused above), see the Q6 annotation. Q-L and Q-V are answered under Q37 and Q45. *Does NOT decide:* ADR-0020 acceptance (Q50) or any other open question.
