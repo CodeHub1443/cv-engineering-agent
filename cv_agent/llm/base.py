@@ -19,8 +19,7 @@ class LLMRequest:
 
     prompt: str
     system: Optional[str] = None
-    max_tokens: int = 1024
-    temperature: float = 0.0
+    max_tokens: Optional[int] = None  # None is legal here; adapters require an int
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -34,6 +33,9 @@ class LLMResponse:
     # Token counts — providers may return 0 if not available
     usage: dict[str, int] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    stop_reason: Optional[str] = None
+    request_id: Optional[str] = None  # the provider's request ID, when it gave one
+    call_id: Optional[str] = None  # set by the governed provider (G4), never by an adapter
 
 
 class LLMProvider(ABC):
@@ -63,6 +65,16 @@ class LLMProvider(ABC):
         Implementations must be synchronous.  Async support will be
         added in a later step when streaming is required.
         """
+
+    @property
+    def adapter_version(self) -> Optional[str]:
+        """Adapter contract version (e.g. 'anthropic/2'); None when not applicable."""
+        return None
+
+    @property
+    def sdk_version(self) -> Optional[str]:
+        """Version of the provider SDK in use; None when not applicable."""
+        return None
 
     def __repr__(self) -> str:
         return (

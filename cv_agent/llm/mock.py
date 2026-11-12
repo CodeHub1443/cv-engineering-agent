@@ -63,6 +63,7 @@ class FakeLLMProvider(LLMProvider):
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
             },
+            stop_reason="end_turn",
         )
 
     # ── Test helpers ──────────────────────────────────────────────────────

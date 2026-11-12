@@ -1,11 +1,12 @@
 # ADR-0020: LLM gateway v2 — task routing, daily budget, length cap, privacy, call log
 
-- **Status:** Proposed
+- **Status:** Accepted, accepted by owner (2026-11-12)
 - **Date:** 2026-11-12
 - **Layer:** reasoning (LLM Gateway)
 - **Canon:** `[P§19]`, `[P§20]`, `[P§24]`, `[P§25]`, `[P§29.8]`, `[P§34]`
 - **Supersedes / Superseded by:** amends [ADR-0002](ADR-0002-llm-gateway.md) (§3 "single configured model"; §5 "`LLMRequest`/`LLMResponse` unchanged"; §6 "no call/iteration budget"). On acceptance it supersedes D-033(2)'s "unchanged interfaces" clause. The model choice (D-033(3), D-034) is superseded by owner decision D-089, not by this ADR. The credential source (D-033(5)) is superseded by [ADR-0021](ADR-0021-llm-credential-source.md). D-033(4) (no automatic fallback) and D-033(6) (mock default) are **kept**.
 - **Issue:** #83
+- **Acceptance (2026-11-12, owner; issue #89):** accepted with the safe defaults of the previously open questions: Q34 `LLMRequest.temperature` is removed; Q35 a `max_tokens` stop raises `LLMTruncatedError` even when some text exists; Q36 the adapter uses `max_retries=0`; Q42 the call-log store is created only by an explicit `cv-agent llm-log init` and a missing store fails closed (implemented in G2); Q43 the call log is kept, append-only, with no pruning; Q44 the project `.env` is looked up at the main checkout root (already implemented in C2). Recorded as D-092.
 
 ## 1. Context
 
