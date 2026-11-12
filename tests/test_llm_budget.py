@@ -599,9 +599,9 @@ def test_two_processes_racing_near_the_ceiling_never_both_pass(tmp_path: Path) -
 # ── Schema v2 ────────────────────────────────────────────────────────────────
 
 
-def test_schema_version_is_2_with_an_llm_budget_table(tmp_path: Path) -> None:
+def test_schema_version_is_3_with_an_llm_budget_table(tmp_path: Path) -> None:
     store = _store(tmp_path)
-    assert SCHEMA_VERSION == "2"
+    assert SCHEMA_VERSION == "3"
     conn = sqlite3.connect(store.path)
     try:
         tables = {
@@ -616,7 +616,7 @@ def test_schema_version_is_2_with_an_llm_budget_table(tmp_path: Path) -> None:
         conn.close()
     assert tables == {"llm_calls", "llm_budget", "meta"}
     assert columns == ["call_id", "day_key", "ts_utc", "reserved_usd", "spent_usd", "settled", "prices_as_of"]
-    assert version == ("2",)
+    assert version == ("3",)
 
 
 def test_a_version_1_store_is_refused_with_a_re_init_hint_and_not_migrated(tmp_path: Path) -> None:
