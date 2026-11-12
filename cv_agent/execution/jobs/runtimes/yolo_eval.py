@@ -63,7 +63,7 @@ RUNTIME_ID = _LINUX_NVIDIA_RUNTIME_ID
 DEFAULT_MODEL = "yolo11n.pt"
 # Q28 (owner-accepted 2026-10-04, D-067): mAP is computed at the standard ultralytics
 # validation threshold so the PR curve is not truncated. The fixed-threshold operating
-# point is NOT chosen here (Q30 is open); see scripts/run_fixed_threshold_strata.py.
+# point (D-077: conf 0.25) is NOT chosen here (Q30); see scripts/run_fixed_threshold_strata.py.
 DEFAULT_CONF = 0.001
 DEFAULT_IMGSZ = 640
 DEFAULT_CLASSES = [0]  # COCO class 0 = person
