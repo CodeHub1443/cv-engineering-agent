@@ -2414,3 +2414,15 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Found:** The credential no-op fixture only patches the CLI loader, so the live test calls `load_project_env_file` itself and resets credential state in a `finally`. The live test was not run and `CV_AGENT_LIVE_LLM` was not set by the agent.
 
 **Left open:** G7; Q38-Q41, Q46-Q49. The owner runs the live test once on the Windows PC after `cv-agent llm-log init`. No LLM call, no key read, no GPU, ledger unchanged.
+
+
+## 2026-11-12 — LLM slice G7: research extraction on the fast tier, behind config (feature/claude/101-llm-research-fast, issue #101)
+
+**Did:** G6 confirmed merged (a8e61b9 on origin/main). Owner live test passed on 2026-11-12 through the governed fast tier: stop `end_turn`, in=55, out=4, settled $0.000008, one call-log row (recorded as reported by the owner; the agent did not run it). Implemented ADR-0020 slice G7 under D-089/D-092: `claim_query_from(topic_tags, model_names, metric)` in `cv_agent/graph/research.py` accepts only single identifier tokens (no spaces, newlines or sentences, 64 chars max) and raises `ValueError` on anything else; `perform_research` takes an optional `router` (exactly one of `llm_provider` or `router`; the router path resolves `router.for_task(TaskClass.EXTRACTION)` after a successful fetch). The shipped default stays `extraction = "offline"`. One more `live_llm` test runs `perform_research` over a fake fetch and the fast tier (not run by the agent).
+
+**Behaviour chosen for provider failures:** an `LLMCallError` after the send (truncation, refusal, empty answer, unexpected stop, request failure) becomes `failed_extraction`, nothing is stored, and `error_message` carries only the exception type, stop reason and `call_id` (never model text). Privacy, budget, credential and store errors still propagate: they are policy or setup failures, not a bad page. Before this slice a provider exception crashed the whole run.
+
+**Found:** the extraction request already declared `{PUBLIC_WEB, PROJECT_METADATA}` with `max_tokens=512`; its prompt holds the claim query, the URL and fetched text only (tests now pin this). `ResearchRequest.claim_query` remains a free string for existing callers; `claim_query_from` is the safe builder, and a user-facing entry point that must use it is Q41.
+
+**Left open:** Q41 (user-facing research command, separate issue); Q38-Q40, Q46-Q49. No key read, no GPU, ledger unchanged.
+

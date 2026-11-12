@@ -20,6 +20,7 @@ executor and models needed to call ToolExecutor.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal
@@ -32,7 +33,9 @@ from cv_agent.knowledge.models import (
 )
 from cv_agent.knowledge.store import KnowledgeStore
 from cv_agent.llm.base import LLMProvider, LLMRequest
-from cv_agent.llm.policy import DataClass
+from cv_agent.llm.errors import LLMCallError
+from cv_agent.llm.policy import DataClass, TaskClass
+from cv_agent.llm.router import LLMRouter
 from cv_agent.tools.executor import ToolExecutor
 from cv_agent.tools.models import ToolId, ToolRequest
 
@@ -160,6 +163,33 @@ Source URL: {url}
 ---"""
 
 
+_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/+:-]{0,63}")
+
+
+def _token(value: str, what: str) -> str:
+    if not isinstance(value, str) or _TOKEN.fullmatch(value) is None:
+        raise ValueError(
+            f"{what} must be a single identifier token (letters, digits, . _ / + : -; no spaces, "
+            f"at most 64 characters), got {value!r}: free text is never allowed in a research query."
+        )
+    return value
+
+
+def claim_query_from(topic_tags: tuple[str, ...], model_names: tuple[str, ...], metric: str) -> str:
+    """Build the claim query only from structured fields (ADR-0020 G7, Q40 default-deny).
+
+    Each field must be a single identifier token; anything resembling free text (a task
+    description, a sentence, a newline) raises ``ValueError``. The query is what reaches a
+    hosted tier next to fetched public text, so it may name topics, models and a metric, nothing else.
+    """
+    if not topic_tags:
+        raise ValueError("topic_tags must not be empty.")
+    tags = ", ".join(_token(t, "topic tag") for t in topic_tags)
+    models = ", ".join(_token(m, "model name") for m in model_names)
+    subject = f" for {models}" if models else ""
+    return f"the {_token(metric, 'metric')} reported{subject} (topics: {tags})"
+
+
 def _truncate_for_llm(text: str) -> str:
     if len(text) <= MAX_CONTENT_FOR_LLM:
         return text
@@ -214,7 +244,8 @@ def perform_research(
     request: ResearchRequest,
     *,
     tool_executor: ToolExecutor,
-    llm_provider: LLMProvider,
+    llm_provider: LLMProvider | None = None,
+    router: LLMRouter | None = None,
     knowledge_store: KnowledgeStore,
 ) -> ResearchResult:
     """
@@ -229,7 +260,14 @@ def perform_research(
     - KnowledgeStore receives only fully-validated KnowledgeItems.
 
     Fail-closed: any non-"stored" result means nothing was written.
+
+    Give exactly one of ``llm_provider`` (used as is) or ``router`` (the provider is
+    ``router.for_task(TaskClass.EXTRACTION)``, resolved only once the fetch has succeeded).
+    A ``LLMCallError`` after the send (truncation, refusal, empty or unexpected stop, request
+    failure) is a ``failed_extraction``; privacy, budget, credential and store errors propagate.
     """
+    if (llm_provider is None) == (router is None):
+        raise ValueError("perform_research needs exactly one of llm_provider or router.")
 
     # 1. Acquire raw content via ToolExecutor — never bypass the boundary
     inputs: dict = {"url": request.url}
@@ -255,18 +293,30 @@ def perform_research(
     date_accessed: str = _date_accessed_from_timestamp(output.get("date_accessed") or "")
 
     # 2. LLM reasoning — extract structured evidence from raw content
-    llm_response = llm_provider.complete(
-        LLMRequest(
-            prompt=_EXTRACTION_PROMPT.format(
-                claim_query=request.claim_query,
-                url=final_url,
-                content_text=_truncate_for_llm(content_text),
-            ),
-            system=_EXTRACTION_SYSTEM,
-            max_tokens=512,
-            data_classes=frozenset({DataClass.PUBLIC_WEB, DataClass.PROJECT_METADATA}),
+    provider = llm_provider if llm_provider is not None else router.for_task(TaskClass.EXTRACTION)  # type: ignore[union-attr]
+    try:
+        llm_response = provider.complete(
+            LLMRequest(
+                prompt=_EXTRACTION_PROMPT.format(
+                    claim_query=request.claim_query,
+                    url=final_url,
+                    content_text=_truncate_for_llm(content_text),
+                ),
+                system=_EXTRACTION_SYSTEM,
+                max_tokens=512,
+                data_classes=frozenset({DataClass.PUBLIC_WEB, DataClass.PROJECT_METADATA}),
+            )
         )
-    )
+    except LLMCallError as exc:  # diagnostics only: type, stop reason, call id; never model text
+        return ResearchResult(
+            status="failed_extraction",
+            item_id=str(request.item_id),
+            url=final_url,
+            error_message=(
+                f"LLM call failed after send: {type(exc).__name__} "
+                f"(stop_reason={exc.stop_reason!r}, call_id={exc.call_id!r})."
+            ),
+        )
 
     extracted = _extract_json(llm_response.content)
     if extracted is None:
