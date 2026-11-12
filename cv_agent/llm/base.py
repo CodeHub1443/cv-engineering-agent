@@ -76,6 +76,16 @@ class LLMProvider(ABC):
         """Version of the provider SDK in use; None when not applicable."""
         return None
 
+    @property
+    def local_model_digest(self) -> Optional[str]:
+        """Digest of a locally served model; None for hosted providers."""
+        return None
+
+    @property
+    def local_quantization(self) -> Optional[str]:
+        """Quantization of a locally served model; None for hosted providers."""
+        return None
+
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("

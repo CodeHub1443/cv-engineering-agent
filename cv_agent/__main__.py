@@ -13,6 +13,8 @@ Usage:
                                             execution-input recovery, with real answers
                                             (--answer, --input, --approve/--reject, or
                                             interactive stdin — never a fabricated one)
+    python -m cv_agent llm-log init        create the LLM call log (<state root>/llm_calls.sqlite);
+                                            refuses when it already exists
     cv-agent ...                           (when installed via pip)
 """
 
@@ -844,6 +846,31 @@ def _cmd_workflow(
     return 0
 
 
+def _cmd_llm_log_init() -> int:
+    """Create the LLM call log under the repository state root (ADR-0020, Q42). Explicit only:
+    nothing else ever creates it. Exit 0 created, 1 already exists, 2 cannot be created."""
+    from cv_agent.experiments.provenance import ProvenanceError, repository_state_root
+    from cv_agent.llm.errors import LLMStoreError
+    from cv_agent.llm.sqlite_store import LLM_CALLS_FILENAME, LLMCallStore
+
+    header = "CV Engineering Agent - LLM call log"
+    try:
+        target = repository_state_root() / LLM_CALLS_FILENAME
+    except ProvenanceError as exc:
+        print(f"{header}: cannot locate the state root\n  {exc}", file=sys.stderr)
+        return 2
+    if target.exists():
+        print(f"{header}: already exists, left untouched\n  {target}", file=sys.stderr)
+        return 1
+    try:
+        LLMCallStore.initialise(target)
+    except LLMStoreError as exc:
+        print(f"{header}: not created\n  {exc}", file=sys.stderr)
+        return 2
+    print(f"{header}: created\n  {target}")
+    return 0
+
+
 def _load_project_credentials() -> None:
     """Load the project ``.env`` once, before dispatch (ADR-0021 §3.5). Never fails the CLI
     for an unresolvable root; a bad ``.env`` (malformed, wrong permissions) is a loud error."""
@@ -951,6 +978,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Pre-supply a 'rejected' decision for an approval_gate interrupt.",
     )
 
+    llm_log_parser = subparsers.add_parser("llm-log", help="Manage the LLM call log.")
+    llm_log_sub = llm_log_parser.add_subparsers(dest="llm_log_command", required=True)
+    llm_log_sub.add_parser(
+        "init", help="Create the LLM call log under the state root; refuses if it exists."
+    )
+
     args = parser.parse_args(argv)
     _load_project_credentials()
 
@@ -983,6 +1016,9 @@ def main(argv: list[str] | None = None) -> int:
             approve=args.approve,
             reject=args.reject,
         )
+
+    if args.command == "llm-log":
+        return _cmd_llm_log_init()
 
     parser.error(f"unrecognized command: {args.command}")  # pragma: no cover
     return 2

@@ -3,8 +3,8 @@ cv_agent.llm.errors — exception types for the LLM gateway.
 
 Responsibility: name the gateway's failure modes so callers can catch them without
 importing a provider module. Credential failures come from ADR-0021; configuration and
-after-send call failures from ADR-0020 slice G1. Store, budget, privacy and clock errors
-arrive with their own slices (G2 onward).
+after-send call failures from ADR-0020 slice G1, the call-log store failure from G2. Budget,
+privacy and clock-skew errors arrive with their own slices (G3 onward).
 """
 
 from __future__ import annotations
@@ -22,6 +22,13 @@ class LLMCredentialError(LLMError):
 
 class LLMConfigError(LLMError):
     """An adapter or gateway setting is invalid. Raised before any request is sent."""
+
+
+class LLMStoreError(LLMError):
+    """The call log is missing, corrupt, busy, of a foreign schema version, or a write failed.
+
+    The gateway fails closed on it: a call that cannot be logged is not handed out.
+    """
 
 
 class LLMCallError(LLMError):
