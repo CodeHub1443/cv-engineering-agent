@@ -16,6 +16,9 @@ Usage:
     python -m cv_agent llm-log migrate     add the nullable payload columns to an existing call log (once)
     python -m cv_agent llm-log init        create the LLM call log (<state root>/llm_calls.sqlite);
                                             refuses when it already exists
+    python -m cv_agent research --url U --source-class C --topic-tag T --metric M --staleness-days N
+                                            one research cycle (fetch -> extract -> in-process
+                                            KnowledgeStore) via the EXTRACTION route; JSON on stdout
     cv-agent ...                           (when installed via pip)
 """
 
@@ -24,7 +27,9 @@ from __future__ import annotations
 import sys
 import uuid
 from argparse import ArgumentParser
-from typing import Any, Callable
+from typing import Any, Callable, get_args
+
+from cv_agent.knowledge.models import SourceClass
 
 
 def _health_check() -> int:
@@ -899,6 +904,116 @@ def _cmd_llm_log_init() -> int:
     return 0
 
 
+def _cmd_research(args: Any) -> int:
+    """One research cycle through ``perform_research`` and the router (Q41, ADR-0020 G7, D-093).
+
+    The claim query is built only by ``claim_query_from`` (single identifier tokens), so no free
+    text reaches a hosted tier. Results go to an in-process KnowledgeStore only (ADR-0006 §8): a
+    ``stored`` result prints one JSON object on stdout; everything human-readable goes to stderr.
+    Exit 0 stored, 1 any other research status, 2 invalid input or a gateway refusal.
+    """
+    import hashlib
+    import json
+
+    from cv_agent.config import settings
+    from cv_agent.graph.research import ResearchRequest, claim_query_from, perform_research
+    from cv_agent.knowledge.models import ItemId
+    from cv_agent.knowledge.store import InMemoryKnowledgeStore
+    from cv_agent.llm.errors import LLMConfigError, LLMError
+    from cv_agent.llm.policy import TaskClass
+    from cv_agent.llm.router import build_router
+    from cv_agent.tools import web_research
+    from cv_agent.tools.executor import ToolExecutor
+    from cv_agent.tools.registry import ToolRegistry
+
+    def fail(message: str) -> int:
+        print(f"research: {' '.join(message.split())}", file=sys.stderr)
+        return 2
+
+    if args.staleness_days <= 0:
+        return fail("--staleness-days must be a positive number of days.")
+    try:
+        claim_query = claim_query_from(tuple(args.topic_tag), tuple(args.model_name), args.metric)
+    except ValueError as exc:
+        return fail(str(exc))
+    item_id = args.item_id or "research-" + hashlib.sha256(
+        f"{args.url}\n{claim_query}".encode("utf-8")
+    ).hexdigest()[:16]
+
+    try:
+        router = build_router(settings.load_config().llm, state_dir=None)
+    except LLMConfigError as exc:
+        return fail(f"invalid LLM configuration: {exc}")
+    route = next(r for r in router.routes() if r.task_class == TaskClass.EXTRACTION)
+
+    registry = ToolRegistry()
+    web_research.register(registry)
+    request = ResearchRequest(
+        url=args.url,
+        item_id=ItemId(item_id),
+        source_class=args.source_class,
+        topic_tags=tuple(args.topic_tag),
+        staleness_horizon_days=args.staleness_days,
+        claim_query=claim_query,
+        author_or_org=args.author_or_org,
+        date_published=args.date_published,
+    )
+    try:
+        result = perform_research(
+            request,
+            tool_executor=ToolExecutor(registry),
+            router=router,
+            knowledge_store=InMemoryKnowledgeStore(),
+        )
+    except LLMError as exc:
+        return fail(f"refused by the LLM gateway: {type(exc).__name__}: {exc}")
+
+    print(
+        f"research: status={result.status} item={result.item_id} url={result.url} "
+        f"route={route.tier}/{route.provider}/{route.model}",
+        file=sys.stderr,
+    )
+    item = result.knowledge_item
+    if result.status != "stored" or item is None:
+        print(f"research: {result.error_message}", file=sys.stderr)
+        return 1
+    prov = item.provenance
+    print(
+        json.dumps(
+            {
+                "status": result.status,
+                "item_id": str(item.item_id),
+                "url": result.url,
+                "claim": item.claim,
+                "conditions": item.conditions,
+                "provenance": {
+                    "url": prov.url,
+                    "source_class": prov.source_class,
+                    "date_published": prov.date_published,
+                    "date_accessed": prov.date_accessed,
+                    "author_or_org": prov.author_or_org,
+                },
+                "evidence_weight": item.evidence_weight(),
+                "topic_tags": list(item.topic_tags),
+                "staleness_horizon_days": item.staleness_horizon_days,
+                "ingest": item.ingest.value,
+                "route": {
+                    "tier": route.tier,
+                    "provider": route.provider,
+                    "model": route.model,
+                    "hosted": route.hosted,
+                },
+            },
+            indent=2,
+        )
+    )
+    print(
+        "research: stored in the in-process KnowledgeStore, not persisted (ADR-0006 §8).",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _load_project_credentials() -> None:
     """Load the project ``.env`` once, before dispatch (ADR-0021 §3.5). Never fails the CLI
     for an unresolvable root; a bad ``.env`` (malformed, wrong permissions) is a loud error."""
@@ -1006,6 +1121,38 @@ def main(argv: list[str] | None = None) -> int:
         help="Pre-supply a 'rejected' decision for an approval_gate interrupt.",
     )
 
+    research_parser = subparsers.add_parser(
+        "research",
+        help="One research cycle: fetch a URL, extract a claim via the EXTRACTION route, "
+        "hold it in an in-process KnowledgeStore (JSON on stdout when stored).",
+    )
+    research_parser.add_argument("--url", required=True, help="URL to fetch.")
+    research_parser.add_argument(
+        "--source-class", required=True, choices=get_args(SourceClass), help="Source classification."
+    )
+    research_parser.add_argument(
+        "--topic-tag", action="append", required=True, metavar="TOKEN",
+        help="Topic tag, repeatable; a single identifier token (no free text).",
+    )
+    research_parser.add_argument(
+        "--model-name", action="append", default=[], metavar="TOKEN",
+        help="Model name, repeatable; a single identifier token.",
+    )
+    research_parser.add_argument(
+        "--metric", required=True, metavar="TOKEN", help="Metric to look for; a single identifier token."
+    )
+    research_parser.add_argument(
+        "--staleness-days", type=int, required=True, help="Staleness horizon in days (> 0)."
+    )
+    research_parser.add_argument(
+        "--item-id", default=None,
+        help="Item id (default: 'research-' + sha256(url + claim query)[:16], so re-runs are stable).",
+    )
+    research_parser.add_argument("--author-or-org", default=None, help="Provenance fallback.")
+    research_parser.add_argument(
+        "--date-published", default=None, help="Provenance fallback, YYYY-MM-DD."
+    )
+
     llm_log_parser = subparsers.add_parser("llm-log", help="Manage the LLM call log.")
     llm_log_sub = llm_log_parser.add_subparsers(dest="llm_log_command", required=True)
     llm_log_sub.add_parser(
@@ -1047,6 +1194,9 @@ def main(argv: list[str] | None = None) -> int:
             approve=args.approve,
             reject=args.reject,
         )
+
+    if args.command == "research":
+        return _cmd_research(args)
 
     if args.command == "llm-log":
         if args.llm_log_command == "migrate":
