@@ -213,7 +213,7 @@ def test_notes_carry_protocol_artifacts_and_hashes(tmp_path: Path) -> None:
     run_dir, coco = make_run(tmp_path)
     record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
     notes = json.loads(record.notes or "{}")
-    assert "REFERENCE ONLY" in notes["confidence_protocol"]
+    assert "D-077 floor measurement" in notes["confidence_protocol"] and "never mAP" in notes["confidence_protocol"]
     assert notes["imgsz"] == 640
     for key in ("val_log", "predictions_json", "run_json", "weights", "data_yaml", "val_txt"):
         assert len(notes["artifacts"][key]["sha256"]) == 64
