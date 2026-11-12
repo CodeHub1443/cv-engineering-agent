@@ -32,6 +32,7 @@ from cv_agent.knowledge.models import (
 )
 from cv_agent.knowledge.store import KnowledgeStore
 from cv_agent.llm.base import LLMProvider, LLMRequest
+from cv_agent.llm.policy import DataClass
 from cv_agent.tools.executor import ToolExecutor
 from cv_agent.tools.models import ToolId, ToolRequest
 
@@ -263,6 +264,7 @@ def perform_research(
             ),
             system=_EXTRACTION_SYSTEM,
             max_tokens=512,
+            data_classes=frozenset({DataClass.PUBLIC_WEB, DataClass.PROJECT_METADATA}),
         )
     )
 

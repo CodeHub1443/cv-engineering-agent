@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from cv_agent.llm.policy import DataClass
+
 
 @dataclass
 class LLMRequest:
@@ -20,6 +22,8 @@ class LLMRequest:
     prompt: str
     system: Optional[str] = None
     max_tokens: Optional[int] = None  # None is legal here; adapters require an int
+    # What the prompt carries (ADR-0020 §3 item 7). Empty is treated as {PROJECT_DATA}, the strictest.
+    data_classes: frozenset[DataClass] = frozenset()
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

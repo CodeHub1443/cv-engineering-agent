@@ -4,13 +4,15 @@ cv_agent.llm.errors — exception types for the LLM gateway.
 Responsibility: name the gateway's failure modes so callers can catch them without
 importing a provider module. Credential failures come from ADR-0021; configuration and
 after-send call failures from ADR-0020 slice G1, the call-log store failure from G2, budget,
-call-limit, input-size and clock-skew refusals from G3. Privacy errors arrive with G4. None of
+call-limit, input-size and clock-skew refusals from G3, the data-class refusal from G4. None of
 these messages ever carries prompt text.
 """
 
 from __future__ import annotations
 
 from typing import Any, Literal, Optional
+
+from cv_agent.llm.policy import DataClass, TaskClass
 
 
 class LLMError(RuntimeError):
@@ -34,6 +36,21 @@ class LLMStoreError(LLMError):
 
 class LLMClockSkewError(LLMError):
     """The clock reads earlier than the last recorded call by more than the tolerance."""
+
+
+class LLMDataClassNotAllowedError(LLMError):
+    """A hosted tier was asked to carry a data class it may not receive. Nothing was sent.
+
+    The message names the task class, the tier and the blocked classes only, never prompt text.
+    """
+
+    def __init__(self, task_class: TaskClass | str, tier: str, blocked: frozenset[DataClass]) -> None:
+        names = ", ".join(sorted(d.value for d in blocked))
+        task = task_class.value if isinstance(task_class, TaskClass) else task_class
+        super().__init__(f"LLM privacy refused: tier {tier!r} (task {task!r}) may not receive: {names}.")
+        self.task_class = task_class
+        self.tier = tier
+        self.blocked = blocked
 
 
 class LLMInputTooLargeError(LLMError):
