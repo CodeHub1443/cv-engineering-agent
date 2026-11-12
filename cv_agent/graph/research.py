@@ -263,7 +263,6 @@ def perform_research(
             ),
             system=_EXTRACTION_SYSTEM,
             max_tokens=512,
-            temperature=0.0,
         )
     )
 

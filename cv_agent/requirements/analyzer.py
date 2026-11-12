@@ -295,7 +295,7 @@ class RequirementsAnalyzer:
             f"Candidate task components: {tasks}\n"
             f"Open questions: {len(clarifications)}\n"
         )
-        response = self._llm.complete(LLMRequest(prompt=prompt))
+        response = self._llm.complete(LLMRequest(prompt=prompt, max_tokens=1024))
         return response.content
 
 

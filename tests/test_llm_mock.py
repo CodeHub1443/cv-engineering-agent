@@ -14,15 +14,36 @@ class TestLLMRequest:
         req = LLMRequest(prompt="hello")
         assert req.prompt == "hello"
         assert req.system is None
-        assert req.max_tokens == 1024
-        assert req.temperature == 0.0
+        assert req.max_tokens is None
+        assert not hasattr(req, "temperature")
         assert req.metadata == {}
 
     def test_custom_values(self) -> None:
-        req = LLMRequest(prompt="q", system="sys", max_tokens=512, temperature=0.7)
+        req = LLMRequest(prompt="q", system="sys", max_tokens=512)
         assert req.system == "sys"
         assert req.max_tokens == 512
-        assert req.temperature == 0.7
+
+    def test_temperature_is_not_accepted(self) -> None:
+        with pytest.raises(TypeError):
+            LLMRequest(prompt="q", temperature=0.0)  # type: ignore[call-arg]
+
+
+class TestLLMResponse:
+    def test_gateway_fields_default_to_none(self) -> None:
+        resp = LLMResponse(content="c", model="m", provider="p")
+        assert resp.stop_reason is None
+        assert resp.request_id is None
+        assert resp.call_id is None
+
+
+class TestProviderVersionProperties:
+    def test_adapter_and_sdk_version_default_to_none(self) -> None:
+        p = FakeLLMProvider()
+        assert p.adapter_version is None
+        assert p.sdk_version is None
+
+    def test_fake_provider_reports_end_turn(self) -> None:
+        assert FakeLLMProvider().complete(LLMRequest(prompt="x")).stop_reason == "end_turn"
 
 
 class TestFakeLLMProvider:
