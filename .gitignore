@@ -11,3 +11,7 @@ __pycache__/
 # YOLO model weights and runtime outputs
 *.pt
 /runs/
+
+# Secrets: project credential file, never committed (ADR-0021, D-088).
+.env
+.env.*
