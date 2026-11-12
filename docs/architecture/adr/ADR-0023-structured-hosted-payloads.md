@@ -625,3 +625,14 @@ A parallel session is building a user-facing research command (Q41) that calls `
 - **Hostname rule:** whether the reserved-suffix list in §2.3 rule 2 covers every private naming scheme the owner uses. The rule is conservative (a dotted public DNS name is required), but an intranet host with a public-looking name would pass.
 
 Whether every `KnowledgeItem` path is truly public-web is **not** left unverified here: the KnowledgeStore writer inventory is a required first step of slice S4, and the S4 PR must include it (§7.2).
+
+## Amendment (2026-11-12, implementation of S1)
+
+Recorded as D-097. The sections above are unchanged; S1 shipped as S1a/S1b/S1c (#112, #113, #114) and deviates from them as follows.
+
+1. `LLMUnstructuredRequestError` subclasses `LLMDataClassNotAllowedError` (owner-approved), so existing handlers for the data-class refusal also catch it.
+2. The governed path refuses a payload whose `TASK_CLASS` differs from the route's task class (`LLMPayloadMisuseError`).
+3. Issuance is tracked by a module-private registry of issued instances with field fingerprints, not by a constructor sentinel.
+4. S1 shipped as three PRs, S1a (#112), S1b (#113) and S1c (#114), instead of one slice.
+5. `select_claims` and the payload size guard move from S1 to S4.
+6. Registration is allowed only at module top level of an allowlisted schema module. A module executed with a forged `__name__` can still register; this gap is accepted, with the S5 AST test as the backstop.
