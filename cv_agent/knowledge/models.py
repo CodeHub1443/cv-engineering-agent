@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import Enum
 from typing import Literal, NewType
 
 SourceClass = Literal[
@@ -87,6 +88,16 @@ class Provenance:
         _require_nonblank(self.author_or_org, "Provenance.author_or_org")
 
 
+class IngestPath(str, Enum):
+    """How an item entered the store (ADR-0023 §3.4). Set by the knowledge writer, never by an LLM
+    call site. Only the first two may reach a hosted payload; UNSPECIFIED (the default) never does."""
+
+    WEB_FETCH = "web_fetch"
+    CURATED_REFERENCE = "curated_reference"
+    PROJECT_INPUT = "project_input"
+    UNSPECIFIED = "unspecified"
+
+
 @dataclass(frozen=True)
 class KnowledgeItem:
     """A single stored claim. Cannot be constructed without valid Provenance."""
@@ -97,8 +108,11 @@ class KnowledgeItem:
     provenance: Provenance
     topic_tags: tuple[str, ...]
     staleness_horizon_days: int
+    ingest: IngestPath = IngestPath.UNSPECIFIED
 
     def __post_init__(self) -> None:
+        if not isinstance(self.ingest, IngestPath):
+            raise ValueError(f"KnowledgeItem.ingest must be an IngestPath, got {self.ingest!r}")
         _require_nonblank(str(self.item_id), "KnowledgeItem.item_id")
         _require_nonblank(self.claim, "KnowledgeItem.claim")
         if not isinstance(self.provenance, Provenance):

@@ -53,6 +53,13 @@ class LLMDataClassNotAllowedError(LLMError):
         self.blocked = blocked
 
 
+class PayloadFieldError(ValueError):
+    """The payload builder or schema registry rejected a leaf, type or registration (ADR-0023 §3.2).
+
+    Raised before any request exists. The message names the field path or vocabulary, never the value.
+    """
+
+
 class LLMInputTooLargeError(LLMError):
     """``len(system) + len(prompt)`` exceeds the input cap. Raised before any network I/O."""
 
