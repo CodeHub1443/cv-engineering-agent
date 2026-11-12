@@ -40,4 +40,4 @@ asyncio_mode = "auto"
 
 [tool.hatch.build.targets.wheel]
 packages = ["cv_agent"]
-include = ["cv_agent/resources/**"]
+include = ["cv_agent/resources/**", "cv_agent/llm/catalog.toml"]

@@ -18,6 +18,7 @@ import pytest
 
 import cv_agent.__main__ as cli
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
+from cv_agent.llm.catalog import parse_catalog
 from cv_agent.llm.clock import Clock, SystemClock
 from cv_agent.llm.errors import (
     LLMRefusalError,
@@ -55,6 +56,17 @@ EXPECTED_COLUMNS = [
     "prompt_text",
     "response_text",
 ]
+FAKE_CATALOG = parse_catalog(
+    """
+[models."fake-model-1"]
+provider = "fakeprovider"
+prices_as_of = "2026-11-12"
+prices_source = "https://example.invalid/pricing"
+[[models."fake-model-1".price_steps]]
+input_usd_per_mtok = 1.0
+output_usd_per_mtok = 1.0
+"""
+)
 FAKE_KEY = "sk-ant-FAKE-KEY-for-tests-0123456789"
 T0 = datetime(2026, 11, 12, 9, 30, 0, tzinfo=timezone.utc)
 
@@ -149,6 +161,7 @@ def _governed(
         clock=clock or FakeClock(),
         thinking="disabled",
         effort="low",
+        catalog=FAKE_CATALOG,
     )
 
 
@@ -223,7 +236,7 @@ def test_foreign_schema_version_raises(tmp_path: Path) -> None:
         LLMCallStore(path)
 
 
-def test_initialise_creates_exactly_the_g2_schema(tmp_path: Path) -> None:
+def test_initialise_creates_exactly_the_call_log_schema(tmp_path: Path) -> None:
     _, path = _new_store(tmp_path)
     conn = sqlite3.connect(path)
     try:
@@ -237,9 +250,9 @@ def test_initialise_creates_exactly_the_g2_schema(tmp_path: Path) -> None:
         version = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
     finally:
         conn.close()
-    assert tables == {"llm_calls", "meta"}  # no budget table until G3
+    assert tables == {"llm_calls", "llm_budget", "meta"}  # budget table since G3 (schema 2)
     assert columns == EXPECTED_COLUMNS
-    assert version == ("1",)
+    assert version == ("2",)
 
 
 def test_initialise_creates_missing_parent_directory(tmp_path: Path) -> None:
@@ -532,7 +545,11 @@ def test_error_usage_is_logged(tmp_path: Path) -> None:
 # ── Fail closed on a store failure ───────────────────────────────────────────
 
 
-def test_store_failure_after_a_successful_call_raises_and_returns_nothing(tmp_path: Path) -> None:
+def _failing_settle(*args: Any, **kwargs: Any) -> None:
+    raise LLMStoreError("disk full")
+
+
+def test_store_vanishing_before_the_call_fails_closed_without_sending(tmp_path: Path) -> None:
     store, path = _new_store(tmp_path)
     adapter = FakeAdapter(response=_response("unlogged answer"))
     governed = _governed(store, adapter)
@@ -541,15 +558,31 @@ def test_store_failure_after_a_successful_call_raises_and_returns_nothing(tmp_pa
     with pytest.raises(LLMStoreError):
         governed.complete(LLMRequest(prompt="p", max_tokens=8))
 
+    assert adapter.requests == []  # the budget could not be reserved, so nothing was sent
+    assert not path.exists()  # and the store was not silently re-created
+
+
+def test_store_failure_after_a_successful_call_raises_and_returns_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _ = _new_store(tmp_path)
+    adapter = FakeAdapter(response=_response("unlogged answer"))
+    governed = _governed(store, adapter)
+    monkeypatch.setattr(store, "settle", _failing_settle)
+
+    with pytest.raises(LLMStoreError):
+        governed.complete(LLMRequest(prompt="p", max_tokens=8))
+
     assert len(adapter.requests) == 1  # the call was sent; the answer is not handed out
-    assert not path.exists()  # the failed append did not silently re-create the store
 
 
-def test_store_failure_while_logging_an_adapter_error_is_chained(tmp_path: Path) -> None:
-    store, path = _new_store(tmp_path)
+def test_store_failure_while_logging_an_adapter_error_is_chained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _ = _new_store(tmp_path)
     original = LLMRefusalError("refused", stop_reason="refusal")
     governed = _governed(store, FakeAdapter(exc=original))
-    path.unlink()
+    monkeypatch.setattr(store, "settle", _failing_settle)
 
     with pytest.raises(LLMStoreError) as info:
         governed.complete(LLMRequest(prompt="p", max_tokens=8))
