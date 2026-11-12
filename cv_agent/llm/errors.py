@@ -53,6 +53,11 @@ class LLMDataClassNotAllowedError(LLMError):
         self.blocked = blocked
 
 
+class LLMPayloadMisuseError(LLMError):
+    """A payload came with prompt, system or data classes, or was not issued by the builder, or does not
+    match the route's task class. Raised before any reservation or network I/O; never carries payload text."""
+
+
 class PayloadFieldError(ValueError):
     """The payload builder or schema registry rejected a leaf, type or registration (ADR-0023 §3.2).
 
