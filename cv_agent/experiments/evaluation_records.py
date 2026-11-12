@@ -11,8 +11,8 @@ math lives in cv_agent.experiments.detection_metrics. The log regexes below mirr
 
 Two kinds of metric, kept apart in val_metrics:
 - standard keys ``mAP@0.5``, ``mAP@0.5:0.95``, ``AP@0.5/<size>``: full PR curve at conf=0.001 (Q28).
-- reference keys ``fixed_thr@0.25/<name>``: fixed-threshold precision/recall. Reference only, not mAP,
-  not an operating point (Q30 is open).
+- reference keys ``fixed_thr@0.25/<name>``: fixed-threshold precision/recall. The D-077 precision-floor
+  measurement (conf 0.25, IoU>=0.5): never mAP, separate from full-curve AP.
 
 Nothing is fabricated. A value that was not measured is None or absent, and the notes say so.
 """
@@ -563,7 +563,7 @@ def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_re
         ),
         "confidence_protocol": (
             f"conf={MAP_PROTOCOL_CONF} (Q28/D-067) for mAP and AP@0.5/* (full PR curve). "
-            f"fixed_thr@{FIXED_THRESHOLD}/* are REFERENCE ONLY: not mAP, not an operating point (Q30 open)."
+            f"fixed_thr@{FIXED_THRESHOLD}/* is the D-077 floor measurement (conf 0.25, IoU>=0.5): never mAP, separate from full-curve AP."
         ),
         "imgsz": run.imgsz,
         "gflops_reported_by_ultralytics": run.gflops,

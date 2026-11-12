@@ -33,8 +33,8 @@ Three measurements are kept separate. Never mix them in one number.
    summary values are **not** this measurement: they are the max-F1 point of the curve.
 
 A run whose predictions do not include scores down to about 0.001 is **not valid** for
-measurement 1 or 2. The operating threshold for reporting is **not defined here**; it is an
-open owner decision (OPEN_QUESTIONS Q30).
+measurement 1 or 2. The fixed-threshold floor measurement (measurement 3) is defined by D-077:
+conf 0.25, IoU >= 0.5, precision floor 0.75 (Q30 answered).
 
 **Legacy values.** mAP values computed at `conf=0.25` (EXP-20260930-01 and the sweep rows
 EXP-20261001-01..04) are **legacy, truncated-protocol values**. They are lower bounds on the
@@ -43,11 +43,11 @@ The `scripts/run_fixed_threshold_strata.py` output flags any predictions file th
 
 **Recorded metric keys (ADR-0017).** A record's `val_metrics` keeps two kinds apart by prefix:
 - `mAP@0.5`, `mAP@0.5:0.95`, `AP@0.5/small|medium|large`: full-curve, conf=0.001 (standard).
-- `fixed_thr@0.25/<name>`: fixed-threshold reference measurement. **Reference only**, not mAP,
-  not an operating point (Q30 open). The ultralytics P and R summary is not recorded at all.
+- `fixed_thr@0.25/<name>`: the D-077 precision-floor measurement (conf 0.25, IoU >= 0.5). Never mAP,
+  and separate from the full-curve AP keys. The ultralytics P and R summary is not recorded at all.
 
 **Inference operating-point default.** `yolo_inference` keeps `conf=0.25` as its default. That is
-an operating-point default, not a mAP protocol value, and it is unchanged because Q30 is open.
+an operating-point default, not a mAP protocol value, and it is unchanged by D-077.
 The tracking baseline (`scripts/run_baseline.py`) runs at the same 0.25 for the same reason.
 
 **Classification** — accuracy · precision · recall · F1 · confusion matrix · ROC-AUC ·

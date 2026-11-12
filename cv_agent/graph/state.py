@@ -37,7 +37,7 @@ class AgentState(TypedDict, total=False):
 
     # ── LLM context ───────────────────────────────────────────────────────
     provider: str
-    """Active LLM provider name (e.g. 'mock', 'anthropic')."""
+    """Active LLM provider name (a registered gateway provider id)."""
 
     model: str
     """Active model identifier."""

@@ -4,8 +4,7 @@
 file under 150 lines. If you are tempted to add CV knowledge here, it belongs in
 `docs/PROJECT.md` (frozen), an ADR, or `docs/GLOSSARY.md`.
 
-Project: **CV Engineering Agent** — an AI system that *performs* computer-vision
-engineering, not one that merely knows computer vision.
+Project: **CV Engineering Agent** — an AI system that *performs* computer-vision engineering, not one that merely knows it.
 
 ---
 
@@ -43,11 +42,10 @@ work, and `CLAUDE.md` does not define *what the project is*.
 Do **not** bulk-read `docs/`. If `STATUS.md` contradicts the repository, stop and say so
 rather than guessing which is right.
 
-Two more trees exist and are not part of this read order — consult them only when the
-task needs them: `spec/*.md` (technical elaborations of specific canon areas — see
-README's document map for which spec file covers what; none describe anything
-implemented except `10-capability-registry.md`) and `docs/development/` (the git
-workflow — read before opening a branch or PR).
+Two more trees are outside this read order — consult them only when the task needs them:
+`spec/*.md` (technical elaborations of specific canon areas — see README's document map for
+which file covers what; none describe anything implemented except `10-capability-registry.md`)
+and `docs/development/` (the git workflow — read before opening a branch or PR).
 
 ## 3. Hard rules — non-negotiable
 
@@ -107,8 +105,7 @@ the system toward any of these, flag it.
    `docs/development/GITHUB_FLOW_V1.md` §4). **Never commit to `main`.** PRs target
    `main` directly; the project owner reviews and merges — there is no intermediate
    development trunk.
-4. Write the acceptance test first, from the issue's acceptance criteria. Show it
-   failing.
+4. Write the acceptance test first, from the issue's acceptance criteria. Show it failing.
 5. Implement the minimum that makes it pass. No speculative abstraction. No unrelated
    refactors.
 6. Lint, type-check, full test suite.
@@ -117,6 +114,7 @@ the system toward any of these, flag it.
    template.
 9. Report what you changed, what you deliberately did not, and what you are unsure about.
 
+**Never run `git stash`** (denied in `.claude/settings.json`); commit WIP on the branch instead.
 Keep diffs reviewable — under ~400 lines. If the issue cannot fit, split the issue.
 
 ## 7. Rolling state protocol
@@ -136,8 +134,7 @@ Before every commit, and at the end of every session:
 ## 8. Style
 
 - Python, typed, `ruff` + `mypy` clean. Tests with `pytest`.
-- Registries hold typed identities, not free strings `[P§32]`.
-- Package-safe resource loading; explicit dependencies `[P§32]`.
+- Registries hold typed identities, not free strings; package-safe resource loading; explicit dependencies `[P§32]`.
 - Docstrings state the responsibility the unit owns.
 - No `TODO` without a corresponding GitHub issue number.
 
@@ -145,8 +142,7 @@ Before every commit, and at the end of every session:
 
 ```
 pip install -e ".[dev]"   # install package + pytest
-pytest                    # full test suite (testpaths = tests/)
-pytest tests/test_x.py::test_name   # single test
+pytest [tests/test_x.py::test_name]   # full suite (testpaths = tests/), or a single test
 python -m cv_agent         # CLI health check (or: cv-agent, once installed)
 ```
 
