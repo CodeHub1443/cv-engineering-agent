@@ -79,3 +79,40 @@ def test_live_extraction_call_on_the_fast_tier(capsys: pytest.CaptureFixture[str
     with capsys.disabled():
         tokens = f"in={row['input_tokens']} out={row['output_tokens']}"
         print(f"\nlive: call_id={response.call_id} stop={response.stop_reason} {tokens} settled_usd={spent:.6f}")
+
+
+@pytest.mark.live_llm
+def test_live_research_extraction_on_the_fast_tier(capsys: pytest.CaptureFixture[str]) -> None:
+    """perform_research end to end on the fast tier: fixed public text, fake fetch, one real call."""
+    from cv_agent.graph.research import claim_query_from, perform_research
+    from cv_agent.knowledge.store import InMemoryKnowledgeStore
+    from tests.test_research_orchestration import _make_executor, _minimal_request
+
+    state_root = repository_state_root()
+    db = state_root / LLM_CALLS_FILENAME
+    if not db.is_file():
+        pytest.fail("LLM call log missing: run cv-agent llm-log init")
+    invoker_text = f"Tower Report, 2026-01-15. Example Org. {_SENTENCE}"
+    executor, invoker = _make_executor()
+    invoker.outcome.output["content_text"] = invoker_text  # type: ignore[index]
+    request = _minimal_request(claim_query=claim_query_from(("landmarks",), ("tower",), "height"))
+    store = InMemoryKnowledgeStore()
+
+    try:
+        credentials.load_project_env_file(state_root.parent / ".env")
+        llm = load_config().llm
+        routing = {**llm.routing, TaskClass.EXTRACTION.value: "fast"}  # in memory only
+        router = build_router(dataclasses.replace(llm, routing=routing), state_root)
+        before = {r["call_id"] for r in _rows(str(db))}
+        result = perform_research(request, tool_executor=executor, router=router, knowledge_store=store)
+    finally:
+        credentials._reset_for_tests()
+
+    assert result.status == "stored", result.error_message
+    new = [r for r in _rows(str(db)) if r["call_id"] not in before]
+    assert len(new) == 1 and new[0]["task_class"] == "extraction" and new[0]["model"] == "claude-haiku-5-5"
+    assert new[0]["stop_reason"] == "end_turn" and new[0]["prompt_text"] is None
+    with capsys.disabled():
+        row = new[0]
+        tokens = f"in={row['input_tokens']} out={row['output_tokens']}"
+        print(f"\nlive research: call_id={row['call_id']} stop={row['stop_reason']} {tokens} status={result.status}")
