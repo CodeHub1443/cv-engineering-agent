@@ -2,6 +2,7 @@
 
 - **Status:** Accepted (retroactive — same allowance ADR-0001 and ADR-0007 used; no
   live GitHub issue tracker wired up yet)
+- **Amended by:** ADR-0023 (2026-11-12)
 - **Date:** 2026-09-15
 - **Layer:** reasoning
 - **Canon:** `[P§5]`, `[P§6]`, `[P§23]`, `[P§34]`

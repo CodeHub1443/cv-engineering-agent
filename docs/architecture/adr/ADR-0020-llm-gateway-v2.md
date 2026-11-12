@@ -1,6 +1,7 @@
 # ADR-0020: LLM gateway v2 — task routing, daily budget, length cap, privacy, call log
 
 - **Status:** Accepted, accepted by owner (2026-11-12)
+- **Amended by:** ADR-0023 (2026-11-12)
 - **Date:** 2026-11-12
 - **Layer:** reasoning (LLM Gateway)
 - **Canon:** `[P§19]`, `[P§20]`, `[P§24]`, `[P§25]`, `[P§29.8]`, `[P§34]`

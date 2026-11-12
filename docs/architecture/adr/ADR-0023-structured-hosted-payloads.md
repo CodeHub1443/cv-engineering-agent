@@ -1,6 +1,6 @@
 # ADR-0023: Structured hosted payloads for SELECTION and NARRATIVE
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-12, owner; D-095)
 - **Date:** 2026-11-12
 - **Layer:** reasoning (LLM gateway mechanism + reasoning call sites); one knowledge-layer field (§3.4)
 - **Canon:** `[P§19]`, `[P§20]`, `[P§24]`, `[P§29.3]`, `[P§32]`, `[P§34]`
