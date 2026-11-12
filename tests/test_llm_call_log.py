@@ -55,6 +55,8 @@ EXPECTED_COLUMNS = [
     "latency_ms",
     "prompt_text",
     "response_text",
+    "payload_schema",
+    "payload_sha256",
 ]
 FAKE_CATALOG = parse_catalog(
     """
@@ -253,7 +255,7 @@ def test_initialise_creates_exactly_the_call_log_schema(tmp_path: Path) -> None:
         conn.close()
     assert tables == {"llm_calls", "llm_budget", "meta"}  # budget table since G3 (schema 2)
     assert columns == EXPECTED_COLUMNS
-    assert version == ("2",)
+    assert version == ("3",)
 
 
 def test_initialise_creates_missing_parent_directory(tmp_path: Path) -> None:

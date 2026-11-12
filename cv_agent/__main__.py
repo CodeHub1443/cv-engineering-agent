@@ -13,6 +13,7 @@ Usage:
                                             execution-input recovery, with real answers
                                             (--answer, --input, --approve/--reject, or
                                             interactive stdin — never a fabricated one)
+    python -m cv_agent llm-log migrate     add the nullable payload columns to an existing call log (once)
     python -m cv_agent llm-log init        create the LLM call log (<state root>/llm_calls.sqlite);
                                             refuses when it already exists
     cv-agent ...                           (when installed via pip)
@@ -851,6 +852,28 @@ def _cmd_workflow(
     return 0
 
 
+def _cmd_llm_log_migrate() -> int:
+    """Upgrade the LLM call log to the current schema (ADR-0023, Q43). Explicit and idempotent:
+    adds nullable columns only, never touches a row. Exit 0 migrated or already current, 2 error."""
+    from cv_agent.experiments.provenance import ProvenanceError, repository_state_root
+    from cv_agent.llm.errors import LLMStoreError
+    from cv_agent.llm.sqlite_store import LLM_CALLS_FILENAME, LLMCallStore
+
+    header = "CV Engineering Agent - LLM call log"
+    try:
+        target = repository_state_root() / LLM_CALLS_FILENAME
+        LLMCallStore.migrate(target)
+        LLMCallStore(target)  # the result must open cleanly
+    except ProvenanceError as exc:
+        print(f"{header}: cannot locate the state root\n  {exc}", file=sys.stderr)
+        return 2
+    except LLMStoreError as exc:
+        print(f"{header}: not migrated\n  {exc}", file=sys.stderr)
+        return 2
+    print(f"{header}: up to date (schema version 3)\n  {target}")
+    return 0
+
+
 def _cmd_llm_log_init() -> int:
     """Create the LLM call log under the repository state root (ADR-0020, Q42). Explicit only:
     nothing else ever creates it. Exit 0 created, 1 already exists, 2 cannot be created."""
@@ -988,6 +1011,9 @@ def main(argv: list[str] | None = None) -> int:
     llm_log_sub.add_parser(
         "init", help="Create the LLM call log under the state root; refuses if it exists."
     )
+    llm_log_sub.add_parser(
+        "migrate", help="Add the ADR-0023 payload columns to an existing LLM call log (idempotent)."
+    )
 
     args = parser.parse_args(argv)
     _load_project_credentials()
@@ -1023,6 +1049,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.command == "llm-log":
+        if args.llm_log_command == "migrate":
+            return _cmd_llm_log_migrate()
         return _cmd_llm_log_init()
 
     parser.error(f"unrecognized command: {args.command}")  # pragma: no cover

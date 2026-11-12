@@ -16,7 +16,10 @@ Rules:
   two processes cannot both pass the ceiling.
 - Tables: ``llm_calls``, ``llm_budget`` (one row per reserved call; ``spent_usd`` is the
   reservation until settle replaces it with the actual cost) and ``meta`` (``schema_version``).
-  Schema version 2 (G3). A version-1 store is refused, never migrated: re-initialise it.
+  Schema version 3 (ADR-0023: nullable ``payload_schema`` and ``payload_sha256``, last). A
+  version-2 store is refused with the hint ``cv-agent llm-log migrate``, which only adds those two
+  nullable columns and bumps the version; it never deletes or rewrites a row. A version-1 store
+  is refused: re-initialise it.
 - The log holds no key and no thinking text; prompt and response text only when the caller
   passes it in (``[llm.log] store_text``, off by default).
 """
@@ -37,9 +40,11 @@ from cv_agent.llm.errors import (
     LLMStoreError,
 )
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
+PREVIOUS_SCHEMA_VERSION = "2"
 LLM_CALLS_FILENAME = "llm_calls.sqlite"
 INIT_HINT = "run `cv-agent llm-log init` to create it"
+MIGRATE_HINT = "run `cv-agent llm-log migrate` once"
 
 _SCHEMA = (
     "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -68,7 +73,9 @@ _SCHEMA = (
     stop_reason TEXT NOT NULL,
     latency_ms INTEGER NOT NULL,
     prompt_text TEXT,
-    response_text TEXT
+    response_text TEXT,
+    payload_schema TEXT,
+    payload_sha256 TEXT
 )""",
     """CREATE TABLE llm_budget (
     call_id TEXT PRIMARY KEY,
@@ -118,6 +125,8 @@ class CallRecord:
     latency_ms: int
     prompt_text: Optional[str] = None
     response_text: Optional[str] = None
+    payload_schema: Optional[str] = None  # "<schema_id>/<version>"; NULL for unstructured calls
+    payload_sha256: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +147,7 @@ def _utc_text(moment: datetime) -> str:
 
 _COLUMNS = tuple(f.name for f in fields(CallRecord))
 _INSERT = f"INSERT INTO llm_calls ({', '.join(_COLUMNS)}) VALUES ({', '.join('?' * len(_COLUMNS))})"
+_NEW_COLUMNS = ("payload_schema", "payload_sha256")
 _DAY_TOTALS = "SELECT COALESCE(SUM(spent_usd), 0.0), COUNT(*) FROM llm_budget WHERE day_key = ?"
 
 
@@ -179,6 +189,42 @@ class LLMCallStore:
         except sqlite3.Error as exc:
             target.unlink(missing_ok=True)  # never leave a half-initialised store behind
             raise LLMStoreError(f"cannot initialise LLM call log {target}: {exc}") from exc
+
+    @staticmethod
+    def migrate(path: Path) -> None:
+        """Upgrade a schema-2 store to 3: add the two nullable payload columns, bump the version.
+
+        Idempotent (a current store is left as is); refuses a missing file; never creates, deletes
+        or rewrites a row. DDL and version bump share one transaction.
+        """
+        target = Path(path)
+        if not target.is_file():
+            raise LLMStoreError(f"LLM call log {target} does not exist; {INIT_HINT}.")
+        try:
+            conn = sqlite3.connect(target.resolve().as_uri() + "?mode=rw", uri=True, timeout=5.0, isolation_level=None)
+            with closing(conn):
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+                    columns = tuple(r[1] for r in conn.execute("PRAGMA table_info(llm_calls)"))
+                    if row is not None and row[0] == SCHEMA_VERSION:
+                        pass  # already current; _verify judges the rest
+                    elif row is not None and row[0] == PREVIOUS_SCHEMA_VERSION and columns == _COLUMNS[:-2]:
+                        for name in _NEW_COLUMNS:
+                            conn.execute(f"ALTER TABLE llm_calls ADD COLUMN {name} TEXT")
+                        conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", (SCHEMA_VERSION,))
+                    else:
+                        found = None if row is None else row[0]
+                        raise LLMStoreError(
+                            f"LLM call log {target} has schema version {found!r} and cannot be migrated; "
+                            "move it away and run `cv-agent llm-log init`."
+                        )
+                    conn.execute("COMMIT")
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
+        except sqlite3.Error as exc:
+            raise LLMStoreError(f"cannot migrate LLM call log {target}: {exc}") from exc
 
     def append(self, record: CallRecord) -> None:
         """Insert one call row in its own transaction."""
@@ -285,6 +331,11 @@ class LLMCallStore:
                 budget_columns = tuple(r[1] for r in conn.execute("PRAGMA table_info(llm_budget)"))
         except sqlite3.Error as exc:
             raise LLMStoreError(f"LLM call log {self._path} is corrupt or unreadable: {exc}") from exc
+        if row is not None and row[0] == PREVIOUS_SCHEMA_VERSION and columns == _COLUMNS[:-2]:
+            raise LLMStoreError(
+                f"LLM call log {self._path} has schema version {PREVIOUS_SCHEMA_VERSION!r} (no payload columns); "
+                f"{MIGRATE_HINT}: `cv-agent llm-log migrate`."
+            )
         if row is None or row[0] != SCHEMA_VERSION:
             found = None if row is None else row[0]
             raise LLMStoreError(
