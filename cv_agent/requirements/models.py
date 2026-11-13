@@ -38,6 +38,11 @@ class RequirementField:
     source: str = "user_request"
     """Where `value` came from: "user_request" (extracted) or
     "caller_assumption" (explicitly supplied, never invented in-analyzer)."""
+    terms: tuple[str, ...] = ()
+    """The field's own trigger terms matched in the request (known) or in the
+    caller's value (assumed): closed vocabulary from `rules.FIELD_DETECTORS`,
+    never the value itself. This is what a hosted payload may carry
+    (ADR-0023 §2.2); `value` stays local."""
 
 
 @dataclass(frozen=True)
