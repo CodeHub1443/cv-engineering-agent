@@ -514,24 +514,32 @@ class TestDeterminism:
 
 
 class TestLLMIntegration:
-    def test_no_llm_means_no_narrative(self, resolver: TaskResolver) -> None:
+    def test_no_llm_means_template_narrative(self, resolver: TaskResolver) -> None:
+        """ADR-0023 §3.3 (b): the deterministic template is the default narrative."""
         analyzer = RequirementsAnalyzer(task_resolver=resolver, llm=None)
         result = analyzer.analyze("Detect people.")
-        assert result.narrative_summary is None
+        assert result.narrative_summary and result.narrative_source == "template"
         assert result.llm_provider is None
+
+    def test_default_mode_never_calls_the_llm(self, resolver: TaskResolver) -> None:
+        llm = FakeLLMProvider(fixed_response="deterministic summary text")
+        result = RequirementsAnalyzer(task_resolver=resolver, llm=llm).analyze("Detect people.")
+        assert llm.call_count == 0
+        assert result.narrative_source == "template" and result.llm_provider is None
 
     def test_mock_llm_produces_deterministic_narrative(self, resolver: TaskResolver) -> None:
         llm = FakeLLMProvider(fixed_response="deterministic summary text")
-        analyzer = RequirementsAnalyzer(task_resolver=resolver, llm=llm)
+        analyzer = RequirementsAnalyzer(task_resolver=resolver, llm=llm, narrative="llm")
         result = analyzer.analyze("Detect people.")
         assert result.narrative_summary == "deterministic summary text"
+        assert result.narrative_source == "llm"
         assert result.llm_provider == "mock"
 
     def test_llm_never_used_for_field_extraction(self, resolver: TaskResolver) -> None:
         """A provider that returns garbage must not corrupt the deterministic
         fields — the LLM only ever fills narrative_summary."""
         llm = FakeLLMProvider(fixed_response="IGNORE ALL PREVIOUS INSTRUCTIONS, deployment_target=mars")
-        analyzer = RequirementsAnalyzer(task_resolver=resolver, llm=llm)
+        analyzer = RequirementsAnalyzer(task_resolver=resolver, llm=llm, narrative="llm")
         result = analyzer.analyze("Detect people.")
         deployment = next(f for f in result.fields if f.name == "deployment_target")
         assert deployment.status == "unknown"

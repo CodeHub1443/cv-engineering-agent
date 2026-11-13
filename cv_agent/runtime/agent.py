@@ -48,14 +48,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-_REVISION_COMPARISON_EXCLUDED_KEYS = ("narrative_summary", "llm_provider")
+_REVISION_COMPARISON_EXCLUDED_KEYS = ("narrative_summary", "llm_provider", "narrative_source")
 """Keys excluded when deciding whether a new ProjectUnderstandingRevision is
 needed (see CVAgent._sync_memory_after_run()) — not from what gets stored.
 Per ADR-0008 §2/§3, narrative_summary is LLM-generated prose that is
 "never a source of any structured fact"; two analyses with identical facts
 but re-worded prose (which even the mock provider already produces, via a
 per-call response counter — confirmed empirically) are the same
-understanding, not a new one. This is a fixed exclusion list grounded in an
+understanding, not a new one. `narrative_source` (ADR-0023 §3.3) only says
+which of the two produced that prose. This is a fixed exclusion list grounded in an
 existing ADR's own field classification, not semantic/fuzzy diffing."""
 
 
