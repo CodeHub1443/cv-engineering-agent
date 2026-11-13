@@ -118,7 +118,7 @@ def test_stored_prints_one_json_object(env: _Env, capsys: pytest.CaptureFixture[
     cap = capsys.readouterr()
     assert rc == 0
     doc = json.loads(cap.out)
-    assert doc["status"] == "stored" and doc["ingest"] == "unspecified"
+    assert doc["status"] == "stored" and doc["ingest"] == "web_fetch"
     assert doc["route"]["tier"] == "offline"
     assert doc["provenance"]["author_or_org"] == "Example Org"
     assert doc["topic_tags"] == ["object_detection"] and doc["staleness_horizon_days"] == 180

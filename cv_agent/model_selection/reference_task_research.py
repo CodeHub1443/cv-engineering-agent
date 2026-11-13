@@ -45,18 +45,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cv_agent.knowledge.models import ItemId, KnowledgeItem, Provenance, SourceClass
+from cv_agent.knowledge.models import IngestPath, ItemId, KnowledgeItem, Provenance, SourceClass
 from cv_agent.knowledge.store import InMemoryKnowledgeStore
 from cv_agent.llm.base import LLMProvider
 from cv_agent.model_selection.models import (
     CandidateComparison,
+    ConflictDimension,
     SelectionRecommendation,
 )
+from cv_agent.model_selection.selection_payload import SelectionNeedsClarification
 from cv_agent.model_selection.selector import (
     build_candidate,
     compare_candidates,
     select_candidate,
 )
+from cv_agent.requirements.structured import RequirementsView
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -408,6 +411,7 @@ def build_reference_knowledge_store() -> InMemoryKnowledgeStore:
             ),
             topic_tags=spec.topic_tags,
             staleness_horizon_days=spec.staleness_horizon_days,
+            ingest=IngestPath.CURATED_REFERENCE,
         )
         store.put(item)
     return store
@@ -573,7 +577,7 @@ def build_reference_candidates(
 # Conflict notes for the comparison
 # ---------------------------------------------------------------------------
 
-_KNOWN_CONFLICTS: tuple[tuple[str, str, str, str], ...] = (
+_KNOWN_CONFLICTS: tuple[tuple[str, str, str, str, ConflictDimension], ...] = (
     (
         "yolo11-bench-n",
         "rtdetr-paper-r50-coco",
@@ -583,6 +587,7 @@ _KNOWN_CONFLICTS: tuple[tuple[str, str, str, str], ...] = (
             "RT-DETR-R50 throughput is reported on T4 GPU (108 FPS ≈ 9.3 ms/image). "
             "A100 and T4 are different GPU tiers — numbers are NOT directly comparable."
         ),
+        ConflictDimension.HARDWARE,
     ),
     (
         "yolo11-bench-n",
@@ -593,6 +598,7 @@ _KNOWN_CONFLICTS: tuple[tuple[str, str, str, str], ...] = (
             "these are different model sizes. Comparing their raw mAP numbers "
             "(39.5 vs 53.1) conflates scale with architecture quality."
         ),
+        ConflictDimension.MODEL_SCALE,
     ),
 )
 
@@ -612,12 +618,17 @@ def build_reference_comparison() -> CandidateComparison:
     )
 
 
-def run_reference_selection(llm_provider: LLMProvider) -> SelectionRecommendation:
+def run_reference_selection(
+    llm_provider: LLMProvider, *, requirements: RequirementsView
+) -> SelectionRecommendation | SelectionNeedsClarification:
     """Full pipeline: research → comparison → LLM selection for the reference task.
+
+    requirements is the structured view of the user's request (ADR-0023 §3.5); an unknown required
+    field returns SelectionNeedsClarification and makes no LLM call.
 
     llm_provider must be a real LLM provider to generate a meaningful rationale.
     With FakeLLMProvider the rationale will be generic — the comparison itself is
     always fully evidence-backed regardless.
     """
     comparison = build_reference_comparison()
-    return select_candidate(comparison, llm_provider=llm_provider)
+    return select_candidate(comparison, requirements=requirements, llm_provider=llm_provider)

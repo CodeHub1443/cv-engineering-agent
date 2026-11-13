@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from cv_agent.knowledge.models import (
+    IngestPath,
     ItemId,
     KnowledgeItem,
     Provenance,
@@ -394,6 +395,13 @@ def perform_research(
             provenance=provenance,
             topic_tags=request.topic_tags,
             staleness_horizon_days=request.staleness_horizon_days,
+            # conditions that came from the caller (the fallback above) are not web text: such an item is
+            # PROJECT_INPUT, so the hosted payload builder excludes it (ADR-0023 §2.1, §3.4).
+            ingest=(
+                IngestPath.WEB_FETCH
+                if _nonempty_str(extracted.get("conditions")) or request.conditions is None
+                else IngestPath.PROJECT_INPUT
+            ),
         )
     except ValueError as exc:
         return ResearchResult(

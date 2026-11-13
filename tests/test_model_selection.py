@@ -40,6 +40,8 @@ from cv_agent.model_selection.selector import (
     compare_candidates,
     select_candidate,
 )
+from cv_agent.requirements.structured import structured_view
+from tests.test_requirements_structured import _analyzer
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -113,6 +115,12 @@ def _comparison(
 def _llm_with_json(**fields: Any) -> FakeLLMProvider:
     """FakeLLM that returns a JSON string with the given fields."""
     return FakeLLMProvider(fixed_response=json.dumps(fields))
+
+
+# A requirements view that passes the ADR-0023 §3.5 gate (objective, deployment target, latency, a task).
+_REQS = structured_view(
+    _analyzer().analyze("Detect people on a Jetson edge device in real-time from RTSP cameras.")
+)
 
 
 # ---------------------------------------------------------------------------
@@ -574,9 +582,9 @@ class TestCompareCandidates:
 # ---------------------------------------------------------------------------
 
 class TestSelectCandidate:
-    def _valid_json(self, candidate_id: str = "yolov8n") -> str:
+    def _valid_json(self, candidate_id: str = "C1") -> str:
         return json.dumps({
-            "recommended_candidate_id": candidate_id,
+            "recommended_candidate": candidate_id,
             "rationale": "Benchmark evidence shows fast inference on NVIDIA GPU.",
             "confidence": "medium",
             "uncertainty_notes": ["No CCTV-specific benchmark found."],
@@ -584,8 +592,8 @@ class TestSelectCandidate:
 
     def test_valid_response_produces_recommendation(self) -> None:
         cmp = _comparison()
-        llm = FakeLLMProvider(fixed_response=self._valid_json("yolov8n"))
-        rec = select_candidate(cmp, llm_provider=llm)
+        llm = FakeLLMProvider(fixed_response=self._valid_json("C1"))
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec.recommended_candidate_id == "yolov8n"
         assert rec.confidence == "medium"
         assert rec.is_proposal is True
@@ -594,20 +602,20 @@ class TestSelectCandidate:
     def test_is_proposal_always_true_from_selector(self) -> None:
         cmp = _comparison()
         llm = FakeLLMProvider(fixed_response=self._valid_json())
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec.is_proposal is True
 
     def test_llm_called_exactly_once(self) -> None:
         cmp = _comparison((_candidate("a"), _candidate("b", items=(_item("b"),))))
-        llm = FakeLLMProvider(fixed_response=self._valid_json("a"))
-        select_candidate(cmp, llm_provider=llm)
+        llm = FakeLLMProvider(fixed_response=self._valid_json("C1"))
+        select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert llm.call_count == 1
 
     def test_deterministic_with_fixed_llm(self) -> None:
         cmp = _comparison()
         llm = FakeLLMProvider(fixed_response=self._valid_json())
-        rec1 = select_candidate(cmp, llm_provider=llm)
-        rec2 = select_candidate(cmp, llm_provider=llm)
+        rec1 = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
+        rec2 = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec1.recommended_candidate_id == rec2.recommended_candidate_id
         assert rec1.confidence == rec2.confidence
 
@@ -615,14 +623,14 @@ class TestSelectCandidate:
         """ADR-0014 §7 acceptance test — fail-closed when LLM names wrong candidate."""
         cmp = _comparison()
         llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "nonexistent-model-xyz",
+            "recommended_candidate": "C9",
             "rationale": "Best ever.",
             "confidence": "high",
             "uncertainty_notes": [],
         }))
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec.confidence == "insufficient_evidence"
-        assert "nonexistent-model-xyz" in rec.uncertainty_notes[0]
+        assert "C9" in rec.uncertainty_notes[0]
 
     def test_no_invented_benchmark_values(self) -> None:
         """The selector must not introduce benchmark numbers absent from evidence."""
@@ -632,12 +640,12 @@ class TestSelectCandidate:
         cmp = _comparison()
         llm_rationale = "Benchmark evidence shows fast inference on NVIDIA GPU."
         llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "yolov8n",
+            "recommended_candidate": "C1",
             "rationale": llm_rationale,
             "confidence": "medium",
             "uncertainty_notes": [],
         }))
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         # rationale comes from LLM — which we control here via fixed_response
         # The selector must not have added any number not in the prompt
         assert rec.rationale == llm_rationale
@@ -645,18 +653,18 @@ class TestSelectCandidate:
     def test_unparseable_llm_response_falls_back_to_insufficient(self) -> None:
         cmp = _comparison()
         llm = FakeLLMProvider(fixed_response="This is not JSON at all.")
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec.confidence == "insufficient_evidence"
 
     def test_invalid_confidence_from_llm_becomes_insufficient(self) -> None:
         cmp = _comparison()
         llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "yolov8n",
+            "recommended_candidate": "C1",
             "rationale": "Some rationale.",
             "confidence": "extremely_high",
             "uncertainty_notes": [],
         }))
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec.confidence == "insufficient_evidence"
 
     def test_multi_candidate_comparison(self) -> None:
@@ -668,12 +676,12 @@ class TestSelectCandidate:
         )
         cmp = compare_candidates((c1, c2), task_description="Person detection")
         llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "rtdetr-r50",
+            "recommended_candidate": "C2",
             "rationale": "Higher mAP evidence.",
             "confidence": "low",
             "uncertainty_notes": ["Latency not benchmarked."],
         }))
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec.recommended_candidate_id == "rtdetr-r50"
         assert rec.confidence == "low"
 
@@ -683,12 +691,12 @@ class TestSelectCandidate:
         cmp = compare_candidates((c,), task_description="Task")
         assert cmp.research_gaps  # gaps were inferred
         llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "yolov8n",
+            "recommended_candidate": "C1",
             "rationale": "Only candidate.",
             "confidence": "insufficient_evidence",
             "uncertainty_notes": ["No benchmark evidence found."],
         }))
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec.confidence == "insufficient_evidence"
         assert rec.is_proposal is True
 
@@ -701,35 +709,35 @@ class TestSelectCandidate:
             known_conflicts=(("a-1", "b-1", "mAP", "Different hardware"),),
         )
         llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "a",
+            "recommended_candidate": "C1",
             "rationale": "Chose despite conflict.",
             "confidence": "low",
             "uncertainty_notes": ["Conflicting mAP evidence."],
         }))
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert len(rec.comparison.conflicting_evidence) == 1
         assert rec.confidence == "low"
 
     def test_uncertainty_notes_empty_list(self) -> None:
         cmp = _comparison()
         llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "yolov8n",
+            "recommended_candidate": "C1",
             "rationale": "Fast.",
             "confidence": "high",
             "uncertainty_notes": [],
         }))
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec.uncertainty_notes == ()
 
     def test_null_uncertainty_notes_from_llm(self) -> None:
         cmp = _comparison()
         llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "yolov8n",
+            "recommended_candidate": "C1",
             "rationale": "Fast.",
             "confidence": "high",
             "uncertainty_notes": None,
         }))
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
         assert rec.uncertainty_notes == ()
 
 
@@ -842,7 +850,7 @@ class TestReferenceTaskCandidates:
 
         # Use a fake LLM that recommends the YOLO candidate
         llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "yolov8n",
+            "recommended_candidate": "C1",
             "rationale": (
                 "YOLOv8n achieves 37.3 mAP with NVIDIA TAO support and runs "
                 "in real-time; benchmark shows feasibility for CCTV use case."
@@ -854,7 +862,7 @@ class TestReferenceTaskCandidates:
             ],
         }))
 
-        rec = select_candidate(cmp, llm_provider=llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=llm)
 
         assert rec.is_proposal is True
         assert rec.recommended_candidate_id in {"yolov8n", "rtdetr-r50", "tao-detectnetv2"}
