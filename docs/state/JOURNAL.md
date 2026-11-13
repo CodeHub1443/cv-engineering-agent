@@ -2445,3 +2445,11 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Stopped:** The extraction route switch to `fast` (D-098) was not applied. The runtime loads only the packaged default config, which must stay offline, and `tests/test_config.py` requires the two default copies to be identical and all-offline. Reported as Q58 for the owner.
 
 **Left open:** Q38–Q41, Q46–Q49, Q54–Q58. No key read, no GPU, no LLM call, ledger unchanged.
+
+## 2026-11-13 — ADR-0024 accepted: durable KnowledgeStore backend (docs/claude/adr0024-knowledge-store, issue #125, PR #127)
+
+**Did:** Drafted ADR-0024 (Q54, design only), then recorded the owner's acceptance with OQ1 to OQ4 as recommended (D-101). The ADR status is Accepted and each decision is recorded inline under its question. Merged origin/main (state-sync 2) into the branch before the acceptance commit.
+
+**Found:** `--model-name` and `--metric` of `cv-agent research` only build the claim query and were never stored, so the store needs its own retrieval keys (OQ2). `date_accessed` is already a UTC date, so UTC is the staleness convention. S4's `select_claims` signature was not available at drafting time; K4 must re-check it.
+
+**Left open:** K1 to K4 are not started (separate issues; K4 waits for ADR-0023 S4). The ADR-0006 "Amended by ADR-0024" note lands with K1. Q54 stays open in OPEN_QUESTIONS until K3 ships. No code, no key read, no GPU, no LLM call, ledger unchanged.
