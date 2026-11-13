@@ -10,7 +10,8 @@ See ADR-0014 §2/§5.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Literal
 
 from cv_agent.knowledge.models import EvidenceWeight, KnowledgeItem, SourceClass
@@ -25,6 +26,19 @@ SelectionConfidence = Literal[
 _VALID_CONFIDENCE: frozenset[str] = frozenset(
     {"high", "medium", "low", "insufficient_evidence"}
 )
+
+
+class ConflictDimension(str, Enum):
+    """The closed kind of a conflict between two evidence items (ADR-0023 §3.5). The free-text
+    ``ConflictNote.dimension`` and ``.note`` stay local; only this enum may reach a hosted payload."""
+
+    HARDWARE = "hardware"
+    MODEL_SCALE = "model_scale"
+    DATASET = "dataset"
+    METRIC_DEFINITION = "metric_definition"
+    INPUT_RESOLUTION = "input_resolution"
+    PRECISION = "precision"
+    OTHER = "other"
 
 
 def _require_nonblank(value: str, field_name: str) -> None:
@@ -47,6 +61,10 @@ class EvidenceReference:
     evidence_weight: EvidenceWeight
     source_class: SourceClass
     url: str
+    source_item: KnowledgeItem | None = field(default=None, compare=False, repr=False)
+    """The stored item this reference was built from. The selection payload builder hands it, not the
+    reference, to ``PublicClaim.from_item`` so that provenance and ``ingest`` decide eligibility. A
+    reference without one is excluded as ``no_provenance`` (fails closed)."""
 
     def __post_init__(self) -> None:
         _require_nonblank(self.item_id, "EvidenceReference.item_id")
@@ -67,6 +85,7 @@ class EvidenceReference:
             evidence_weight=item.evidence_weight(),
             source_class=item.provenance.source_class,
             url=item.provenance.url,
+            source_item=item,
         )
 
 
@@ -121,8 +140,11 @@ class ConflictNote:
     second_item_id: str
     dimension: str
     note: str
+    dimension_kind: ConflictDimension = ConflictDimension.OTHER
 
     def __post_init__(self) -> None:
+        if not isinstance(self.dimension_kind, ConflictDimension):
+            raise ValueError("ConflictNote.dimension_kind must be a ConflictDimension")
         _require_nonblank(self.first_item_id, "ConflictNote.first_item_id")
         _require_nonblank(self.second_item_id, "ConflictNote.second_item_id")
         _require_nonblank(self.dimension, "ConflictNote.dimension")
