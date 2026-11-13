@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 InfoStatus = Literal["known", "unknown", "assumed"]
+NarrativeSource = Literal["template", "llm"]
 
 
 @dataclass(frozen=True)
@@ -149,13 +150,15 @@ class RequirementsAnalysis:
     constraints: tuple[str, ...]
     risks: tuple[str, ...]
     narrative_summary: str | None = None
-    """Optional prose summary from the configured LLMProvider. Never a
-    source of fact for any other field on this dataclass — purely
-    explanatory text, clearly attributable to the LLM call that produced it
-    (see RequirementsAnalyzer)."""
+    """Prose summary: the deterministic template by default, or LLM prose
+    from `NarrativePayloadV1` when the analyzer is built with
+    narrative="llm" (ADR-0023 §3.3). Never a source of fact for any other
+    field on this dataclass — see `narrative_source`."""
     llm_provider: str | None = None
-    """provider_name of the LLM used for narrative_summary, or None if no
-    provider was configured for this run."""
+    """provider_name of the LLM used for narrative_summary, or None when the
+    narrative came from the template."""
+    narrative_source: NarrativeSource = "template"
+    """"template" (deterministic, offline) or "llm" (ADR-0023 §3.3)."""
 
     @property
     def unknown_field_names(self) -> tuple[str, ...]:

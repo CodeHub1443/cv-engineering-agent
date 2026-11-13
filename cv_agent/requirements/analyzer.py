@@ -5,11 +5,13 @@ cv_agent.requirements.analyzer — RequirementsAnalyzer.
 
 Deterministic and rule-based at its core (cv_agent.requirements.rules),
 matching the same pattern cv_agent.skills.resolver already established for
-capability matching. An LLMProvider is optional and, when supplied, is used
-for exactly one thing: a prose `narrative_summary` — never for extracting or
-inventing a fact. This keeps every structured field reproducible and
-testable against cv_agent.llm.mock.FakeLLMProvider without a live provider,
-per ADR-0008.
+capability matching, per ADR-0008. The `narrative_summary` is the
+deterministic template from cv_agent.requirements.structured by default
+(ADR-0023 §3.3 (b)). Only when built with narrative="llm" does the analyzer
+call its LLMProvider, and then the request carries `NarrativePayloadV1`
+(closed-vocabulary tokens and counts) and nothing else: no request text,
+field value, assumption value or ID reaches a provider (ADR-0023 §2, §3.2).
+The LLM is never used for extracting or inventing a fact.
 
 Does not execute anything: this module never imports cv_agent.skills.local,
 never calls a SkillSource, and never imports cv_agent.execution — even
@@ -17,25 +19,34 @@ though ADR-0009's execution boundary now exists and a skill this analyzer
 reports on may be genuinely executable (see SkillLink, ADR-0008 §9), that
 liveness fact is read secondhand off the Skill/SkillMatch objects the
 already-injected TaskResolver returns, never queried directly. Its only
-side effect is at most one LLMProvider.complete() call.
+side effect is at most one LLMProvider.complete() call, in narrative="llm"
+mode only.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from typing import Optional
 
 from cv_agent.llm.base import LLMProvider, LLMRequest
-from cv_agent.llm.policy import DataClass
+from cv_agent.llm.payload import build_payload
 from cv_agent.requirements.models import (
     CapabilityLink,
     ClarificationQuestion,
+    NarrativeSource,
     RequirementField,
     RequirementsAnalysis,
     SkillLink,
     TaskHypothesis,
 )
 from cv_agent.requirements.rules import FIELD_DETECTORS, TASK_HYPOTHESIS_RULES
+from cv_agent.requirements.structured import (
+    RISK_BEARING_FIELDS,
+    NarrativePayloadV1,
+    render_template_narrative,
+    structured_view,
+)
 from cv_agent.skills.resolver import TaskResolver
 
 _MAX_CAPABILITY_LINKS_PER_TASK = 3
@@ -67,9 +78,16 @@ class RequirementsAnalyzer:
         self,
         task_resolver: TaskResolver,
         llm: Optional[LLMProvider] = None,
+        *,
+        narrative: NarrativeSource = "template",
     ) -> None:
+        if narrative not in ("template", "llm"):
+            raise ValueError('narrative must be "template" or "llm"')  # never fall through to the LLM
+        if narrative == "llm" and llm is None:
+            raise ValueError('narrative="llm" needs an LLMProvider')
         self._resolver = task_resolver
         self._llm = llm
+        self._narrative: NarrativeSource = narrative
 
     def analyze(
         self,
@@ -100,15 +118,7 @@ class RequirementsAnalyzer:
             if f.status == "assumed"
         )
 
-        narrative_summary = None
-        llm_provider_name = None
-        if self._llm is not None:
-            narrative_summary = self._generate_narrative(
-                request, fields, candidate_tasks, clarifications
-            )
-            llm_provider_name = self._llm.provider_name
-
-        return RequirementsAnalysis(
+        analysis = RequirementsAnalysis(
             original_request=request,
             problem_statement=f"The user requests: {request.strip()}",
             fields=fields,
@@ -119,9 +129,8 @@ class RequirementsAnalyzer:
             assumptions=assumption_lines,
             constraints=constraint_lines,
             risks=risk_lines,
-            narrative_summary=narrative_summary,
-            llm_provider=llm_provider_name,
         )
+        return self._with_narrative(analysis)
 
     # ── Field detection ──────────────────────────────────────────────────
 
@@ -262,46 +271,41 @@ class RequirementsAnalyzer:
         )
 
     def _derive_risks(self, fields: tuple[RequirementField, ...]) -> tuple[str, ...]:
-        risk_bearing = {
-            "accuracy_requirement": (
-                "No stated recall/false-positive tolerance — any model choice "
-                "risks being evaluated against the wrong bar later [P§12]."
-            ),
-            "deployment_target": (
-                "No stated deployment target — an architecture chosen now may "
-                "turn out to be undeployable on the eventual hardware [P§13]."
-            ),
-        }
         return tuple(
-            risk_bearing[f.name]
+            _RISK_TEXT[f.name]
             for f in fields
-            if f.name in risk_bearing and f.status == "unknown"
+            if f.name in RISK_BEARING_FIELDS and f.status == "unknown"
         )
 
-    # ── Optional LLM narrative (never a source of fact) ──────────────────
+    # ── Narrative (never a source of fact; ADR-0023 §3.3) ────────────────
 
-    def _generate_narrative(
-        self,
-        request: str,
-        fields: tuple[RequirementField, ...],
-        candidate_tasks: tuple[TaskHypothesis, ...],
-        clarifications: tuple[ClarificationQuestion, ...],
-    ) -> str:
-        assert self._llm is not None
-        known = ", ".join(f.name for f in fields if f.status == "known") or "none"
-        unknown = ", ".join(f.name for f in fields if f.status == "unknown") or "none"
-        tasks = ", ".join(t.task_component for t in candidate_tasks) or "none identified"
-        prompt = (
-            "Summarize this CV engineering requirements analysis in prose.\n"
-            f"Request: {request}\n"
-            f"Known fields: {known}\n"
-            f"Unknown fields: {unknown}\n"
-            f"Candidate task components: {tasks}\n"
-            f"Open questions: {len(clarifications)}\n"
+    def _with_narrative(self, analysis: RequirementsAnalysis) -> RequirementsAnalysis:
+        view = structured_view(analysis)
+        if self._narrative == "template":
+            return dataclasses.replace(
+                analysis, narrative_summary=render_template_narrative(view), narrative_source="template"
+            )
+        assert self._llm is not None  # enforced in __init__
+        payload = build_payload(NarrativePayloadV1(view=view))
+        response = self._llm.complete(LLMRequest(payload=payload, max_tokens=1024))
+        return dataclasses.replace(
+            analysis,
+            narrative_summary=response.content,
+            narrative_source="llm",
+            llm_provider=self._llm.provider_name,
         )
-        response = self._llm.complete(LLMRequest(prompt=prompt, max_tokens=1024, data_classes=frozenset({DataClass.PROJECT_DATA})))
-        return response.content
 
+
+_RISK_TEXT: dict[str, str] = {
+    "accuracy_requirement": (
+        "No stated recall/false-positive tolerance — any model choice "
+        "risks being evaluated against the wrong bar later [P§12]."
+    ),
+    "deployment_target": (
+        "No stated deployment target — an architecture chosen now may "
+        "turn out to be undeployable on the eventual hardware [P§13]."
+    ),
+}
 
 _QUESTION_TEMPLATES: dict[str, str] = {
     "operational_objective": "What exactly needs to be detected, tracked, or measured, in observable terms?",

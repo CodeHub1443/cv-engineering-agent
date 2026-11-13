@@ -198,8 +198,13 @@ def test_selector_declares_project_data() -> None:
     assert [r.data_classes for r in llm.requests] == [frozenset({PD})]
 
 
-def test_analyzer_narrative_declares_project_data() -> None:
+def test_analyzer_narrative_sends_a_payload_not_a_label() -> None:
+    """ADR-0023 §3.2, §3.3: the LLM narrative carries NarrativePayloadV1, declares no label, and its
+    derived classes are PROJECT_METADATA only. The default (template) mode makes no call at all."""
     llm = CapturingLLM("narrative")
-    analyzer = RequirementsAnalyzer(task_resolver=MagicMock(), llm=llm)
-    analyzer._generate_narrative("detect people", (), (), ())
-    assert [r.data_classes for r in llm.requests] == [frozenset({PD})]
+    RequirementsAnalyzer(task_resolver=MagicMock(), llm=llm).analyze(f"detect people {SECRET}")
+    assert llm.requests == []
+    RequirementsAnalyzer(task_resolver=MagicMock(), llm=llm, narrative="llm").analyze(f"detect people {SECRET}")
+    (req,) = llm.requests
+    assert req.data_classes == frozenset() and req.prompt == "" and req.payload is not None
+    assert req.payload.data_classes == frozenset({PM}) and SECRET not in req.payload.body_json

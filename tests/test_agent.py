@@ -50,16 +50,17 @@ def test_hosted_narrative_route_never_breaks_startup_or_health(monkeypatch: pyte
     assert agent.run("smoke test")["status"] == "ready"  # nothing on this path calls an LLM
 
 
-def test_hosted_narrative_route_fails_closed_on_use_without_a_key(
+def test_hosted_narrative_route_is_not_used_by_the_template_narrative(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from cv_agent.llm.errors import LLMCredentialError
-
+    """ADR-0023 §3.3 (b): the narrative is the offline template, so even a hosted NARRATIVE route
+    with no key is never called (it would fail closed with LLMCredentialError; test_llm_config)."""
     monkeypatch.delenv("CV_AGENT_ANTHROPIC_API_KEY", raising=False)
     cfg = AgentConfig()
     cfg.llm.routing["narrative"] = "fast"
-    with pytest.raises(LLMCredentialError):
-        CVAgent(cfg).analyze_requirements("detect defects on a conveyor")  # no fallback to offline
+    analysis = CVAgent(cfg).analyze_requirements("detect defects on a conveyor")
+    assert analysis.narrative_source == "template" and analysis.llm_provider is None
+    assert analysis.narrative_summary
 
 
 def test_unknown_tier_in_config_fails_at_construction() -> None:
