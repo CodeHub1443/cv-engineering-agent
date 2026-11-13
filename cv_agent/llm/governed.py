@@ -23,7 +23,9 @@ one of these per hosted route and never builds one for the mock provider.
 3. reserve the worst case against the day's USD ceiling and call limit (``LLMCallStore.reserve``:
    ``LLMBudgetExceededError``, ``LLMCallLimitError`` or ``LLMClockSkewError``, no network);
 4. the adapter call;
-5. settle: the reservation becomes the actual cost and one call row is written.
+5. settle: the reservation becomes the actual cost and one call row is written. A payload call's
+   row carries ``payload_schema`` (``"<schema_id>/<version>"``) and ``payload_sha256``, taken from
+   the payload that step -1 validated and rendered; both are NULL for unstructured calls (ADR-0023 §5).
 Nothing in 0-3 touches the network, and none of their messages carries prompt text.
 
 Settling rules:
@@ -217,7 +219,10 @@ class GovernedProvider(LLMProvider):
     def complete(self, request: LLMRequest) -> LLMResponse:
         if self._hosted and request.payload is None and self._task_class in _STRUCTURED_ONLY:
             raise LLMUnstructuredRequestError(TaskClass(self._task_class), self._tier)
+        payload = request.payload
         request = resolve_request(request, self._task_class)  # misuse, task mismatch, render, derive classes
+        # resolve_request drops the payload once rendered; it has just validated this exact object.
+        logged = None if payload is None else (f"{payload.schema_id}/{payload.schema_version}", payload.payload_sha256)
         self._check_privacy(request)
         max_tokens = self._check_caps(request)
         if request.max_tokens != max_tokens:
@@ -255,6 +260,7 @@ class GovernedProvider(LLMProvider):
                 stop_reason=exc.stop_reason or f"error:{type(exc).__name__}",
                 request_id=exc.request_id,
                 content=None,
+                payload=logged,
             )
             try:
                 self._store.settle(reservation, record, None)  # the full reservation stays counted
@@ -274,6 +280,7 @@ class GovernedProvider(LLMProvider):
             stop_reason=response.stop_reason or "unknown",
             request_id=response.request_id,
             content=response.content,
+            payload=logged,
         )
         actual = self._actual(response.usage, reservation.reserved_usd, call_id)
         self._store.settle(reservation, record, actual)  # LLMStoreError propagates: no unlogged answer
@@ -330,6 +337,7 @@ class GovernedProvider(LLMProvider):
         stop_reason: str,
         request_id: Optional[str],
         content: Optional[str],
+        payload: Optional[tuple[str, str]],
     ) -> CallRecord:
         return CallRecord(
             call_id=call_id,
@@ -357,4 +365,6 @@ class GovernedProvider(LLMProvider):
             latency_ms=latency_ms,
             prompt_text=prompt_payload(request.system, request.prompt) if self._store_text else None,
             response_text=content if self._store_text else None,
+            payload_schema=None if payload is None else payload[0],
+            payload_sha256=None if payload is None else payload[1],
         )
