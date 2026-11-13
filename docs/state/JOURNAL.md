@@ -2435,3 +2435,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Found:** The brief expected Q50 for the new question, but Q50 was already answered, so the new question is Q53 and the store question is Q54. D-096 cites "operating rules §5"; no file of that name exists in this repository, so the citation is as the owner specified and needs a home. The plan's `yolo_eval.py` anchor was off (the block is lines 64–66); the stale "(Q30 is open)" wording now points to D-077.
 
 **Left open:** Q38–Q41, Q46–Q49, Q53, Q54. No key read, no GPU, no LLM call, ledger unchanged.
+
+## 2026-11-13 — Batch 3 recorded; follow-ups and state-sync 2 (chore/claude/followups-state-sync-2, issue #126)
+
+**Did:** Recorded batch 3: #117 state-sync 1 (a9e6083); #118 Q41 research CLI (d81ad7e); #122 ADR-0023 S3a (e8ec4b8); #123 S3b (0c75e69); #124 S3 requirements (fd1aaf1, origin/main). The S3 review found 0 leaks, 3 low findings fixed and 1 accepted. S3 deviations: a combined `requirement_trigger` vocabulary; substring re-match of assumption values; `narrative_source` defaults to `"template"`. The Q41 ADR verdict was none (no ADR needed). State-sync 1's late file check was fixed in a follow-up commit. The model switch is done by the operator, not by Claude Code.
+
+**Follow-ups in this PR:** `.mypy_cache/` added to `.gitignore`; the `analyze` narrative header now prints `source=<narrative_source>` instead of `llm_provider` (no test asserted the old text); Q53 fixed in test code only (an `ExitStack` helper closes the SQLite ledger before the temp directory is removed; `SqliteExperimentLedger.close()` already existed, so no production leak; three Windows runs of `test_baseline_wiring.py`, 64 passed each). Recorded D-098 to D-100 and Q55 to Q58.
+
+**Stopped:** The extraction route switch to `fast` (D-098) was not applied. The runtime loads only the packaged default config, which must stay offline, and `tests/test_config.py` requires the two default copies to be identical and all-offline. Reported as Q58 for the owner.
+
+**Left open:** Q38–Q41, Q46–Q49, Q54–Q58. No key read, no GPU, no LLM call, ledger unchanged.

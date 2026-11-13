@@ -31,6 +31,7 @@ Coverage (numbered to match the task's required test list):
 from __future__ import annotations
 
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -42,12 +43,25 @@ from cv_agent.execution.jobs.models import (
 )
 from cv_agent.execution.models import ExecutionError, ExecutionEvidence
 from cv_agent.experiments.models import ExperimentRecord
-from cv_agent.experiments.store import ExperimentLedgerError, open_ledger
+from cv_agent.experiments.store import ExperimentLedger, ExperimentLedgerError, open_ledger
 from cv_agent.graph.experiment_wiring import ExperimentContext, job_result_to_experiment_record
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
 # ---------------------------------------------------------------------------
+
+def _open_closing_ledger(stack: ExitStack, tmpdir: str) -> ExperimentLedger:
+    """Open a temp-dir ledger and register its close() on `stack` (Q53).
+
+    On Windows the open SQLite file blocks TemporaryDirectory cleanup (WinError 32), so the
+    ExitStack must be entered *after* the directory and therefore unwinds *before* it.
+    """
+    ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
+    close = getattr(ledger, "close", None)
+    if callable(close):
+        stack.callback(close)
+    return ledger
+
 
 _STARTED_AT = "2026-09-28T10:00:00+00:00"
 _COMPLETED_AT = "2026-09-28T10:05:00+00:00"
@@ -422,8 +436,8 @@ class TestNoFabricatedMetrics:
 
 class TestLedgerPersistence:
     def test_record_can_be_written_and_read_back(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            ledger = _open_closing_ledger(stack, tmpdir)
             rec = job_result_to_experiment_record(
                 _completed_result(), context=_context()
             )
@@ -434,8 +448,8 @@ class TestLedgerPersistence:
             assert retrieved.status == rec.status
 
     def test_written_record_appears_in_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            ledger = _open_closing_ledger(stack, tmpdir)
             rec = job_result_to_experiment_record(
                 _completed_result(), context=_context()
             )
@@ -445,8 +459,8 @@ class TestLedgerPersistence:
             assert records[0].exp_id == _EXP_ID
 
     def test_all_populated_fields_survive_round_trip(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            ledger = _open_closing_ledger(stack, tmpdir)
             ctx = ExperimentContext(
                 exp_id=_EXP_ID,
                 commit=_TEST_SHA,
@@ -528,8 +542,8 @@ class TestArchitectureBoundary:
 
 class TestDuplicateRecord:
     def test_writing_terminal_record_twice_raises(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            ledger = _open_closing_ledger(stack, tmpdir)
             rec = job_result_to_experiment_record(
                 _completed_result(), context=_context()
             )
@@ -538,8 +552,8 @@ class TestDuplicateRecord:
                 ledger.record_experiment(rec)
 
     def test_writing_terminal_record_twice_leaves_original_intact(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ledger = open_ledger(db_path=Path(tmpdir) / "exp.sqlite", create=True)
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            ledger = _open_closing_ledger(stack, tmpdir)
             rec = job_result_to_experiment_record(
                 _completed_result(), context=_context()
             )

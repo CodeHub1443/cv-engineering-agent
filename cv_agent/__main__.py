@@ -213,7 +213,7 @@ def _cmd_analyze(request: str) -> int:
 
     if analysis.narrative_summary:
         print()
-        print(f"Narrative summary (llm_provider={analysis.llm_provider}):")
+        print(f"Narrative summary (source={analysis.narrative_source}):")
         print(f"  {analysis.narrative_summary}")
 
     return 0
