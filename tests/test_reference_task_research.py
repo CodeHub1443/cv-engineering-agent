@@ -31,6 +31,7 @@ from cv_agent.model_selection.reference_task_research import (
     run_reference_selection,
 )
 from cv_agent.model_selection.selector import select_candidate
+from tests.test_model_selection import _REQS
 
 # ---------------------------------------------------------------------------
 # Known candidate IDs for the reference task
@@ -255,11 +256,11 @@ class TestReferenceComparison:
 # 4. Selection
 # ---------------------------------------------------------------------------
 
-def _evidence_based_llm(recommended_candidate_id: str = "yolo11n") -> FakeLLMProvider:
+def _evidence_based_llm(recommended_candidate: str = "C1") -> FakeLLMProvider:
     """FakeLLM that returns a JSON response citing real evidence from the comparison."""
     return FakeLLMProvider(
         fixed_response=json.dumps({
-            "recommended_candidate_id": recommended_candidate_id,
+            "recommended_candidate": recommended_candidate,
             "rationale": (
                 "YOLO11n achieves 39.5 mAP on COCO val2017 at 1.5 ms TensorRT latency "
                 "with 2.6M parameters (official Ultralytics docs). Native ByteTrack/BoT-SORT "
@@ -282,23 +283,23 @@ def _evidence_based_llm(recommended_candidate_id: str = "yolo11n") -> FakeLLMPro
 
 class TestReferenceTaskSelection:
     def test_recommendation_is_proposal(self) -> None:
-        rec = run_reference_selection(_evidence_based_llm())
+        rec = run_reference_selection(_evidence_based_llm(), requirements=_REQS)
         assert rec.is_proposal is True
 
     def test_recommended_candidate_is_valid(self) -> None:
-        rec = run_reference_selection(_evidence_based_llm())
+        rec = run_reference_selection(_evidence_based_llm(), requirements=_REQS)
         assert rec.recommended_candidate_id in _KNOWN_CANDIDATES
 
     def test_confidence_is_valid_value(self) -> None:
-        rec = run_reference_selection(_evidence_based_llm())
+        rec = run_reference_selection(_evidence_based_llm(), requirements=_REQS)
         assert rec.confidence in ("high", "medium", "low", "insufficient_evidence")
 
     def test_rationale_is_nonempty(self) -> None:
-        rec = run_reference_selection(_evidence_based_llm())
+        rec = run_reference_selection(_evidence_based_llm(), requirements=_REQS)
         assert rec.rationale.strip()
 
     def test_uncertainty_notes_preserve_benchmark_incompatibility(self) -> None:
-        rec = run_reference_selection(_evidence_based_llm())
+        rec = run_reference_selection(_evidence_based_llm(), requirements=_REQS)
         notes_text = " ".join(rec.uncertainty_notes)
         # At least one note should acknowledge the hardware incompatibility
         assert any(
@@ -308,13 +309,13 @@ class TestReferenceTaskSelection:
 
     def test_no_execution_triggered(self) -> None:
         """is_proposal=True and no execution-related attributes."""
-        rec = run_reference_selection(_evidence_based_llm())
+        rec = run_reference_selection(_evidence_based_llm(), requirements=_REQS)
         assert rec.is_proposal is True
         for attr in ("run", "execute", "download", "train", "infer"):
             assert not hasattr(rec, attr), f"Unexpected callable attr: {attr!r}"
 
     def test_comparison_embedded_in_recommendation(self) -> None:
-        rec = run_reference_selection(_evidence_based_llm())
+        rec = run_reference_selection(_evidence_based_llm(), requirements=_REQS)
         assert len(rec.comparison.candidates) == 3
         cand_ids = {c.candidate_id for c in rec.comparison.candidates}
         assert cand_ids == _KNOWN_CANDIDATES
@@ -322,20 +323,20 @@ class TestReferenceTaskSelection:
     def test_fail_closed_on_unknown_candidate(self) -> None:
         """If LLM returns an unknown candidate_id, confidence=insufficient_evidence."""
         bad_llm = FakeLLMProvider(fixed_response=json.dumps({
-            "recommended_candidate_id": "nonexistent-model",
+            "recommended_candidate": "C9",
             "rationale": "Best ever.",
             "confidence": "high",
             "uncertainty_notes": [],
         }))
         cmp = build_reference_comparison()
-        rec = select_candidate(cmp, llm_provider=bad_llm)
+        rec = select_candidate(cmp, requirements=_REQS, llm_provider=bad_llm)
         assert rec.confidence == "insufficient_evidence"
 
     def test_deterministic_with_fixed_llm(self) -> None:
         llm = _evidence_based_llm()
-        rec1 = run_reference_selection(llm)
+        rec1 = run_reference_selection(llm, requirements=_REQS)
         llm2 = _evidence_based_llm()
-        rec2 = run_reference_selection(llm2)
+        rec2 = run_reference_selection(llm2, requirements=_REQS)
         assert rec1.recommended_candidate_id == rec2.recommended_candidate_id
         assert rec1.confidence == rec2.confidence
 
