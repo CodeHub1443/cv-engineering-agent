@@ -1,6 +1,6 @@
 # ADR-0024: Durable KnowledgeStore backend — append-only SQLite revisions with a latest view
 
-- **Status:** Proposed (2026-11-13). Awaiting owner acceptance; the decision row is recorded by the next state-sync, not by this PR.
+- **Status:** Accepted (2026-11-13, owner; D-101), with OQ1 to OQ4 decided as recommended (§7.3).
 - **Date:** 2026-11-13
 - **Layer:** knowledge (one new module in the existing `cv_agent/knowledge/` package); CLI wiring
 - **Canon:** `[P§16]`, `[P§17]`, `[P§19]`, `[P§24]`, `[P§25]`, `[P§29.3]`, `[P§34]`
@@ -423,9 +423,13 @@ All tests use `tmp_path` only: never the real state root, no network, no `.env`.
 ### 7.3 Owner questions (decided at acceptance)
 
 - **OQ1. Should the research CLI persist by default?** *Recommendation:* yes, with `--no-persist`, failing closed **before** the fetch when the store is missing (§3.8). *Alternative:* opt in with `--persist` (Alternative G).
+  - **Decided (2026-11-13, owner; D-101):** as recommended: persist by default, with `--no-persist`; the store is checked before any fetch.
 - **OQ2. Where do model names and metric live?** *Recommendation:* store-level `RetrievalKeys`, with `KnowledgeItem` unchanged (§3.3). *Alternative:* new `KnowledgeItem` fields (Alternative F, amends ADR-0006).
+  - **Decided (2026-11-13, owner; D-101):** as recommended: store-level `RetrievalKeys`; `KnowledgeItem` unchanged.
 - **OQ3. How does K4 map an item to a candidate?** *Recommendation:* an exact match after the single normalisation rule of §3.3 (`model_names ∋ normalise_key(candidate_id)`): `YOLO11n` matches `yolo11n`, `yolo11` does not.
+  - **Decided (2026-11-13, owner; D-101):** as recommended: exact match after the trim, identifier check, lower-case rule (§3.3).
 - **OQ4. Does the curated reference evidence move into the durable store?** *Recommendation:* no in v1. It stays code-defined (`reference_task_research.py`), versioned in git and rebuilt in memory, so the reference comparison and its goldens stay reproducible without a local file. `KnowledgeWriter.CURATED_REFERENCE` is added only if the owner says yes.
+  - **Decided (2026-11-13, owner; D-101):** as recommended: curated reference evidence stays code-defined in v1.
 
 ## 8. Revisit trigger
 
