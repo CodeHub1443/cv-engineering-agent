@@ -45,7 +45,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cv_agent.knowledge.models import ItemId, KnowledgeItem, Provenance, SourceClass
+from cv_agent.knowledge.models import IngestPath, ItemId, KnowledgeItem, Provenance, SourceClass
 from cv_agent.knowledge.store import InMemoryKnowledgeStore
 from cv_agent.llm.base import LLMProvider
 from cv_agent.model_selection.models import (
@@ -408,6 +408,7 @@ def build_reference_knowledge_store() -> InMemoryKnowledgeStore:
             ),
             topic_tags=spec.topic_tags,
             staleness_horizon_days=spec.staleness_horizon_days,
+            ingest=IngestPath.CURATED_REFERENCE,
         )
         store.put(item)
     return store
