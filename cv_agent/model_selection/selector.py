@@ -26,6 +26,7 @@ from cv_agent.llm.base import LLMProvider, LLMRequest
 from cv_agent.llm.policy import DataClass
 from cv_agent.model_selection.models import (
     CandidateComparison,
+    ConflictDimension,
     ConflictNote,
     EvidenceReference,
     ModelCandidate,
@@ -188,11 +189,12 @@ def compare_candidates(
     candidates: tuple[ModelCandidate, ...],
     *,
     task_description: str,
-    known_conflicts: tuple[tuple[str, str, str, str], ...] = (),
+    known_conflicts: tuple[tuple, ...] = (),
 ) -> CandidateComparison:
     """Produce a CandidateComparison from already-built candidates.
 
-    known_conflicts: tuples of (item_id_1, item_id_2, dimension, note).
+    known_conflicts: tuples of (item_id_1, item_id_2, dimension, note) and an optional fifth
+    element, a ConflictDimension for the hosted payload (default OTHER; the prose stays local).
 
     research_gaps are inferred deterministically:
     - A candidate with no benchmark_evidence contributes a gap noting the
@@ -222,8 +224,9 @@ def compare_candidates(
             second_item_id=b,
             dimension=dim,
             note=note,
+            dimension_kind=(kind[0] if kind else ConflictDimension.OTHER),
         )
-        for a, b, dim, note in known_conflicts
+        for a, b, dim, note, *kind in known_conflicts
     )
 
     return CandidateComparison(
