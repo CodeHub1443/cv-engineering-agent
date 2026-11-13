@@ -139,6 +139,7 @@ class RequirementsAnalyzer:
                         value=_extract_sentence(request, matches[0]),
                         why_it_matters=detector.why_it_matters,
                         source="user_request",
+                        terms=matches,
                     )
                 )
             elif detector.field_name in assumptions:
@@ -149,6 +150,8 @@ class RequirementsAnalyzer:
                         value=assumptions[detector.field_name],
                         why_it_matters=detector.why_it_matters,
                         source="caller_assumption",
+                        # Only the field's own vocabulary, re-matched locally (ADR-0023 §3.5 item 3).
+                        terms=_find_matches(str(assumptions[detector.field_name]).lower(), detector.trigger_terms),
                     )
                 )
             else:
