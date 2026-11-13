@@ -54,8 +54,8 @@ WEB_SOURCE_CLASSES: frozenset[str] = frozenset(
 )
 MAX_CLAIM_CHARS = 300
 MAX_CONDITIONS_CHARS = 150
-MAX_CLAIMS_PER_CANDIDATE = 10  # N; applied by select_claims (slice S4)
-MAX_CLAIMS_PER_PAYLOAD = 30  # M; applied by select_claims (slice S4)
+MAX_CLAIMS_PER_CANDIDATE = 10  # N; applied by the selection payload builder (slice S4b)
+MAX_CLAIMS_PER_PAYLOAD = 30  # M; applied by the selection payload builder (slice S4b)
 _RESERVED_SUFFIXES = (".local", ".localhost", ".internal", ".lan", ".home.arpa", ".corp", ".intranet")
 _WEB_INGEST = frozenset({IngestPath.WEB_FETCH, IngestPath.CURATED_REFERENCE})
 _NUMERIC_LABEL = re.compile(r"0x[0-9a-f]*|[0-9]+")  # inet_aton forms: 127.1, 0xa.0.0.5, 010.0.0.5
@@ -231,6 +231,55 @@ class PublicClaim:
                 is_benchmark=is_benchmark,
             )
         )
+
+
+_WEIGHT_RANK = {"high": 0, "medium": 1, "low_medium": 2}
+
+
+def claim_order_key(item: KnowledgeItem, is_benchmark: bool) -> tuple[int, int, str]:
+    """The §2.3 deterministic order, smaller is better: benchmark evidence first, then evidence weight
+    from high to low_medium, then ``item_id`` lexically. Used for the caps and the size guard alike.
+    Only meaningful for an eligible item (one that ``PublicClaim.from_item`` accepts)."""
+    weight = source_class_weight(item.provenance.source_class)
+    return (0 if is_benchmark else 1, _WEIGHT_RANK.get(weight, len(_WEIGHT_RANK)), str(item.item_id))
+
+
+def rank_eligible(
+    items: typing.Sequence[tuple[object, bool]],
+) -> tuple[list[tuple[tuple[int, int, str], KnowledgeItem, bool]], Mapping[ExclusionReason, int]]:
+    """Split ``(item, is_benchmark)`` pairs into the eligible ones, best first, and the exclusion counts.
+
+    Eligibility is decided by :meth:`PublicClaim.from_item` itself (a throwaway probe is discarded), so
+    the §2.3 checks have exactly one implementation.
+    """
+    ranked: list[tuple[tuple[int, int, str], KnowledgeItem, bool]] = []
+    excluded: dict[ExclusionReason, int] = {}
+    for item, is_benchmark in items:
+        probe = PublicClaim.from_item(item, ordinal=1, is_benchmark=is_benchmark)
+        if isinstance(probe, ExclusionReason):
+            excluded[probe] = excluded.get(probe, 0) + 1
+        else:
+            assert type(item) is KnowledgeItem  # from_item accepts nothing else
+            ranked.append((claim_order_key(item, is_benchmark), item, is_benchmark))
+    ranked.sort(key=lambda r: r[0])
+    return ranked, MappingProxyType(excluded)
+
+
+def select_claims(
+    items: typing.Sequence[tuple[object, bool]], *, per_candidate: int, start_ordinal: int
+) -> tuple[tuple[PublicClaim, ...], int, Mapping[ExclusionReason, int]]:
+    """``(claims, omitted, excluded)``: at most ``per_candidate`` eligible claims in the §2.3 order,
+    ordinals ``start_ordinal`` onward, the number of eligible items left out, and the exclusion counts
+    by reason. An ineligible item is excluded and counted, never raised. Bad arguments are a caller bug."""
+    if type(per_candidate) is not int or per_candidate < 0 or type(start_ordinal) is not int:
+        raise PayloadFieldError("select_claims: per_candidate must be an int >= 0 and start_ordinal an int")
+    ranked, excluded = rank_eligible(items)
+    claims = []
+    for offset, (_, item, is_benchmark) in enumerate(ranked[:per_candidate]):
+        made = PublicClaim.from_item(item, ordinal=start_ordinal + offset, is_benchmark=is_benchmark)
+        assert isinstance(made, PublicClaim)  # it passed the probe above
+        claims.append(made)
+    return tuple(claims), len(ranked) - len(claims), excluded
 
 
 @dataclass(frozen=True, eq=False)
