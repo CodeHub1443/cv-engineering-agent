@@ -6,6 +6,7 @@ no real state root: every store lives under ``tmp_path``, every adapter is a fak
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from cv_agent.graph.research import perform_research
+from cv_agent.knowledge.models import IngestPath
 from cv_agent.knowledge.store import InMemoryKnowledgeStore
 from cv_agent.llm.base import LLMProvider, LLMRequest, LLMResponse
 from cv_agent.llm.catalog import load_catalog
@@ -23,9 +25,10 @@ from cv_agent.llm.governed import GovernedProvider
 from cv_agent.llm.mock import FakeLLMProvider
 from cv_agent.llm.policy import DEFAULT_HOSTED_ALLOWED, DataClass, TaskClass
 from cv_agent.llm.sqlite_store import LLMCallStore
-from cv_agent.model_selection.selector import select_candidate
+from cv_agent.model_selection.models import ModelCandidate
+from cv_agent.model_selection.selector import build_candidate, select_candidate
 from cv_agent.requirements.analyzer import RequirementsAnalyzer
-from tests.test_model_selection import _comparison
+from tests.test_model_selection import _REQS, _comparison, _item
 from tests.test_research_orchestration import _llm_json, _make_executor, _minimal_request
 
 T0 = datetime(2026, 11, 12, 9, 30, 0, tzinfo=timezone.utc)
@@ -192,10 +195,26 @@ def test_research_extraction_declares_public_web_and_metadata() -> None:
     assert [r.data_classes for r in llm.requests] == [frozenset({PW, PM})]
 
 
-def test_selector_declares_project_data() -> None:
+def test_selector_sends_a_payload_with_derived_classes_never_project_data() -> None:
+    """ADR-0023 §3.5: the selector sends a SelectionPayloadV1 and declares no class itself. The derived
+    classes are {PROJECT_METADATA} (no eligible public claim) or {PROJECT_METADATA, PUBLIC_WEB}, never
+    PROJECT_DATA."""
     llm = CapturingLLM("{}")
-    select_candidate(_comparison(), llm_provider=llm)
-    assert [r.data_classes for r in llm.requests] == [frozenset({PD})]
+    select_candidate(_comparison(), requirements=_REQS, llm_provider=llm)  # items default to ingest=UNSPECIFIED
+    web = _comparison((_web_candidate(),))
+    select_candidate(web, requirements=_REQS, llm_provider=llm)
+    assert [r.data_classes for r in llm.requests] == [frozenset(), frozenset()]
+    assert all(r.payload is not None and r.prompt == "" and r.system is None for r in llm.requests)
+    assert [r.payload.data_classes for r in llm.requests] == [frozenset({PM}), frozenset({PM, PW})]  # type: ignore[union-attr]
+    assert all(PD not in r.payload.data_classes for r in llm.requests)  # type: ignore[union-attr]
+
+
+def _web_candidate() -> ModelCandidate:
+    item = dataclasses.replace(_item("web-1", "A public claim"), ingest=IngestPath.WEB_FETCH)
+    return build_candidate(
+        candidate_id="w", model_family="W", task_support=("object_detection",), evidence_items=(item,),
+        strengths=(), limitations=(), compatibility_constraints=(),
+    )
 
 
 def test_analyzer_narrative_sends_a_payload_not_a_label() -> None:

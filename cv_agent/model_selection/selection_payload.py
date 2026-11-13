@@ -33,7 +33,7 @@ from cv_agent.llm.payload import (
 )
 from cv_agent.llm.policy import TaskClass
 from cv_agent.model_selection.models import CandidateComparison, ConflictDimension
-from cv_agent.requirements.structured import MAX_COUNT, TASK_COMPONENT, RequirementsView
+from cv_agent.requirements.structured import MAX_COUNT, TASK_COMPONENT, FieldStatus, RequirementsView
 
 MAX_CANDIDATES = 8
 MAX_CONFLICTS = 30
@@ -96,6 +96,40 @@ class SelectionPayloadV1:
     candidates: tuple[CandidateBlock, ...] = field(metadata=_b(max_items=MAX_CANDIDATES))
     conflicts: tuple[ConflictRef, ...] = field(metadata=_b(max_items=MAX_CONFLICTS))
     claims_omitted_total: int = field(metadata=_b(maximum=MAX_COUNT))
+
+
+REQUIRED_FIELDS: tuple[str, ...] = ("operational_objective", "deployment_target", "latency_requirement")
+"""ADR-0023 §3.5: each needs at least one admissible trigger token; plus at least one task component."""
+
+
+@dataclass(frozen=True)
+class SelectionNeedsClarification:
+    """A required field is unknown. The caller routes to the clarify interrupt; no LLM call is made.
+    Holds field names (closed vocabulary) only."""
+
+    missing_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SelectionStaysLocal:
+    """After clarification a required field still has no admissible token (or there is no task
+    component): the run stays local with ``insufficient_evidence`` and no hosted call (§3.5 step 4).
+    Additive to the §5 union (deviation D4). Holds field names only, never answer text."""
+
+    unresolved: tuple[str, ...]
+
+
+def check_gate(requirements: RequirementsView) -> "SelectionNeedsClarification | SelectionStaysLocal | None":
+    """The §3.5 gate. Unknown fields come first (a clarification can still fill them); then fields with
+    no admissible token, and no task component, which no clarify interrupt can ask for (deviation D7)."""
+    by_name = {f.name.value: f for f in requirements.fields}
+    missing = tuple(n for n in REQUIRED_FIELDS if n not in by_name or by_name[n].status is FieldStatus.UNKNOWN)
+    if missing:
+        return SelectionNeedsClarification(missing)
+    unresolved = tuple(n for n in REQUIRED_FIELDS if not by_name[n].terms)
+    if not requirements.tasks:
+        unresolved += ("task_component",)
+    return SelectionStaysLocal(unresolved) if unresolved else None
 
 
 def _water_fill(eligible: Sequence[int], per_candidate: int, total: int) -> list[int]:
@@ -176,12 +210,16 @@ def build_selection_payload(
     requirements: RequirementsView,
     *,
     max_input_chars: int = MAX_INPUT_CHARS,
-) -> tuple[SelectionPayloadV1, Mapping[int, str]]:
-    """``(payload, {candidate ordinal: candidate_id})``. The mapping stays local, never in the payload.
+) -> "tuple[SelectionPayloadV1, Mapping[int, str]] | SelectionNeedsClarification | SelectionStaysLocal":
+    """``(payload, {candidate ordinal: candidate_id})``, or the gate's outcome when a required field is
+    missing (nothing is built then). The mapping stays local, never in the payload.
 
     More than ``MAX_CANDIDATES`` candidates is a ``ValueError`` before anything is built. The size guard
     raises ``PayloadFieldError`` only if the payload cannot fit even with no claims.
     """
+    blocked = check_gate(requirements)
+    if blocked is not None:
+        return blocked
     candidates = comparison.candidates
     if len(candidates) > MAX_CANDIDATES:
         raise ValueError(f"a selection payload carries at most {MAX_CANDIDATES} candidates")
@@ -215,9 +253,13 @@ __all__ = [
     "MAX_CANDIDATES",
     "MAX_CONFLICTS",
     "MAX_INPUT_CHARS",
+    "REQUIRED_FIELDS",
     "CandidateBlock",
     "ConflictDimension",
     "ConflictRef",
+    "SelectionNeedsClarification",
     "SelectionPayloadV1",
+    "SelectionStaysLocal",
     "build_selection_payload",
+    "check_gate",
 ]
