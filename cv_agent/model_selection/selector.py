@@ -51,7 +51,7 @@ _ORDINAL = re.compile(r"C[1-8]")
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _extract_json(text: str) -> dict | None:
+def _extract_json(text: str) -> object:
     text = text.strip()
     try:
         return json.loads(text)
@@ -216,7 +216,7 @@ def select_candidate(
     extracted = _extract_json(llm_response.content)
 
     # --- Fail-closed: unparseable LLM response ---
-    if extracted is None:
+    if not isinstance(extracted, dict):
         return _insufficient(
             comparison,
             "LLM response could not be parsed as JSON.",
