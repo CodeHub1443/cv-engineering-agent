@@ -320,6 +320,8 @@ def perform_research(
         )
 
     extracted = _extract_json(llm_response.content)
+    if not isinstance(extracted, dict):  # json.loads may yield a list, number or string (#144)
+        extracted = None
     if extracted is None:
         return ResearchResult(
             status="failed_extraction",

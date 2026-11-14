@@ -980,3 +980,20 @@ class TestProviderFailureAfterSend:
     def test_governance_and_config_errors_stay_loud(self, exc):
         with pytest.raises(type(exc)):
             _research(provider=_Recording(exc=exc))
+
+
+# ---------------------------------------------------------------------------
+# Non-object JSON replies (issue #144)
+# ---------------------------------------------------------------------------
+
+
+class TestNonObjectJsonReply:
+    """A reply that parses as JSON but is not an object is a failed_extraction, never an exception."""
+
+    @pytest.mark.parametrize("reply", ['["x"]', "42", '"claim"'])
+    def test_non_object_reply_is_failed_extraction(self, reply: str):
+        result, _, ks = _run(llm_response=reply)
+        assert result.status == "failed_extraction"
+        assert result.error_message is not None
+        assert "could not be parsed as a JSON object" in result.error_message
+        assert ks.get(ItemId(result.item_id)) is None
