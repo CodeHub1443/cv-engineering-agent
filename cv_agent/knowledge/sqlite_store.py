@@ -38,11 +38,13 @@ from typing import Any, Callable, Collection, Final, Iterator
 
 from cv_agent.knowledge.models import IngestPath, ItemId, KnowledgeItem, Provenance, SourceClass
 from cv_agent.knowledge.store import (
+    KnowledgeQuery,
     KnowledgeStore,
     KnowledgeStoreError,
     KnowledgeWriter,
     RetrievalKeys,
     StoredItem,
+    matches,
 )
 
 SCHEMA_VERSION: Final = "1"
@@ -266,9 +268,16 @@ class SqliteKnowledgeStore:
         )
         return [_rebuild(r, as_of) for r in rows]
 
-    def _latest(self) -> list[StoredItem]:
+    def search(self, query: KnowledgeQuery) -> list[StoredItem]:
+        """Latest revisions matching ``query``, ``item_id`` ascending. Filters in Python through ``matches``
+        (a full scan of the latest view; acceptable for v1). ``stale`` is computed from ``query.as_of``."""
+        if type(query) is not KnowledgeQuery:
+            raise TypeError("search takes a KnowledgeQuery")
+        return [s for s in self._latest(query.as_of) if matches(s.item, s.keys, query)]
+
+    def _latest(self, as_of: date | None = None) -> list[StoredItem]:
         rows = self._select("SELECT * FROM knowledge_latest ORDER BY item_id ASC")
-        return [_rebuild(r, None) for r in rows]
+        return [_rebuild(r, as_of) for r in rows]
 
     def _select(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
         try:
