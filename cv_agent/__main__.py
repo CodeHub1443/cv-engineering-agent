@@ -912,6 +912,7 @@ def _cmd_research(args: Any) -> int:
     ``stored`` result prints one JSON object on stdout; everything human-readable goes to stderr.
     Exit 0 stored, 1 any other research status, 2 invalid input or a gateway refusal.
     """
+    import dataclasses
     import hashlib
     import json
 
@@ -940,11 +941,21 @@ def _cmd_research(args: Any) -> int:
         f"{args.url}\n{claim_query}".encode("utf-8")
     ).hexdigest()[:16]
 
+    llm_config = settings.load_config().llm
+    if args.live:  # per-invocation override, config data only: a tier name (ADR-0020 amendment, D-102)
+        llm_config = dataclasses.replace(
+            llm_config, routing={**llm_config.routing, TaskClass.EXTRACTION.value: "fast"}
+        )
     try:
-        router = build_router(settings.load_config().llm, state_dir=None)
+        router = build_router(llm_config, state_dir=None)
     except LLMConfigError as exc:
         return fail(f"invalid LLM configuration: {exc}")
     route = next(r for r in router.routes() if r.task_class == TaskClass.EXTRACTION)
+    if args.live:
+        try:  # credential and call log resolve before the fetch (Q57); the router caches the provider
+            router.for_task(TaskClass.EXTRACTION)
+        except LLMError as exc:
+            return fail(f"refused by the LLM gateway: {type(exc).__name__}: {exc}")
 
     registry = ToolRegistry()
     web_research.register(registry)
@@ -1151,6 +1162,11 @@ def main(argv: list[str] | None = None) -> int:
     research_parser.add_argument("--author-or-org", default=None, help="Provenance fallback.")
     research_parser.add_argument(
         "--date-published", default=None, help="Provenance fallback, YYYY-MM-DD."
+    )
+    research_parser.add_argument(
+        "--live", action="store_true",
+        help="Route EXTRACTION to the fast tier for this run only (D-102). The route and the "
+        "credential are resolved before the fetch. Default: off (offline route).",
     )
 
     llm_log_parser = subparsers.add_parser("llm-log", help="Manage the LLM call log.")
