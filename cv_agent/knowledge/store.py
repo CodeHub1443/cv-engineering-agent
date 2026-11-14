@@ -8,6 +8,8 @@ implementation, and the small types a durable backend shares (filename, error, w
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 from typing import Collection, Final, Protocol
@@ -15,6 +17,8 @@ from typing import Collection, Final, Protocol
 from cv_agent.knowledge.models import ItemId, KnowledgeItem, SourceClass
 
 KNOWLEDGE_FILENAME: Final = "knowledge.sqlite"
+# One identifier-token rule for retrieval keys (ADR-0024 §3.3). graph/research.py adopts it in K3.
+RETRIEVAL_KEY_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/+:-]{0,63}")
 
 
 class KnowledgeStoreError(Exception):
@@ -28,6 +32,44 @@ class KnowledgeWriter(str, Enum):
     """Who wrote a revision (ADR-0024 §5). CURATED_REFERENCE is added only if curated items move in."""
 
     RESEARCH_CLI = "research_cli"
+
+
+def normalise_key(value: str) -> str:
+    """The single key rule, applied at write and read: strip, token fullmatch (else ValueError), lower."""
+    if not isinstance(value, str):
+        raise ValueError(f"retrieval key must be a string, got {value!r}")
+    stripped = value.strip()
+    if RETRIEVAL_KEY_PATTERN.fullmatch(stripped) is None:
+        raise ValueError(f"retrieval key {value!r} is not an identifier token ({RETRIEVAL_KEY_PATTERN.pattern})")
+    return stripped.lower()
+
+
+@dataclass(frozen=True)
+class RetrievalKeys:
+    """Store-level retrieval metadata recorded next to a revision (ADR-0024 §3.3); not a KnowledgeItem field."""
+
+    model_names: tuple[str, ...] = ()
+    metric: str | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.model_names, str):
+            raise TypeError("RetrievalKeys.model_names must be a sequence of names, not a bare string")
+        names = tuple(dict.fromkeys(normalise_key(n) for n in self.model_names))  # first occurrence wins
+        object.__setattr__(self, "model_names", names)
+        if self.metric is not None:
+            object.__setattr__(self, "metric", normalise_key(self.metric))
+
+
+@dataclass(frozen=True)
+class StoredItem:
+    """One stored revision: the item, its keys, and when/by whom it was recorded."""
+
+    item: KnowledgeItem
+    keys: RetrievalKeys
+    revision: int
+    recorded_at: str  # UTC ISO 8601 'Z'
+    writer: KnowledgeWriter
+    stale: bool  # item.is_stale(as_of) for the as_of the caller passed
 
 
 class KnowledgeStore(Protocol):

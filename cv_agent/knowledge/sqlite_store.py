@@ -7,7 +7,8 @@ together with their retrieval keys; a deterministic latest view; and a fail-clos
 item (the constructors do), hosted-payload eligibility (the gateway does), acquisition, or ranking.
 This is the ONLY module in ``cv_agent/knowledge/`` allowed to import ``sqlite3``.
 
-Slice K1a (this file so far): the lifecycle only. Reading and writing revisions arrive in K1b/K1c.
+Slices: K1a the lifecycle; K1b revisions (record/put/get/list_items/query/history, the content hash,
+row rebuild, staleness from a passed ``as_of``). ``search`` arrives in K1c.
 
 Rules (copied from ``cv_agent/llm/sqlite_store.py``):
 - The file is created only by ``SqliteKnowledgeStore.initialise``. The constructor and every other
@@ -17,19 +18,32 @@ Rules (copied from ``cv_agent/llm/sqlite_store.py``):
 - Rollback journal, no WAL: the store is one file, so a copy is a complete backup.
 - No SQL CHECK on enum columns: SQLite cannot alter one without a table rebuild, which is not an
   additive migration. Enum validity is enforced by the typed dataclasses.
+- A read never skips a bad row: every row is rebuilt through the typed constructors and a failure
+  raises ``KnowledgeStoreError`` naming its ``revision_id``.
+- The store never reads a clock for staleness (``as_of`` is passed in); the injected ``now`` only
+  stamps ``recorded_at`` on a write.
 - Migration is additive only. Schema version 1 has no older version, so ``migrate`` verifies the
   store and changes nothing.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from contextlib import closing, contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable, Final, Iterator
+from typing import Any, Callable, Collection, Final, Iterator
 
-from cv_agent.knowledge.store import KnowledgeStoreError, KnowledgeWriter
+from cv_agent.knowledge.models import IngestPath, ItemId, KnowledgeItem, Provenance, SourceClass
+from cv_agent.knowledge.store import (
+    KnowledgeStore,
+    KnowledgeStoreError,
+    KnowledgeWriter,
+    RetrievalKeys,
+    StoredItem,
+)
 
 SCHEMA_VERSION: Final = "1"
 INIT_HINT: Final = "run `cv-agent knowledge init` to create it"
@@ -160,6 +174,115 @@ class SqliteKnowledgeStore:
         except sqlite3.Error as exc:
             raise KnowledgeStoreError(f"knowledge store {target} is corrupt or unreadable: {exc}") from exc
 
+    # --- KnowledgeStore Protocol (latest view) ---------------------------------------------------
+
+    def put(self, item: KnowledgeItem, *, keys: RetrievalKeys = RetrievalKeys()) -> None:
+        """Record ``item`` (see ``record``); the Protocol method, so it returns nothing."""
+        self.record(item, keys=keys)
+
+    def get(self, item_id: ItemId) -> KnowledgeItem | None:
+        rows = self._select("SELECT * FROM knowledge_latest WHERE item_id = ?", (str(item_id),))
+        return _rebuild(rows[0], None).item if rows else None
+
+    def list_items(self) -> list[KnowledgeItem]:
+        return [s.item for s in self._latest()]
+
+    def query(
+        self,
+        *,
+        topic_tags: Collection[str] | None = None,
+        source_class: SourceClass | None = None,
+        exclude_stale_as_of: date | None = None,
+    ) -> list[KnowledgeItem]:
+        """Same filters as ``InMemoryKnowledgeStore.query``, over the latest view, ``item_id`` ascending."""
+        wanted = set(topic_tags) if topic_tags is not None else None
+        results: list[KnowledgeItem] = []
+        for stored in self._latest():
+            item = stored.item
+            if wanted is not None and not wanted.issubset(item.topic_tags):
+                continue
+            if source_class is not None and item.provenance.source_class != source_class:
+                continue
+            if exclude_stale_as_of is not None and item.is_stale(exclude_stale_as_of):
+                continue
+            results.append(item)
+        return results
+
+    # --- durable-only surface ---------------------------------------------------------------------
+
+    def record(self, item: KnowledgeItem, *, keys: RetrievalKeys = RetrievalKeys()) -> int:
+        """Append a revision unless the content is identical to the latest; return the latest revision.
+
+        One ``BEGIN IMMEDIATE`` transaction reads the latest revision and inserts the next, so racing
+        writers serialise; ``UNIQUE(item_id, revision)`` is the backstop. No row is ever changed.
+        """
+        if not isinstance(item, KnowledgeItem):
+            raise TypeError(f"record() needs a KnowledgeItem, got {item!r}")
+        if not isinstance(keys, RetrievalKeys):
+            raise TypeError(f"keys must be RetrievalKeys, got {keys!r}")
+        recorded_at = self._recorded_at()
+        digest = _content_hash(item, keys)
+        prov = item.provenance
+        with self._txn() as conn:
+            latest = conn.execute(
+                "SELECT revision, content_sha256 FROM knowledge_revisions WHERE item_id = ? "
+                "ORDER BY revision DESC LIMIT 1",
+                (str(item.item_id),),
+            ).fetchone()
+            if latest is not None and latest[1] == digest:
+                return int(latest[0])
+            revision = 1 if latest is None else int(latest[0]) + 1
+            conn.execute(
+                "INSERT INTO knowledge_revisions (item_id, revision, recorded_at, writer, content_sha256, "
+                "claim, conditions, topic_tags_json, staleness_horizon_days, ingest, url, source_class, "
+                "date_published, date_accessed, author_or_org, model_names_json, metric) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    str(item.item_id),
+                    revision,
+                    recorded_at,
+                    self._writer.value,
+                    digest,
+                    item.claim,
+                    item.conditions,
+                    json.dumps(list(item.topic_tags), ensure_ascii=False),
+                    item.staleness_horizon_days,
+                    item.ingest.value,
+                    prov.url,
+                    prov.source_class,
+                    prov.date_published,
+                    prov.date_accessed,
+                    prov.author_or_org,
+                    json.dumps(list(keys.model_names), ensure_ascii=False),
+                    keys.metric,
+                ),
+            )
+            return revision
+
+    def history(self, item_id: ItemId, *, as_of: date) -> list[StoredItem]:
+        """Every revision of ``item_id``, oldest first, with ``stale`` computed from the passed ``as_of``."""
+        rows = self._select(
+            "SELECT * FROM knowledge_revisions WHERE item_id = ? ORDER BY revision ASC", (str(item_id),)
+        )
+        return [_rebuild(r, as_of) for r in rows]
+
+    def _latest(self) -> list[StoredItem]:
+        rows = self._select("SELECT * FROM knowledge_latest ORDER BY item_id ASC")
+        return [_rebuild(r, None) for r in rows]
+
+    def _select(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+        try:
+            with closing(self._connect()) as conn:
+                return conn.execute(sql, params).fetchall()
+        except sqlite3.Error as exc:
+            raise KnowledgeStoreError(f"cannot read knowledge store {self._path}: {exc}") from exc
+
+    def _recorded_at(self) -> str:
+        moment = self._now()
+        if not isinstance(moment, datetime) or moment.tzinfo is None or moment.utcoffset() is None:
+            raise KnowledgeStoreError("the store clock must return a timezone-aware datetime")
+        return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     @contextmanager
     def _txn(self) -> Iterator[sqlite3.Connection]:
         """One ``BEGIN IMMEDIATE`` transaction; any sqlite error becomes ``KnowledgeStoreError``."""
@@ -190,6 +313,81 @@ def _connect(path: Path, busy_timeout_s: float) -> sqlite3.Connection:
     # mode=rw: open an existing file only, so a deleted store is an error, not a new empty one.
     uri = path.resolve().as_uri() + "?mode=rw"
     return sqlite3.connect(uri, uri=True, timeout=busy_timeout_s, isolation_level=None)
+
+
+def _as_protocol(store: SqliteKnowledgeStore) -> KnowledgeStore:
+    """Static proof (mypy) that the store implements the ``KnowledgeStore`` Protocol."""
+    return store
+
+
+def _content_hash(item: KnowledgeItem, keys: RetrievalKeys) -> str:
+    """SHA-256 of the canonical JSON of the item and keys; not ``recorded_at``, ``writer`` or ``revision``."""
+    prov = item.provenance
+    payload = {
+        "item_id": str(item.item_id),
+        "claim": item.claim,
+        "conditions": item.conditions,
+        "topic_tags": list(item.topic_tags),
+        "staleness_horizon_days": item.staleness_horizon_days,
+        "ingest": item.ingest.value,
+        "url": prov.url,
+        "source_class": prov.source_class,
+        "date_published": prov.date_published,
+        "date_accessed": prov.date_accessed,
+        "author_or_org": prov.author_or_org,
+        "model_names": list(keys.model_names),
+        "metric": keys.metric,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _string_list(raw: Any, what: str) -> tuple[str, ...]:
+    value = json.loads(raw)
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise ValueError(f"{what} must be a JSON array of strings")
+    return tuple(value)
+
+
+def _rebuild(row: tuple[Any, ...], as_of: date | None) -> StoredItem:
+    """Rebuild a row through the typed constructors; any failure names the row's ``revision_id``."""
+    revision_id = row[0] if row else None
+    try:
+        if len(row) != len(_REVISION_COLUMNS):
+            raise ValueError(f"expected {len(_REVISION_COLUMNS)} columns, got {len(row)}")
+        (_, item_id, revision, recorded_at, writer, _digest, claim, conditions, tags_json, horizon,
+         ingest, url, source_class, published, accessed, author, names_json, metric) = row
+        item = KnowledgeItem(
+            item_id=ItemId(item_id),
+            claim=claim,
+            conditions=conditions,
+            provenance=Provenance(
+                url=url,
+                source_class=source_class,
+                date_published=published,
+                date_accessed=accessed,
+                author_or_org=author,
+            ),
+            topic_tags=_string_list(tags_json, "topic_tags_json"),
+            staleness_horizon_days=horizon,
+            ingest=IngestPath(ingest),
+        )
+        names = _string_list(names_json, "model_names_json")
+        keys = RetrievalKeys(model_names=names, metric=metric)
+        if keys.model_names != names or keys.metric != metric:
+            raise ValueError("stored retrieval keys are not normalised")
+        if not isinstance(revision, int) or not isinstance(recorded_at, str):
+            raise ValueError("revision or recorded_at has the wrong type")
+        return StoredItem(
+            item=item,
+            keys=keys,
+            revision=revision,
+            recorded_at=recorded_at,
+            writer=KnowledgeWriter(writer),
+            stale=as_of is not None and item.is_stale(as_of),
+        )
+    except (ValueError, TypeError) as exc:  # JSONDecodeError is a ValueError
+        raise KnowledgeStoreError(f"bad knowledge row revision_id={revision_id}: {exc}") from exc
 
 
 def _check_shape(conn: sqlite3.Connection, path: Path) -> None:
