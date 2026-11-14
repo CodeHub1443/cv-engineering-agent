@@ -124,6 +124,17 @@ def test_unparseable_reply_fails_closed() -> None:
     assert isinstance(rec, SelectionRecommendation) and rec.confidence == "insufficient_evidence"
 
 
+@pytest.mark.parametrize(
+    "raw",
+    ['["C1"]', '"C1"', "42", "true", "null", '[{"recommended_candidate": "C1", "rationale": "r", "confidence": "high"}]'],
+)
+def test_a_json_reply_that_is_not_an_object_fails_closed(raw: str) -> None:
+    """Issue #139: valid JSON that is not an object used to raise AttributeError."""
+    rec = select_candidate(_cmp([_cand("a", 2)]), requirements=_view(FULL), llm_provider=Recording(raw))
+    assert isinstance(rec, SelectionRecommendation) and rec.confidence == "insufficient_evidence"
+    assert rec.rationale == "LLM response could not be parsed as JSON."
+
+
 def test_no_marker_reaches_the_outbound_request() -> None:
     m = "CANARY-" + secrets.token_hex(6)
     cand = _cand("id-" + m, 2, model_family=m, strengths=(m,), limitations=(m,), compat=(m,))
