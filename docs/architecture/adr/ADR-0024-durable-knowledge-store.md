@@ -446,3 +446,13 @@ All tests use `tmp_path` only: never the real state root, no network, no `.env`.
 - **SQLite locking on synced or network folders.** `BEGIN IMMEDIATE` with a busy timeout is proven locally (the call log). If the main checkout is on a synced drive (OneDrive and similar), locking may be unreliable. That case is not tested.
 - **Line estimates** (§7.2) are estimates, not measurements.
 - **Row size** (about 1–2 KB) is an estimate from the reference claims (the longest is 220 characters, ADR-0023 §2.3), not a measurement.
+
+## Amendment (2026-11-14): K2 CLI flags (D-109)
+
+Appended with the K2 implementation (issue #149). No text above this section is edited. It refines the §5 CLI sketch:
+
+- **`--json` is dropped** from `knowledge list`. stdout is always machine-readable JSON, consistent with `research`; the human table and counts go to stderr.
+- **`--fresh-only` is the only staleness switch.** Stale items are shown by default and flagged (`stale`), never hidden or deleted; `--fresh-only` excludes them from the output only. There is no `--include-stale`.
+- **`--as-of YYYY-MM-DD`** defaults to today's UTC date (§3.7); the store itself never reads a clock.
+- **Exit codes.** `init`: 0 created, 1 exists (untouched), 2 cannot locate or create. `migrate`: 0 migrated or current, 2 error. `list`: 0 (an empty result is 0), 2 error or bad argument. `show ITEM_ID [--history]`: 0 found, 1 unknown item (stdout empty), 2 error.
+- **Read path.** `list` and `show` open the store with `writer=RESEARCH_CLI` because the constructor requires a writer and it is the only member. No `put` is called, and tests assert the file is byte-identical afterwards.

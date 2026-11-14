@@ -26,7 +26,7 @@ from cv_agent.knowledge.store import (
     matches,
 )
 from cv_agent.llm.payload import PublicClaim
-from tests.test_knowledge_sqlite_store import _fresh, _item, _open, _PoisonedDate, _PoisonedDatetime, _rows
+from tests.knowledge_fakes import _fresh, _item, _open, _PoisonedDate, _PoisonedDatetime, _rows
 
 AS_OF = date(2026, 11, 14)
 

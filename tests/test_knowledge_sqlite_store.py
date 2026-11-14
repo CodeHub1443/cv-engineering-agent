@@ -21,7 +21,7 @@ import cv_agent
 from cv_agent.knowledge import models as knowledge_models
 from cv_agent.knowledge import sqlite_store
 from cv_agent.knowledge import store as knowledge_store
-from cv_agent.knowledge.models import IngestPath, ItemId, KnowledgeItem, Provenance
+from cv_agent.knowledge.models import IngestPath, ItemId
 from cv_agent.knowledge.sqlite_store import SCHEMA_VERSION, SqliteKnowledgeStore
 from cv_agent.knowledge.store import (
     KNOWLEDGE_FILENAME,
@@ -32,6 +32,16 @@ from cv_agent.knowledge.store import (
     RetrievalKeys,
     StoredItem,
     normalise_key,
+)
+
+from tests.knowledge_fakes import (
+    _fresh,
+    _item,
+    _open,
+    _PoisonedDate,
+    _PoisonedDatetime,
+    _rows,
+    _store_path,
 )
 
 EXPECTED_COLUMNS = (
@@ -54,16 +64,6 @@ EXPECTED_COLUMNS = (
     "model_names_json",
     "metric",
 )
-
-
-def _store_path(tmp_path: Path) -> Path:
-    return tmp_path / "state" / KNOWLEDGE_FILENAME
-
-
-def _fresh(tmp_path: Path) -> Path:
-    path = _store_path(tmp_path)
-    SqliteKnowledgeStore.initialise(path)
-    return path
 
 
 def _dump(path: Path) -> list[str]:
@@ -276,47 +276,8 @@ def test_knowledge_package_does_not_import_experiments() -> None:
 
 # === K1b: records ================================================================================
 
-_NOW = datetime(2026, 11, 14, 12, 0, 0, tzinfo=timezone.utc)
 _THREADS = 8
 _JOIN_S = 60.0
-
-
-def _item(
-    item_id: str = "research-aaa",
-    claim: str = "YOLO11n reaches 39.5 mAP on COCO.",
-    *,
-    conditions: str | None = "640px, FP16",
-    tags: tuple[str, ...] = ("detection", "edge"),
-    horizon: int = 90,
-    ingest: IngestPath = IngestPath.WEB_FETCH,
-    accessed: str = "2026-11-01",
-    source_class: Any = "official_documentation",
-) -> KnowledgeItem:
-    return KnowledgeItem(
-        item_id=ItemId(item_id),
-        claim=claim,
-        conditions=conditions,
-        provenance=Provenance(
-            url="https://docs.example.org/yolo11",
-            source_class=source_class,
-            date_published="2026-01-05",
-            date_accessed=accessed,
-            author_or_org="Example Org",
-        ),
-        topic_tags=tags,
-        staleness_horizon_days=horizon,
-        ingest=ingest,
-    )
-
-
-def _open(path: Path, **kw: Any) -> SqliteKnowledgeStore:
-    kw.setdefault("now", lambda: _NOW)
-    return SqliteKnowledgeStore(path, writer=KnowledgeWriter.RESEARCH_CLI, **kw)
-
-
-def _rows(path: Path) -> list[tuple[Any, ...]]:
-    with closing(sqlite3.connect(path)) as conn:
-        return conn.execute("SELECT * FROM knowledge_revisions ORDER BY revision_id").fetchall()
 
 
 def _poke(path: Path, revision_id: int, column: str, value: Any) -> None:
@@ -538,26 +499,6 @@ def test_staleness_boundary_is_strict_and_stale_items_are_flagged_not_deleted(tm
     assert len(store.query(exclude_stale_as_of=date(2026, 11, 11))) == 1
     assert store.query(exclude_stale_as_of=date(2026, 11, 12)) == []
     assert len(store.query()) == 1 and len(_rows(path)) == 1
-
-
-class _PoisonedDatetime(datetime):
-    @classmethod
-    def now(cls, tz: Any = None) -> Any:  # type: ignore[override]
-        raise AssertionError("the store read a clock")
-
-    @classmethod
-    def utcnow(cls) -> Any:
-        raise AssertionError("the store read a clock")
-
-    @classmethod
-    def today(cls) -> Any:
-        raise AssertionError("the store read a clock")
-
-
-class _PoisonedDate(date):
-    @classmethod
-    def today(cls) -> Any:
-        raise AssertionError("the store read a clock")
 
 
 def test_reads_and_staleness_never_touch_a_clock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
