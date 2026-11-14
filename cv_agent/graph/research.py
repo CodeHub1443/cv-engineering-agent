@@ -23,6 +23,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from typing import Literal
 
 from cv_agent.knowledge.models import (
@@ -197,6 +198,231 @@ def _truncate_for_llm(text: str) -> str:
     return text[:MAX_CONTENT_FOR_LLM] + "\n[content truncated at 8 000 characters]"
 
 
+# --- Visible text and claim-term window (#145). The fetcher hands over raw HTML; reasoning needs the page
+# text around the claim, not the first 8,000 characters of markup. The fetcher's contract is unchanged. ---
+
+LEAD_CHARS = 2_000  # leading clean text kept when the page is windowed
+_SEGMENT_CLIP = 600  # longest paragraph or row kept in a window
+_HEADING_CLIP = 200
+_GAP = "[...]"
+_SKIP_TAGS = frozenset({"script", "style", "head", "nav", "aside"})
+_HEADINGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+_BLOCK_TAGS = _HEADINGS | frozenset({
+    "p", "div", "li", "ul", "ol", "dl", "dt", "dd", "section", "article", "pre", "blockquote", "br", "hr",
+    "table", "caption", "figure", "figcaption", "header", "footer", "main", "details", "summary",
+})
+_QUERY_FORM = re.compile(r"the (?P<metric>\S+) reported(?: for (?P<models>.+?))? \(topics: .*\)")
+_STOPWORDS = frozenset({"the", "for", "and", "with", "from", "that", "this", "extract", "main", "claim",
+                        "reported", "topics", "what", "which", "about"})
+
+
+@dataclass(frozen=True)
+class _Seg:
+    """One paragraph or table row of visible text. Rows also carry their table, whether they hold a
+    header cell, and the index of the nearest heading before the table."""
+
+    text: str
+    table: int | None = None
+    th: bool = False
+    heading: int | None = None
+
+
+class _VisibleText(HTMLParser):
+    """Collects visible text as segments: skips script, style, head, nav and aside; one segment per block
+    element; a table row is one segment with its cells joined by `` | ``."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.segs: list[_Seg] = []
+        self._skip = 0
+        self._buf: list[str] = []
+        self._tables: list[tuple[int, int | None]] = []  # (table id, heading index when it opened)
+        self._n_tables = 0
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+        self._row_th = False
+        self._heading: int | None = None
+        self._heading_from = 0
+
+    def _flush(self) -> None:
+        text = " ".join("".join(self._buf).split())
+        self._buf = []
+        if text:
+            self.segs.append(_Seg(text))
+
+    def _end_cell(self) -> None:
+        if self._cell is not None and self._row is not None:
+            self._row.append(" ".join("".join(self._cell).split()))
+        self._cell = None
+
+    def _end_row(self) -> None:
+        self._end_cell()
+        cells, self._row = self._row, None
+        if cells and any(cells) and self._tables:
+            table, heading = self._tables[-1]
+            self.segs.append(_Seg(" | ".join(cells), table, self._row_th, heading))
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:  # noqa: ARG002
+        if tag == "body":
+            self._skip = 0  # an unclosed <head> ends at <body>
+        if tag in _SKIP_TAGS:
+            self._skip += 1
+            return
+        if self._skip:
+            return
+        if tag == "table":
+            self._flush()
+            self._n_tables += 1
+            self._tables.append((self._n_tables, self._heading))
+        elif tag == "tr" and self._tables:
+            if self._row is not None:
+                self._end_row()
+            self._flush()
+            self._row, self._row_th = [], False
+        elif tag in ("td", "th") and self._row is not None:
+            self._end_cell()
+            self._cell = []
+            self._row_th = self._row_th or tag == "th"
+        elif tag == "br" and self._cell is not None:
+            self._cell.append(" ")
+        elif tag in _BLOCK_TAGS and self._row is None:
+            self._flush()
+            if tag in _HEADINGS:
+                self._heading_from = len(self.segs)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _SKIP_TAGS:
+            self._skip = max(0, self._skip - 1)
+            return
+        if self._skip:
+            return
+        if tag in ("td", "th"):
+            self._end_cell()
+        elif tag == "tr" and self._row is not None:
+            self._end_row()
+        elif tag == "table":
+            if self._row is not None:
+                self._end_row()
+            if self._tables:
+                self._tables.pop()
+        elif tag in _BLOCK_TAGS and self._row is None:
+            self._flush()
+            if tag in _HEADINGS and len(self.segs) > self._heading_from:
+                self._heading = len(self.segs) - 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip:
+            return
+        if self._cell is not None:
+            self._cell.append(data)
+        elif self._row is None:
+            self._buf.append(data)
+
+    def finish(self) -> list[_Seg]:
+        self.close()
+        if self._row is not None:
+            self._end_row()
+        self._flush()
+        return self.segs
+
+
+def _html_segments(html: str) -> list[_Seg]:
+    parser = _VisibleText()
+    parser.feed(html)
+    return parser.finish()
+
+
+def _seg_texts(segs: list[_Seg]) -> list[str]:
+    return [s.text for s in segs]
+
+
+def _is_html(text: str) -> bool:
+    head = text[:1000].lstrip().lower()
+    return head.startswith("<!doctype html") or "<html" in head or "<body" in head
+
+
+def _claim_terms(claim_query: str) -> tuple[str, ...]:
+    """The metric and model tokens of a ``claim_query_from`` query (topic tags are too generic to window on).
+
+    A query not in that form falls back to its identifier tokens of three or more characters.
+    """
+    m = _QUERY_FORM.fullmatch(claim_query)
+    if m is not None:
+        return (m["metric"], *(x for x in (m["models"] or "").split(", ") if x))
+    return tuple(t for t in _TOKEN.findall(claim_query) if len(t) >= 3 and t.lower() not in _STOPWORDS)
+
+
+def _matches(text: str, terms: tuple[str, ...]) -> bool:
+    """Whole-token, case-insensitive: ``yolo11n`` does not match ``YOLO11n-seg``."""
+    return any(
+        re.search(rf"(?<![A-Za-z0-9_-]){re.escape(t)}(?![A-Za-z0-9_-])", text, re.IGNORECASE) for t in terms
+    )
+
+
+def _render(picked: dict[int, str]) -> str:
+    out: list[str] = []
+    prev: int | None = None
+    for i in sorted(picked):
+        if prev is not None and i != prev + 1:
+            out.append(_GAP)
+        out.append(picked[i])
+        prev = i
+    return "\n".join(out)
+
+
+def _window(segs: list[_Seg], terms: tuple[str, ...], cap: int) -> str:
+    """The clean text if it fits ``cap``; else the leading text plus each segment naming a term, in document
+    order, with a matching row's table header row and nearest heading. Never longer than ``cap``; no match
+    means the leading clean text."""
+    texts = _seg_texts(segs)
+    clean = "\n".join(texts)
+    if len(clean) <= cap:
+        return clean
+    hits = [i for i, t in enumerate(texts) if _matches(t, terms)]
+    if not hits:
+        return clean[:cap]
+    header: dict[int, int] = {}
+    for i, s in enumerate(segs):
+        if s.table is not None and (s.table not in header or (s.th and not segs[header[s.table]].th)):
+            header[s.table] = i
+    picked: dict[int, str] = {}
+    used = 0
+    for i, t in enumerate(texts):
+        if picked and used + len(t) + 1 > LEAD_CHARS:
+            break
+        picked[i] = t[:_SEGMENT_CLIP]
+        used += len(t) + 1
+    for i in hits:
+        new = {i: texts[i][:_SEGMENT_CLIP]}
+        table, heading = segs[i].table, segs[i].heading
+        if table is not None:
+            new[header[table]] = texts[header[table]][:_SEGMENT_CLIP]
+            if heading is not None:
+                new[heading] = texts[heading][:_HEADING_CLIP]
+        new = {k: v for k, v in new.items() if k not in picked}
+        if not new:
+            continue
+        candidate = {**picked, **new}
+        if len(_render(candidate)) > cap:
+            break
+        picked = candidate
+    return _render(picked)[:cap]
+
+
+def _prepare_for_llm(content_text: str, claim_query: str) -> str:
+    """What the model reads: visible text windowed on the claim terms for HTML; anything else, or any
+    failure of the HTML step, is today's ``_truncate_for_llm``. Never raises."""
+    if not _is_html(content_text):
+        return _truncate_for_llm(content_text)
+    try:
+        segs = _html_segments(content_text)
+        if not segs:
+            return _truncate_for_llm(content_text)
+        return _window(segs, _claim_terms(claim_query), MAX_CONTENT_FOR_LLM)
+    except Exception:  # noqa: BLE001 — the pre-LLM step must not fail the research cycle
+        return _truncate_for_llm(content_text)
+
+
 def _extract_json(text: str) -> dict | None:
     """
     Best-effort JSON extraction from an LLM response.
@@ -301,7 +527,7 @@ def perform_research(
                 prompt=_EXTRACTION_PROMPT.format(
                     claim_query=request.claim_query,
                     url=final_url,
-                    content_text=_truncate_for_llm(content_text),
+                    content_text=_prepare_for_llm(content_text, request.claim_query),
                 ),
                 system=_EXTRACTION_SYSTEM,
                 max_tokens=512,
