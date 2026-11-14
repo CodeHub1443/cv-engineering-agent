@@ -2537,3 +2537,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Q54 answered:** a durable backend exists (K1), is inspectable (K2) and research writes to it (K3). Struck in OPEN_QUESTIONS.
 
 **Left open:** K4 (SELECTION wiring). No key read, no network, no GPU, no LLM call, ledger unchanged. No history was rewritten.
+
+## 2026-11-14 — ADR-0024 K4: SELECTION reads stored evidence (feature/claude/k4-selection-stored-evidence, issue #153, refs #125)
+
+**Changed:** new `cv_agent/model_selection/stored_evidence.py` (`evidence_for_candidate`, `attach_stored_evidence`, a `search` Protocol). `build_reference_comparison` and `run_reference_selection` take optional `evidence` and `as_of` (both or neither, else `TypeError`); with neither, the output is unchanged. New `tests/test_stored_evidence.py` (shown failing first) plus a boundary test: join by normalised name on both backends, invalid id means no evidence, stale exclusion with an injected `as_of`, de-duplication, N and M caps over the combined set, stored `PROJECT_INPUT` and `UNSPECIFIED` items returned by the join and never in a payload (`claims_excluded` +2), stored items not benchmark evidence, empty store gives a byte-identical payload. The golden file and schema version are unchanged. ADR-0024 got an appended amendment (D-111).
+
+**Found, not fixed:** `scripts/run_baseline.py:55` raises `TypeError` since ADR-0023 S4 (`requirements=` is required); EXP-20260929-01 cannot be re-run as written. Owner decision requested in issue #154.
+
+**Learned:** `tests/test_knowledge_ingest_writers.py` flags `dataclasses.replace` in any module that uses `KnowledgeItem`, so the candidate is rebuilt explicitly. Q67 records that curated evidence is never staleness-filtered.
+
+**Left open:** K4b (a production caller; ADR-0023 §7.3 gates 2 and 3, so the strong tier stays `offline`). No key read, no network, no GPU, no LLM call, ledger unchanged. No history was rewritten.
