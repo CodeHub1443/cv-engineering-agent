@@ -44,6 +44,7 @@ build_reference_comparison).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from cv_agent.knowledge.models import IngestPath, ItemId, KnowledgeItem, Provenance, SourceClass
 from cv_agent.knowledge.store import InMemoryKnowledgeStore
@@ -59,6 +60,7 @@ from cv_agent.model_selection.selector import (
     compare_candidates,
     select_candidate,
 )
+from cv_agent.model_selection.stored_evidence import StoredEvidenceSource, attach_stored_evidence
 from cv_agent.requirements.structured import RequirementsView
 
 # ---------------------------------------------------------------------------
@@ -607,10 +609,20 @@ _KNOWN_CONFLICTS: tuple[tuple[str, str, str, str, ConflictDimension], ...] = (
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def build_reference_comparison() -> CandidateComparison:
-    """Build the full evidence-backed CandidateComparison for the reference task."""
+def build_reference_comparison(
+    *, evidence: StoredEvidenceSource | None = None, as_of: date | None = None
+) -> CandidateComparison:
+    """Build the full evidence-backed CandidateComparison for the reference task.
+
+    ``evidence`` is an optional store whose fresh items, keyed to each candidate id, are added to the
+    curated evidence (ADR-0024 K4). ``as_of`` (a UTC date) is then required. None is curated only.
+    """
+    if (evidence is None) != (as_of is None):
+        raise TypeError("evidence and as_of go together: pass both or neither")
     store = build_reference_knowledge_store()
     candidates = build_reference_candidates(store)
+    if evidence is not None and as_of is not None:
+        candidates = attach_stored_evidence(candidates, evidence, as_of=as_of)
     return compare_candidates(
         candidates,
         task_description=TASK_DESCRIPTION,
@@ -619,7 +631,11 @@ def build_reference_comparison() -> CandidateComparison:
 
 
 def run_reference_selection(
-    llm_provider: LLMProvider, *, requirements: RequirementsView
+    llm_provider: LLMProvider,
+    *,
+    requirements: RequirementsView,
+    evidence: StoredEvidenceSource | None = None,
+    as_of: date | None = None,
 ) -> SelectionRecommendation | SelectionNeedsClarification:
     """Full pipeline: research → comparison → LLM selection for the reference task.
 
@@ -630,5 +646,5 @@ def run_reference_selection(
     With FakeLLMProvider the rationale will be generic — the comparison itself is
     always fully evidence-backed regardless.
     """
-    comparison = build_reference_comparison()
+    comparison = build_reference_comparison(evidence=evidence, as_of=as_of)
     return select_candidate(comparison, requirements=requirements, llm_provider=llm_provider)

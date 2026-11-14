@@ -456,3 +456,15 @@ Appended with the K2 implementation (issue #149). No text above this section is 
 - **`--as-of YYYY-MM-DD`** defaults to today's UTC date (§3.7); the store itself never reads a clock.
 - **Exit codes.** `init`: 0 created, 1 exists (untouched), 2 cannot locate or create. `migrate`: 0 migrated or current, 2 error. `list`: 0 (an empty result is 0), 2 error or bad argument. `show ITEM_ID [--history]`: 0 found, 1 unknown item (stdout empty), 2 error.
 - **Read path.** `list` and `show` open the store with `writer=RESEARCH_CLI` because the constructor requires a writer and it is the only member. No `put` is called, and tests assert the file is byte-identical afterwards.
+
+## Amendment (2026-11-14): K4 SELECTION wiring (D-111)
+
+Appended with the K4 implementation (issue #153). No text above this section is edited. It refines the §3.7 and §5 K4 sketch and closes the §9 `select_claims` note:
+
+- **`select_claims` verified.** ADR-0023 S4 is merged: `select_claims(items, *, per_candidate, start_ordinal)` (`cv_agent/llm/payload.py:268`) takes `(item, is_benchmark)` pairs, and the builder feeds it each reference's `source_item` (`selection_payload.py:229`).
+- **Store parameter.** `evidence_for_candidate` takes a one-method `StoredEvidenceSource` (`search`), not `SqliteKnowledgeStore`, because the `KnowledgeStore` Protocol has no `search` and `model_selection` must not import the SQLite module. `topic_tags` is optional (default none). An `attach_stored_evidence` helper merges the result into candidates.
+- **Invalid candidate id.** A candidate id that is not an identifier token has no stored evidence (`()`); it is not an error. A store failure propagates and fails selection closed.
+- **Stale items** are always excluded; there is no option to include them.
+- **Merging with curated evidence.** Curated references come first, then stored items in `item_id` order. A stored item is dropped when its `item_id` or its exact `(url, claim)` is already present. No cap is added: N = 10, M = 30 and the water-fill apply to the merged set.
+- **Benchmark status.** Stored items are not benchmark evidence; `benchmark_evidence` is unchanged.
+- **Wiring.** `build_reference_comparison` and `run_reference_selection` take optional `evidence` and `as_of` (both or neither). A production caller is deferred to a separate slice, K4b. ADR-0023 §7.3 gates 2 (a production caller) and 3 (a recorded comparison) stay open, and the SELECTION route stays `offline`.
