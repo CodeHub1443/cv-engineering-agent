@@ -2529,3 +2529,11 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Q54 progress note:** K2 makes the store inspectable; Q54 stays open until K3. It is not struck.
 
 **Gates:** see the PR. **Left open:** K3 (research persistence), K4 (SELECTION wiring). No key read, no network, no GPU, no LLM call, ledger unchanged. No history was rewritten.
+
+## 2026-11-14 — ADR-0024 K3: research persists to the durable store (feature/claude/k3-research-persists, issue #151, refs #125)
+
+**Changed:** `cv_agent/__main__.py`: `research` opens the knowledge store before the credential and the fetch (unless `--no-persist`), records a `stored` result with `RetrievalKeys(--model-name, --metric)` and writer `RESEARCH_CLI`, and reports `persisted` and `revision` in the JSON and the path and revision on stderr. A record failure still prints the result (`persisted: false`) and exits 2. `perform_research` and `graph/` are unchanged. Tests (shown failing first): 12 new in `tests/test_cli_research.py` and 1 in `tests/test_cli_research_live.py` (missing, garbage and wrong-version stores cost no fetch; keys stored normalised; same-content re-run adds no revision; a later-day re-run adds revision 2 and refreshes staleness; a changed claim adds revision 2; `--no-persist`; record failure; non-stored status; live with a missing store fails before the credential; `_TOKEN` equals `RETRIEVAL_KEY_PATTERN`). The existing research tests pass `--no-persist` through their two `_args()` helpers; one stderr assertion changed to the new text, and the help test also expects `--no-persist`.
+
+**Q54 answered:** a durable backend exists (K1), is inspectable (K2) and research writes to it (K3). Struck in OPEN_QUESTIONS.
+
+**Left open:** K4 (SELECTION wiring). No key read, no network, no GPU, no LLM call, ledger unchanged. No history was rewritten.
