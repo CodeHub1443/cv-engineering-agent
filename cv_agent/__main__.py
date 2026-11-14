@@ -1003,12 +1003,12 @@ def _stored_to_json(stored: Any) -> dict[str, Any]:
     }
 
 
-def _open_knowledge_for_read() -> Any:
-    """Open the store read path only (never creates it). Raises KnowledgeStoreError / ProvenanceError."""
+def _open_knowledge_store() -> Any:
+    """Open the existing store (never creates it; the constructor verifies and closes). Raises KnowledgeStoreError / ProvenanceError."""
     from cv_agent.knowledge.sqlite_store import SqliteKnowledgeStore
     from cv_agent.knowledge.store import KnowledgeWriter
 
-    # The constructor requires a writer; RESEARCH_CLI is the only member and is never used (no put).
+    # The constructor requires a writer; RESEARCH_CLI is the only member. list/show never write; research records with it.
     return SqliteKnowledgeStore(_knowledge_target(), writer=KnowledgeWriter.RESEARCH_CLI)
 
 
@@ -1030,7 +1030,7 @@ def _cmd_knowledge_list(args: Any) -> int:
             ingest=frozenset(IngestPath(i) for i in args.ingest) if args.ingest else None,
             include_stale=not args.fresh_only,
         )
-        rows = _open_knowledge_for_read().search(query)
+        rows = _open_knowledge_store().search(query)
     except ProvenanceError as exc:
         print(f"{_KNOWLEDGE_HEADER}: cannot locate the state root\n  {exc}", file=sys.stderr)
         return 2
@@ -1058,7 +1058,7 @@ def _cmd_knowledge_show(args: Any) -> int:
 
     try:
         as_of = args.as_of or _utc_today()
-        revisions = _open_knowledge_for_read().history(ItemId(args.item_id), as_of=as_of)
+        revisions = _open_knowledge_store().history(ItemId(args.item_id), as_of=as_of)
     except ProvenanceError as exc:
         print(f"{_KNOWLEDGE_HEADER}: cannot locate the state root\n  {exc}", file=sys.stderr)
         return 2
@@ -1079,9 +1079,11 @@ def _cmd_research(args: Any) -> int:
     """One research cycle through ``perform_research`` and the router (Q41, ADR-0020 G7, D-093).
 
     The claim query is built only by ``claim_query_from`` (single identifier tokens), so no free
-    text reaches a hosted tier. Results go to an in-process KnowledgeStore only (ADR-0006 §8): a
-    ``stored`` result prints one JSON object on stdout; everything human-readable goes to stderr.
-    Exit 0 stored, 1 any other research status, 2 invalid input or a gateway refusal.
+    text reaches a hosted tier. A ``stored`` result is recorded in the durable knowledge store
+    (ADR-0024 §3.8) unless ``--no-persist``, and prints one JSON object on stdout; everything
+    human-readable goes to stderr. The store is opened BEFORE the credential and the fetch, so a
+    missing or invalid store costs no fetch and no LLM spend. Exit 0 stored, 1 any other research
+    status, 2 invalid input, a gateway refusal, or a store failure.
     """
     import dataclasses
     import hashlib
@@ -1089,8 +1091,9 @@ def _cmd_research(args: Any) -> int:
 
     from cv_agent.config import settings
     from cv_agent.graph.research import ResearchRequest, claim_query_from, perform_research
+    from cv_agent.experiments.provenance import ProvenanceError
     from cv_agent.knowledge.models import ItemId
-    from cv_agent.knowledge.store import InMemoryKnowledgeStore
+    from cv_agent.knowledge.store import InMemoryKnowledgeStore, KnowledgeStoreError, RetrievalKeys
     from cv_agent.llm.errors import LLMConfigError, LLMError
     from cv_agent.llm.policy import TaskClass
     from cv_agent.llm.router import build_router
@@ -1111,6 +1114,17 @@ def _cmd_research(args: Any) -> int:
     item_id = args.item_id or "research-" + hashlib.sha256(
         f"{args.url}\n{claim_query}".encode("utf-8")
     ).hexdigest()[:16]
+
+    durable: Any = None
+    keys = RetrievalKeys()
+    if not args.no_persist:  # (1) the durable store, before the credential and the fetch (ADR-0024 §3.8)
+        try:
+            keys = RetrievalKeys(model_names=tuple(args.model_name), metric=args.metric)
+            durable = _open_knowledge_store()  # verifies, then closes; ``record`` opens its own transaction
+        except ProvenanceError as exc:
+            return fail(f"cannot locate the state root: {exc}")
+        except (KnowledgeStoreError, ValueError) as exc:
+            return fail(f"{exc} (or pass --no-persist)")
 
     llm_config = settings.load_config().llm
     if args.live:  # per-invocation override, config data only: a tier name (ADR-0020 amendment, D-102)
@@ -1159,6 +1173,13 @@ def _cmd_research(args: Any) -> int:
     if result.status != "stored" or item is None:
         print(f"research: {result.error_message}", file=sys.stderr)
         return 1
+    revision: int | None = None
+    persist_error: str | None = None
+    if durable is not None:
+        try:
+            revision = durable.record(item, keys=keys)
+        except KnowledgeStoreError as exc:
+            persist_error = str(exc)
     prov = item.provenance
     print(
         json.dumps(
@@ -1179,6 +1200,8 @@ def _cmd_research(args: Any) -> int:
                 "topic_tags": list(item.topic_tags),
                 "staleness_horizon_days": item.staleness_horizon_days,
                 "ingest": item.ingest.value,
+                "persisted": revision is not None,
+                "revision": revision,
                 "route": {
                     "tier": route.tier,
                     "provider": route.provider,
@@ -1189,10 +1212,13 @@ def _cmd_research(args: Any) -> int:
             indent=2,
         )
     )
-    print(
-        "research: stored in the in-process KnowledgeStore, not persisted (ADR-0006 §8).",
-        file=sys.stderr,
-    )
+    if persist_error is not None:
+        print(f"research: result NOT persisted: {persist_error}", file=sys.stderr)
+        return 2
+    if durable is None:
+        print("research: not persisted (--no-persist).", file=sys.stderr)
+    else:
+        print(f"research: stored in {_knowledge_target()}, revision {revision}.", file=sys.stderr)
     return 0
 
 
@@ -1333,6 +1359,10 @@ def main(argv: list[str] | None = None) -> int:
     research_parser.add_argument("--author-or-org", default=None, help="Provenance fallback.")
     research_parser.add_argument(
         "--date-published", default=None, help="Provenance fallback, YYYY-MM-DD."
+    )
+    research_parser.add_argument(
+        "--no-persist", action="store_true",
+        help="Do not record the result in the durable knowledge store (default: record it; the store must exist, see `knowledge init`, and is checked before any fetch).",
     )
     research_parser.add_argument(
         "--live", action="store_true",

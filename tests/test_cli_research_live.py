@@ -85,7 +85,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Env:
     return e
 
 
-def _args(*extra: str) -> list[str]:
+def _args(*extra: str, persist: bool = False) -> list[str]:
     return [
         "research",
         "--url", _URL,
@@ -94,6 +94,7 @@ def _args(*extra: str) -> list[str]:
         "--metric", "mAP50-95",
         "--staleness-days", "180",
         *extra,
+        *([] if persist else ["--no-persist"]),
     ]
 
 
@@ -143,3 +144,11 @@ def test_live_with_a_fake_key_routes_to_fast_and_logs_tier_fast(
     with sqlite3.connect(env.state_dir / LLM_CALLS_FILENAME) as conn:
         rows = conn.execute("SELECT task_class, tier FROM llm_calls").fetchall()
     assert rows == [("extraction", "fast")]
+
+
+def test_live_with_a_missing_store_fails_on_the_store_before_the_credential_and_the_fetch(env: _Env) -> None:
+    # no key is set, so reaching the credential step would raise a credential refusal instead
+    rc = cli.main(_args("--live", persist=True))
+    assert rc == 2
+    assert env.fetches == 0 and env.credential_lookups == []
+    assert not (env.state_dir / "knowledge.sqlite").exists()
