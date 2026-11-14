@@ -14,7 +14,7 @@ from datetime import date
 from enum import Enum
 from typing import Collection, Final, Protocol
 
-from cv_agent.knowledge.models import ItemId, KnowledgeItem, SourceClass
+from cv_agent.knowledge.models import IngestPath, ItemId, KnowledgeItem, SourceClass
 
 KNOWLEDGE_FILENAME: Final = "knowledge.sqlite"
 # One identifier-token rule for retrieval keys (ADR-0024 §3.3). graph/research.py adopts it in K3.
@@ -67,9 +67,54 @@ class StoredItem:
     item: KnowledgeItem
     keys: RetrievalKeys
     revision: int
-    recorded_at: str  # UTC ISO 8601 'Z'
-    writer: KnowledgeWriter
+    recorded_at: str | None  # UTC ISO 8601 'Z'; None = not recorded (the in-memory store)
+    writer: KnowledgeWriter | None  # None = not recorded (the in-memory store)
     stale: bool  # item.is_stale(as_of) for the as_of the caller passed
+
+
+@dataclass(frozen=True)
+class KnowledgeQuery:
+    """A ``search`` request (ADR-0024 §3.7). ``as_of`` is required: the store never reads a clock."""
+
+    as_of: date
+    topic_tags: tuple[str, ...] = ()  # all-of, exact (tags are not normalised)
+    model_names: tuple[str, ...] = ()  # any-of, normalised; empty = no filter
+    metric: str | None = None  # normalised
+    source_classes: frozenset[SourceClass] | None = None
+    ingest: frozenset[IngestPath] | None = None  # a listing convenience, never the eligibility gate
+    include_stale: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.as_of) is not date:
+            raise TypeError("KnowledgeQuery.as_of must be a date")
+        for name in ("topic_tags", "model_names"):
+            if isinstance(getattr(self, name), str):
+                raise TypeError(f"KnowledgeQuery.{name} must be a sequence, not a bare string")
+        object.__setattr__(self, "topic_tags", tuple(self.topic_tags))
+        object.__setattr__(self, "model_names", tuple(dict.fromkeys(normalise_key(n) for n in self.model_names)))
+        if self.metric is not None:
+            object.__setattr__(self, "metric", normalise_key(self.metric))
+        for name in ("source_classes", "ingest"):
+            value = getattr(self, name)
+            if value is not None:
+                if isinstance(value, str):
+                    raise TypeError(f"KnowledgeQuery.{name} must be a set, not a bare string")
+                object.__setattr__(self, name, frozenset(value))
+
+
+def matches(item: KnowledgeItem, keys: RetrievalKeys, query: KnowledgeQuery) -> bool:
+    """The one filter both stores use, so their results cannot drift (ADR-0024 §3.7). Pure: no clock."""
+    if not set(query.topic_tags).issubset(item.topic_tags):
+        return False
+    if query.model_names and not set(query.model_names) & set(keys.model_names):
+        return False
+    if query.metric is not None and keys.metric != query.metric:
+        return False
+    if query.source_classes is not None and item.provenance.source_class not in query.source_classes:
+        return False
+    if query.ingest is not None and item.ingest not in query.ingest:
+        return False
+    return query.include_stale or not item.is_stale(query.as_of)
 
 
 class KnowledgeStore(Protocol):
@@ -98,9 +143,23 @@ class InMemoryKnowledgeStore:
 
     def __init__(self) -> None:
         self._items: dict[ItemId, KnowledgeItem] = {}
+        self._keys: dict[ItemId, RetrievalKeys] = {}
+        self._puts: dict[ItemId, int] = {}
 
-    def put(self, item: KnowledgeItem) -> None:
+    def put(self, item: KnowledgeItem, *, keys: RetrievalKeys = RetrievalKeys()) -> None:
         self._items[item.item_id] = item
+        self._keys[item.item_id] = keys
+        self._puts[item.item_id] = self._puts.get(item.item_id, 0) + 1
+
+    def search(self, query: KnowledgeQuery) -> list[StoredItem]:
+        """``item_id`` ascending. ``writer`` and ``recorded_at`` are None (not recorded); ``revision`` is the put count."""
+        if type(query) is not KnowledgeQuery:
+            raise TypeError("search takes a KnowledgeQuery")
+        return [
+            StoredItem(item, self._keys[iid], self._puts[iid], None, None, item.is_stale(query.as_of))
+            for iid, item in sorted(self._items.items())
+            if matches(item, self._keys[iid], query)
+        ]
 
     def get(self, item_id: ItemId) -> KnowledgeItem | None:
         return self._items.get(item_id)

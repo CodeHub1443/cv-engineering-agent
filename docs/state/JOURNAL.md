@@ -2505,3 +2505,16 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Gates:** ruff clean; mypy only the known `SIGKILL` error; pytest with both key variables unset: the four D-103 files fail 18/5/1/2 (26) and nothing else. The full suite first showed one extra failure, the inventory test above (fixed).
 
 **Left open:** K1c (`KnowledgeQuery`, `matches`, `search`, in-memory parity), K2 to K4. No key read, no network, no GPU, no LLM call, ledger unchanged. No history was rewritten.
+
+
+## 2026-11-14 — ADR-0024 K1c: search, KnowledgeQuery and in-memory parity (feature/claude/k1c-knowledge-search, issue #141, refs #125)
+
+**Changed:** `store.py` gained `KnowledgeQuery` (keys normalised at read by the same `normalise_key`), the pure `matches`, and `InMemoryKnowledgeStore.put(keys=)` and `search`; `StoredItem.writer` and `recorded_at` became optional (D-108). `sqlite_store.py` gained `search` (the latest rows, filtered through `matches`, `item_id` ascending, `stale` from `query.as_of`). New `tests/test_knowledge_search.py` (29 tests): normalisation (YOLO11n / yolo11n / YOLO11N / padded match, yolo11 does not), `include_stale` and the horizon boundary, a clock-poison test, a 12-query parity table (`search` by order, `query` as sets), the SQLite store always setting `writer` and `recorded_at`, and eligibility unchanged (the reloaded item gets the same `PublicClaim.from_item` verdict, including the private URLs of ADR-0023 §7.1 3(e); an `ingest` filter changes nothing the builder decides). Tests were shown failing first (import error). No new `KnowledgeItem(` construction site.
+
+**Known limit:** SQLite `search` filters the latest rows in Python, a full scan of the latest view. Acceptable for v1 (tens of items); an indexed SQL filter is a later change.
+
+**Live research, 2026-11-14:** the first successful live `research` call: the YOLO11 docs page, the `fast` tier, claim "YOLO11n 39.5 mAPval50-95 @640 on COCO" verified against the official table; not persisted, pending K3.
+
+**Q54 progress note:** K1c landed search; Q54 stays open until K3. It is not struck.
+
+**Gates:** ruff clean; mypy only the known `SIGKILL` error; pytest with both key variables unset: 26 failed / 2562 passed / 10 skipped, all failures in the four D-103 files (18/5/1/2). **Left open:** K2 (`cv-agent knowledge init/migrate/list/show`), K3, K4. No key read, no network, no GPU, no LLM call, ledger unchanged. No history was rewritten.
