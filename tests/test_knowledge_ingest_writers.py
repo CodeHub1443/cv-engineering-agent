@@ -68,8 +68,14 @@ def test_no_unreviewed_replace_in_a_module_that_uses_knowledge_items() -> None:
 
 def test_every_knowledge_item_construction_passes_ingest() -> None:
     found = _constructions()
-    # The S4 writer inventory (ADR-0023 §7.2): exactly these two modules construct a KnowledgeItem.
-    assert {p for p, _, _ in found} == {"graph/research.py", "model_selection/reference_task_research.py"}
+    # The S4 writer inventory (ADR-0023 §7.2): these two modules author a KnowledgeItem. The third,
+    # knowledge/sqlite_store.py (ADR-0024 K1b), only REBUILDS a stored row, passing the stored ingest
+    # through unchanged; it sets no ingest of its own and the ``ingest`` keyword check below still covers it.
+    assert {p for p, _, _ in found} == {
+        "graph/research.py",
+        "model_selection/reference_task_research.py",
+        "knowledge/sqlite_store.py",
+    }
     missing = [f"{p}:{line}" for p, line, kw in found if "ingest" not in kw]
     assert not missing, f"KnowledgeItem( without ingest=: {missing}"
 
