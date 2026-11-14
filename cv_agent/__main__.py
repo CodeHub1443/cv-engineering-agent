@@ -19,6 +19,12 @@ Usage:
     python -m cv_agent research --url U --source-class C --topic-tag T --metric M --staleness-days N
                                             one research cycle (fetch -> extract -> in-process
                                             KnowledgeStore) via the EXTRACTION route; JSON on stdout
+    python -m cv_agent knowledge init|migrate   create / verify the durable knowledge store
+                                            (<state root>/knowledge.sqlite); refuses to create twice
+    python -m cv_agent knowledge list [filters] [--fresh-only] [--as-of YYYY-MM-DD]
+    python -m cv_agent knowledge show ITEM_ID [--history] [--as-of YYYY-MM-DD]
+                                            list/show: JSON on stdout, human table/notes on stderr;
+                                            stale items are flagged, never hidden (ADR-0024 section 5)
     cv-agent ...                           (when installed via pip)
 """
 
@@ -27,9 +33,10 @@ from __future__ import annotations
 import sys
 import uuid
 from argparse import ArgumentParser
+from datetime import date, datetime, timezone
 from typing import Any, Callable, get_args
 
-from cv_agent.knowledge.models import SourceClass
+from cv_agent.knowledge.models import IngestPath, SourceClass
 
 
 def _health_check() -> int:
@@ -904,6 +911,170 @@ def _cmd_llm_log_init() -> int:
     return 0
 
 
+_KNOWLEDGE_HEADER = "CV Engineering Agent - knowledge store"
+
+
+def _utc_today() -> date:
+    """The default ``--as-of``: today's UTC date (ADR-0024 §3.7). The only clock the knowledge CLI reads."""
+    return datetime.now(timezone.utc).date()
+
+
+def _iso_date_arg(text: str) -> date:
+    from argparse import ArgumentTypeError
+
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        raise ArgumentTypeError(f"not a YYYY-MM-DD date: {text!r}") from None
+
+
+def _knowledge_target() -> Any:
+    from cv_agent.experiments.provenance import repository_state_root
+    from cv_agent.knowledge.store import KNOWLEDGE_FILENAME
+
+    return repository_state_root() / KNOWLEDGE_FILENAME
+
+
+def _cmd_knowledge_init() -> int:
+    """Create the durable knowledge store (ADR-0024 §3.5). Explicit only. Exit 0 created, 1 exists, 2 error."""
+    from cv_agent.experiments.provenance import ProvenanceError
+    from cv_agent.knowledge.sqlite_store import SqliteKnowledgeStore
+    from cv_agent.knowledge.store import KnowledgeStoreError
+
+    try:
+        target = _knowledge_target()
+    except ProvenanceError as exc:
+        print(f"{_KNOWLEDGE_HEADER}: cannot locate the state root\n  {exc}", file=sys.stderr)
+        return 2
+    if target.exists():
+        print(f"{_KNOWLEDGE_HEADER}: already exists, left untouched\n  {target}", file=sys.stderr)
+        return 1
+    try:
+        SqliteKnowledgeStore.initialise(target)
+    except KnowledgeStoreError as exc:
+        print(f"{_KNOWLEDGE_HEADER}: not created\n  {exc}", file=sys.stderr)
+        return 2
+    print(f"{_KNOWLEDGE_HEADER}: created\n  {target}")
+    return 0
+
+
+def _cmd_knowledge_migrate() -> int:
+    """Verify (and, once versions exist, upgrade) the knowledge store. Exit 0 migrated or current, 2 error."""
+    from cv_agent.experiments.provenance import ProvenanceError
+    from cv_agent.knowledge.sqlite_store import SCHEMA_VERSION, SqliteKnowledgeStore
+    from cv_agent.knowledge.store import KnowledgeStoreError, KnowledgeWriter
+
+    try:
+        target = _knowledge_target()
+        SqliteKnowledgeStore.migrate(target)
+        SqliteKnowledgeStore(target, writer=KnowledgeWriter.RESEARCH_CLI)  # the result must open cleanly
+    except ProvenanceError as exc:
+        print(f"{_KNOWLEDGE_HEADER}: cannot locate the state root\n  {exc}", file=sys.stderr)
+        return 2
+    except KnowledgeStoreError as exc:
+        print(f"{_KNOWLEDGE_HEADER}: not migrated\n  {exc}", file=sys.stderr)
+        return 2
+    print(f"{_KNOWLEDGE_HEADER}: up to date (schema version {SCHEMA_VERSION})\n  {target}")
+    return 0
+
+
+def _stored_to_json(stored: Any) -> dict[str, Any]:
+    item = stored.item
+    prov = item.provenance
+    return {
+        "item_id": str(item.item_id),
+        "revision": stored.revision,
+        "recorded_at": stored.recorded_at,
+        "writer": stored.writer.value if stored.writer is not None else None,
+        "stale": stored.stale,
+        "keys": {"model_names": list(stored.keys.model_names), "metric": stored.keys.metric},
+        "claim": item.claim,
+        "conditions": item.conditions,
+        "topic_tags": list(item.topic_tags),
+        "staleness_horizon_days": item.staleness_horizon_days,
+        "ingest": item.ingest.value,
+        "provenance": {
+            "url": prov.url,
+            "source_class": prov.source_class,
+            "date_published": prov.date_published,
+            "date_accessed": prov.date_accessed,
+            "author_or_org": prov.author_or_org,
+        },
+    }
+
+
+def _open_knowledge_for_read() -> Any:
+    """Open the store read path only (never creates it). Raises KnowledgeStoreError / ProvenanceError."""
+    from cv_agent.knowledge.sqlite_store import SqliteKnowledgeStore
+    from cv_agent.knowledge.store import KnowledgeWriter
+
+    # The constructor requires a writer; RESEARCH_CLI is the only member and is never used (no put).
+    return SqliteKnowledgeStore(_knowledge_target(), writer=KnowledgeWriter.RESEARCH_CLI)
+
+
+def _cmd_knowledge_list(args: Any) -> int:
+    """List the latest revisions (stdout: JSON; stderr: a table with a STALE column). Exit 0, 2 error."""
+    import json
+
+    from cv_agent.experiments.provenance import ProvenanceError
+    from cv_agent.knowledge.models import IngestPath
+    from cv_agent.knowledge.store import KnowledgeQuery, KnowledgeStoreError
+
+    try:
+        query = KnowledgeQuery(
+            as_of=args.as_of or _utc_today(),
+            topic_tags=tuple(args.topic_tag),
+            model_names=tuple(args.model_name),
+            metric=args.metric,
+            source_classes=frozenset(args.source_class) if args.source_class else None,
+            ingest=frozenset(IngestPath(i) for i in args.ingest) if args.ingest else None,
+            include_stale=not args.fresh_only,
+        )
+        rows = _open_knowledge_for_read().search(query)
+    except ProvenanceError as exc:
+        print(f"{_KNOWLEDGE_HEADER}: cannot locate the state root\n  {exc}", file=sys.stderr)
+        return 2
+    except (KnowledgeStoreError, ValueError, TypeError) as exc:
+        print(f"{_KNOWLEDGE_HEADER}: cannot list\n  {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps([_stored_to_json(r) for r in rows], indent=2))
+    print(f"{'ITEM_ID':<32} {'REV':>3} {'STALE':<5} CLAIM", file=sys.stderr)
+    for r in rows:
+        claim = r.item.claim if len(r.item.claim) <= 60 else r.item.claim[:57] + "..."
+        print(f"{r.item.item_id!s:<32} {r.revision:>3} {'yes' if r.stale else 'no':<5} {claim}", file=sys.stderr)
+    stale = sum(1 for r in rows if r.stale)
+    print(f"{len(rows)} items, {stale} stale (as of {query.as_of.isoformat()} UTC)", file=sys.stderr)
+    return 0
+
+
+def _cmd_knowledge_show(args: Any) -> int:
+    """Show one item: the latest revision, or every revision with ``--history`` (stdout: JSON).
+    Exit 0, 1 unknown item, 2 error."""
+    import json
+
+    from cv_agent.experiments.provenance import ProvenanceError
+    from cv_agent.knowledge.models import ItemId
+    from cv_agent.knowledge.store import KnowledgeStoreError
+
+    try:
+        as_of = args.as_of or _utc_today()
+        revisions = _open_knowledge_for_read().history(ItemId(args.item_id), as_of=as_of)
+    except ProvenanceError as exc:
+        print(f"{_KNOWLEDGE_HEADER}: cannot locate the state root\n  {exc}", file=sys.stderr)
+        return 2
+    except (KnowledgeStoreError, ValueError, TypeError) as exc:
+        print(f"{_KNOWLEDGE_HEADER}: cannot show\n  {exc}", file=sys.stderr)
+        return 2
+    if not revisions:
+        print(f"{_KNOWLEDGE_HEADER}: no item {args.item_id!r}", file=sys.stderr)
+        return 1
+    if args.history:
+        print(json.dumps([_stored_to_json(r) for r in revisions], indent=2))
+    else:
+        print(json.dumps(_stored_to_json(revisions[-1]), indent=2))
+    return 0
+
+
 def _cmd_research(args: Any) -> int:
     """One research cycle through ``perform_research`` and the router (Q41, ADR-0020 G7, D-093).
 
@@ -1178,6 +1349,27 @@ def main(argv: list[str] | None = None) -> int:
         "migrate", help="Add the ADR-0023 payload columns to an existing LLM call log (idempotent)."
     )
 
+    knowledge_parser = subparsers.add_parser("knowledge", help="Manage and inspect the durable knowledge store.")
+    knowledge_sub = knowledge_parser.add_subparsers(dest="knowledge_command", required=True)
+    knowledge_sub.add_parser("init", help="Create the knowledge store under the state root; refuses if it exists.")
+    knowledge_sub.add_parser("migrate", help="Verify the knowledge store schema (idempotent).")
+    as_of_help = "UTC date for staleness, YYYY-MM-DD (default: today, UTC)."
+    kl = knowledge_sub.add_parser(
+        "list",
+        help="List the latest revisions. stdout: JSON; stderr: a human table. Stale items are flagged, not hidden.",
+    )
+    kl.add_argument("--topic-tag", action="append", default=[], help="Required tag (repeatable, all-of).")
+    kl.add_argument("--model-name", action="append", default=[], help="Model name (repeatable, any-of; exact after normalisation).")
+    kl.add_argument("--metric", default=None, help="Metric key (exact after normalisation).")
+    kl.add_argument("--source-class", action="append", default=[], choices=get_args(SourceClass), help="Source class (repeatable, any-of).")
+    kl.add_argument("--ingest", action="append", default=[], choices=[i.value for i in IngestPath], help="Ingest path (repeatable, any-of).")
+    kl.add_argument("--fresh-only", action="store_true", help="Hide stale items (the rows are never deleted).")
+    kl.add_argument("--as-of", type=_iso_date_arg, default=None, help=as_of_help)
+    ks = knowledge_sub.add_parser("show", help="Show one item as JSON on stdout; exit 1 if unknown.")
+    ks.add_argument("item_id", help="The item id.")
+    ks.add_argument("--history", action="store_true", help="Every revision, oldest first.")
+    ks.add_argument("--as-of", type=_iso_date_arg, default=None, help=as_of_help)
+
     args = parser.parse_args(argv)
     _load_project_credentials()
 
@@ -1213,6 +1405,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "research":
         return _cmd_research(args)
+
+    if args.command == "knowledge":
+        if args.knowledge_command == "init":
+            return _cmd_knowledge_init()
+        if args.knowledge_command == "migrate":
+            return _cmd_knowledge_migrate()
+        if args.knowledge_command == "list":
+            return _cmd_knowledge_list(args)
+        return _cmd_knowledge_show(args)
 
     if args.command == "llm-log":
         if args.llm_log_command == "migrate":
