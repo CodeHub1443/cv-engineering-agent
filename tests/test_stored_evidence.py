@@ -247,3 +247,17 @@ def test_evidence_without_as_of_is_a_type_error() -> None:
         build_reference_comparison(evidence=InMemoryKnowledgeStore())
     with pytest.raises(TypeError):
         build_reference_comparison(as_of=AS_OF)
+
+
+def test_attach_preserves_every_candidate_field_except_the_evidence() -> None:
+    import dataclasses
+
+    from cv_agent.model_selection.models import ModelCandidate
+
+    before = build_reference_comparison().candidates[0]
+    store = _mem((_it("s-new", "a new claim"), ("yolo11n",)))
+    (after,) = attach_stored_evidence((before,), store, as_of=AS_OF)
+    assert len(after.evidence_references) == len(before.evidence_references) + 1
+    for f in dataclasses.fields(ModelCandidate):
+        if f.name != "evidence_references":
+            assert getattr(after, f.name) == getattr(before, f.name), f.name
