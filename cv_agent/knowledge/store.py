@@ -1,17 +1,33 @@
 """
 cv_agent.knowledge.store — KnowledgeStore protocol and the in-memory reference impl.
 
-No durable backend ships here (ADR-0006 §3/§8) — picking one (files/SQLite/a
-service) is an explicit future decision, mirroring OPEN_QUESTIONS.md's Q16 gap for
-the experiment ledger.
+The durable backend is ``cv_agent.knowledge.sqlite_store`` (ADR-0024, answering
+ADR-0006 §8). This module stays backend-neutral: the Protocol, the in-memory reference
+implementation, and the small types a durable backend shares (filename, error, writer).
 """
 
 from __future__ import annotations
 
 from datetime import date
-from typing import Collection, Protocol
+from enum import Enum
+from typing import Collection, Final, Protocol
 
 from cv_agent.knowledge.models import ItemId, KnowledgeItem, SourceClass
+
+KNOWLEDGE_FILENAME: Final = "knowledge.sqlite"
+
+
+class KnowledgeStoreError(Exception):
+    """The durable store is missing, of another schema version, corrupt, busy or unwritable.
+
+    Never means "no data" (that is ``get() -> None``). Messages carry the init or migrate hint.
+    """
+
+
+class KnowledgeWriter(str, Enum):
+    """Who wrote a revision (ADR-0024 §5). CURATED_REFERENCE is added only if curated items move in."""
+
+    RESEARCH_CLI = "research_cli"
 
 
 class KnowledgeStore(Protocol):

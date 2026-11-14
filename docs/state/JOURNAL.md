@@ -2471,3 +2471,15 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Results:** pre-merge (927852b + 3 commits): ruff clean, mypy only the SIGKILL error, canary and structural suite 79 passed three times, full suite 27 failed, all in the four D-103 files. After merging origin/main (b5141c0, #138): ruff clean, mypy the same single error, 79 passed three times, full suite 26 failed (18 + 5 + 1 + 2) in the same four files, as D-103 predicts. Both key variables unset. No key read, no network, no GPU, ledger unchanged. No history was rewritten.
 
 **Left open:** Q59 to Q62. The §7.3 route switch for SELECTION is still blocked (no production caller, no recorded comparison).
+
+## 2026-11-14 — ADR-0024 K1a: SQLite KnowledgeStore lifecycle (feature/claude/k1-knowledge-sqlite-store, issue #141, refs #125)
+
+**Changed:** New `cv_agent/knowledge/sqlite_store.py`: schema v1 (every `KnowledgeItem` and `Provenance` column, ingest, writer, recorded_at, content hash, retrieval keys, and the `knowledge_latest` view), `initialise`, `migrate` (v1 only verifies and writes nothing), a `mode=rw` constructor with a fail-closed `_verify`, `BEGIN IMMEDIATE` with a 5 s busy timeout, no WAL. `store.py` gained `KNOWLEDGE_FILENAME`, `KnowledgeStoreError`, `KnowledgeWriter`. ADR-0006 got its "Amended by ADR-0024" line (D-101); ADR-0024 is unedited. 18 tests in `tests/test_knowledge_sqlite_store.py`, written first (the run failed on `ImportError`, no module). D-104 records the split.
+
+**Found:** ADR-0024 §7.2 estimated K1 at about 380 lines; the measured scope is about 660, so K1 became K1a/K1b/K1c. Timing mismatch: ADR-0024's header and §6 say the *acceptance PR* adds the ADR-0006 note, but the acceptance JOURNAL entry deferred it to K1; it landed here, and ADR-0024 was left as written. `initialise` closes its connection before unlinking a half-created file (Windows lock, same class as Q53), with a test that forces a failure mid-schema. The "no UPDATE/DELETE" test scans SQL strings only (`_SCHEMA`, `execute` arguments), with a self-test that catches a planted `UPDATE`. `now` is in the constructor because ADR-0024 §5 lists it; nothing uses it until K1b's `record`. The `cv-agent knowledge init` hint names a command that ships in K2.
+
+**Q54 progress note:** K1a landed the store lifecycle. Q54 stays open until K3 (research CLI persistence) ships; it is not struck.
+
+**Gates:** ruff clean; mypy only the known `SIGKILL` error; pytest with both key variables unset: 26 failed / 2423 passed / 10 skipped, all failures in the four D-103 files, before and after merging origin/main.
+
+**Left open:** K1b, K1c, K2 to K4. No key read, no network, no GPU, no LLM call, ledger unchanged.

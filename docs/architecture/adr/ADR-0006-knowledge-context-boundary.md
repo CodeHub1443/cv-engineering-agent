@@ -4,6 +4,7 @@
   authorization, 2026-09-24 — see §9. Subject to the normal PR review gate before landing
   on `main`.)
 - **Amended by:** ADR-0023 (2026-11-12)
+- **Amended by:** ADR-0024 (2026-11-13, D-101): answers the §8 durable-backend revisit trigger.
 - **Date:** 2026-09-24
 - **Layer:** knowledge
 - **Canon:** `[P§16]`, `[P§17]`, `[P§18]`, `[P§19]`, `[P§29.3]`, `[P§34]`
