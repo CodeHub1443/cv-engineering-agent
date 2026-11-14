@@ -2453,3 +2453,11 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Found:** `--model-name` and `--metric` of `cv-agent research` only build the claim query and were never stored, so the store needs its own retrieval keys (OQ2). `date_accessed` is already a UTC date, so UTC is the staleness convention. S4's `select_claims` signature was not available at drafting time; K4 must re-check it.
 
 **Left open:** K1 to K4 are not started (separate issues; K4 waits for ADR-0023 S4). The ADR-0006 "Amended by ADR-0024" note lands with K1. Q54 stays open in OPEN_QUESTIONS until K3 ships. No code, no key read, no GPU, no LLM call, ledger unchanged.
+
+## 2026-11-13 — Q58 resolved: `cv-agent research --live` (feature/claude/q58-research-live, issue #137)
+
+**Changed:** `research` gains `--live` (default off). It passes the router a config copy with `routing["extraction"] = "fast"` (a tier name; the CLI names no provider or model) and calls `router.for_task(EXTRACTION)` before the fetch, so a missing key or call log costs no fetch (Q57, live path). ADR-0020 got a dated amendment in its own first commit. D-102 (Q58 option b) and D-103 (four known Windows-only failing files) recorded; Q58 struck through, Q57 annotated. Three tests in `tests/test_cli_research_live.py`, written first: the two `--live` ones failed on `unrecognized arguments: --live` before the change.
+
+**Learned:** `perform_research` reuses the provider the router cached (`LLMRouter.for_task`), so the pre-fetch resolve needed no change to `graph/research.py`. After merging origin/main (S4, D-101) that reuse is at `cv_agent/graph/research.py:297`. `test_baseline_wiring.py` no longer fails on Windows; 27 failures, all in the four D-103 files. A combined shell command that edited the ADR was denied once by the auto-mode classifier; nothing had been applied, and the edit was redone with the edit tool.
+
+**Left open:** D-098 is now usable per run only with `--live` and a key; the persisted default stays offline. No key was read or set beyond a fake test value, no network, no GPU, ledger unchanged.
