@@ -372,3 +372,14 @@ Per slice (each needs its own issue):
 ## 9. Not verified at drafting time
 
 Whether Claude's tokenizer never yields more tokens than UTF-8 bytes; the real size of message framing (512 is a reserve); whether failed or timed-out requests are billed (counted conservatively); cache price multipliers (never sent, so an anomaly is settled at the larger of actual and reserved); the request-ID attribute on SDK error objects in 0.125; whether Haiku 5.5 rejects `temperature` (never sent).
+
+## Amendment (2026-11-13): per-invocation CLI route override (D-102, issue #137)
+
+Q58 is resolved with option (b). This amends §3 items 3-4 (task class to tier routing) and the §5 router interface by one caller-facing rule; nothing above is edited.
+
+- `cv-agent research --live` (default off) resolves the EXTRACTION route to the `fast` tier for that one invocation. The CLI does this by passing the router a copy of the loaded `[llm]` config whose `routing["extraction"]` is the tier name `fast`. It is config data: the CLI names no provider, SDK or model string, and `build_router` validates it against the catalog like any other routing.
+- Scope: the `research` command and the EXTRACTION task class only. No other command, task class or config file is affected. The packaged and project `default.toml` files stay all-`offline`, and without `--live` behaviour is unchanged (the offline default of this ADR stands).
+- Budget, privacy, payload checks, credential lookup and the call log stay inside `GovernedProvider` and the router, unchanged. `[llm.privacy]` is unchanged; `PROJECT_DATA` stays blocked (D-094).
+- With `--live` the CLI calls `router.for_task(TaskClass.EXTRACTION)` before the fetch, so a missing key (`LLMCredentialError`) or call log (`LLMStoreError`) refuses before any HTTP GET (Q57 for the live path). The router caches the built provider, so the later call reuses it.
+
+Canon: `[P§20]`, `[P§24]`, `[P§34]`.
