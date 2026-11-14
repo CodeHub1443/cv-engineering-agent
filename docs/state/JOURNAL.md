@@ -2518,3 +2518,14 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Q54 progress note:** K1c landed search; Q54 stays open until K3. It is not struck.
 
 **Gates:** ruff clean; mypy only the known `SIGKILL` error; pytest with both key variables unset: 26 failed / 2562 passed / 10 skipped, all failures in the four D-103 files (18/5/1/2). **Left open:** K2 (`cv-agent knowledge init/migrate/list/show`), K3, K4. No key read, no network, no GPU, no LLM call, ledger unchanged. No history was rewritten.
+
+
+## 2026-11-14 — ADR-0024 K2: knowledge CLI (feature/claude/k2-knowledge-cli, issue #149, refs #125)
+
+**Changed:** `cv_agent/__main__.py` gained `knowledge init | migrate | list | show` (handlers in the style of `llm-log`; `_utc_today` is the only clock; `list`/`show` open the read path with `writer=RESEARCH_CLI`, stdout JSON, stderr human text, stale flagged and `--fresh-only` the only switch). New `tests/test_cli_knowledge.py` (20 tests: exit codes, filters, as-of with an injected UTC clock including the horizon boundary, history, unknown item, byte-identical file after reads) with tmp state roots only. Shared fixtures moved to `tests/knowledge_fakes.py`; `test_knowledge_sqlite_store.py` and `test_knowledge_search.py` import from it (no test module imports another). ADR-0024 got an appended amendment section (D-109); nothing above it was edited. Tests were shown failing first.
+
+**Owner confirmation:** on 2026-11-14 the owner confirmed that `E:\Dev\CV-Agent` is not under OneDrive or any synced folder, which resolves the ADR-0024 "Not verified" note on SQLite locking for this machine.
+
+**Q54 progress note:** K2 makes the store inspectable; Q54 stays open until K3. It is not struck.
+
+**Gates:** see the PR. **Left open:** K3 (research persistence), K4 (SELECTION wiring). No key read, no network, no GPU, no LLM call, ledger unchanged. No history was rewritten.
