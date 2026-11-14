@@ -82,3 +82,18 @@ def test_the_boundary_check_would_catch_a_forbidden_import() -> None:
         a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names
     ]
     assert [m for m in found if m not in SELECTOR_ALLOWED] == ["cv_agent.requirements.analyzer", "cv_agent.graph"]
+
+
+def test_stored_evidence_boundary_and_no_storage_imports_in_model_selection() -> None:
+    allowed = STDLIB | {
+        "datetime",
+        "cv_agent.knowledge.models",
+        "cv_agent.knowledge.store",
+        "cv_agent.model_selection.models",
+    }
+    bad = [m for m, _ in _imports("stored_evidence") if m not in allowed]
+    assert not bad, f"stored_evidence imports outside its boundary: {bad}"
+    forbidden = ("sqlite3", "cv_agent.knowledge.sqlite_store", "cv_agent.__main__")
+    for path in ROOT.glob("*.py"):
+        found = [m for m, _ in _imports(path.stem) if m in forbidden]
+        assert not found, f"{path.name} imports {found}"
