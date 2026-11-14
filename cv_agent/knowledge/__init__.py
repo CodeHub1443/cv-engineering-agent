@@ -9,7 +9,7 @@ This package imports nothing from cv_agent.execution, cv_agent.skills,
 cv_agent.graph, cv_agent.tools, or cv_agent.llm — enforced by
 tests/test_knowledge.py's structural test. It does not acquire information (no web
 fetching, no research execution — that is future work), does not reason about or
-rank claims by relevance, and ships no durable persistence backend: only an
-in-memory reference KnowledgeStore. See ADR-0006 for the full design and the
-explicit list of what this package deliberately does not yet do.
+rank claims by relevance. Persistence is an in-memory reference KnowledgeStore plus
+the durable SQLite backend in ``sqlite_store.py`` (ADR-0024). See ADR-0006 for the
+full design and the explicit list of what this package deliberately does not yet do.
 """
