@@ -2563,3 +2563,11 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** the imgsz series already shows resolution is a small-person lever (960: +0.103 small AP@0.5) and that precision at 0.25 falls with it (960: 0.7273, below the D-077 floor). The proposal fixes 768 in advance from a three-point quadratic (mAP about 0.530, small AP about 0.407, P about 0.759) and labels it a heuristic, not evidence. The measured-run wrapper and recorder are hard-wired to the 640/960/1280 series (`run_yolo_val_measured.py:55,69-71,336`; `record_evaluation_runs.py:41-45,60-61`; `evaluation_records.py:49-58,546-551`), so the run needs an ADR-0017 amendment and a generalised wrapper before it can start. STATUS cited Q25 for the model-swap block, but Q25 concerns the execution host (D-044).
 
 **Left open:** Issue B (ADR-0017 amendment, generalised wrapper and recorder, about 300 lines) and Issue C (read-only comparison entry point, about 150 lines). No GPU, no run, no key, no network, no LLM call, ledger unchanged (10 records), no code under `cv_agent/`, `scripts/` or `tests/`, no ADR modified.
+
+## 2026-11-15 — Issue C: compare_candidate.py (feature/claude/compare-candidate, issue #160)
+
+**Changed:** new `scripts/compare_candidate.py` (read-only ledger reads, `evaluate_candidate(..., variable_under_test="input_resolution")`, verdict plus each criterion with its margin; exit 0/1/2). `acceptance.py`: the provisional-gains caveat now cites D-113; flag unchanged. Tests first (shown failing): `tests/test_compare_candidate.py` (pass, precision floor, each gain, missing candidate and baseline row, precision / dataset / model difference, unchanged resolution, ledger bytes unchanged, missing ledger) and one caveat test in `test_acceptance.py`. DECISIONS D-118, OPEN_QUESTIONS Q68.
+
+**Learned:** `invalid` is exit 2 so a comparison that cannot be judged is never read as a failed candidate. Smoke run on the real ledger (read-only): EXP-20261004-02 vs the baseline reports 960 fails the D-077 floor (0.7273) while both gains pass. A test helper parameter named `precision` collided with the record field of the same name; renamed.
+
+**Left open:** Issue B (wrapper, recorder, ADR-0017 amendment; takes D-117). Q68 (whether to widen the gate). No GPU run, ledger unchanged.
