@@ -73,6 +73,16 @@ LEGACY_REFERENCE = (
 )
 MODEL_NAME_EXPECTED = "yolo11n.pt"
 
+# One owner-fixed candidate per approved proposal (ADR-0017 amendment 2026-11-15). The wrapper and the
+# recorder share this contract so the rule is stated once.
+CANDIDATE_IMGSZ_MIN = 320
+CANDIDATE_IMGSZ_MAX = 1280
+CANDIDATE_IMGSZ_STEP = 32
+RESERVED_SERIES_IDS = frozenset(
+    {SERIES_ID, "EXP-20261004-02", "EXP-20261004-03", FP32_CONTROL_SERIES_ID}
+)
+_EXP_ID_RE = re.compile(r"^EXP-\d{8}-\d{2}$")
+
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _SUMMARY_ROW = re.compile(
     r"^\s+(all|person)\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+"
@@ -150,6 +160,33 @@ def precision_label(quantize: int | None) -> str:
     if quantize is None:
         return PRECISION_FP32_REQUESTED
     raise ValueError(f"no precision label for quantize={quantize!r}")
+
+
+def is_exp_id(value: object) -> bool:
+    """True for a well-formed experiment id (EXP-YYYYMMDD-NN)."""
+    return isinstance(value, str) and _EXP_ID_RE.match(value) is not None
+
+
+def candidate_problems(exp_id: str, imgsz: int) -> list[str]:
+    """Why (exp_id, imgsz) cannot be an owner-fixed candidate. Empty means it can."""
+    problems: list[str] = []
+    if not is_exp_id(exp_id):
+        problems.append(f"exp id {exp_id!r} must match EXP-YYYYMMDD-NN")
+    elif exp_id in RESERVED_SERIES_IDS:
+        problems.append(f"exp id {exp_id} is reserved for the EXP-20261004 series")
+    if not _is_int(imgsz) or not (
+        CANDIDATE_IMGSZ_MIN <= imgsz <= CANDIDATE_IMGSZ_MAX and imgsz % CANDIDATE_IMGSZ_STEP == 0
+    ):
+        problems.append(
+            f"imgsz {imgsz!r} must be a multiple of {CANDIDATE_IMGSZ_STEP} "
+            f"in [{CANDIDATE_IMGSZ_MIN}, {CANDIDATE_IMGSZ_MAX}]"
+        )
+    return problems
+
+
+def candidate_run_name(exp_id: str, imgsz: int) -> str:
+    """The run directory name for a candidate: derived from the exp id, never free text."""
+    return f"{exp_id.lower()}-yolo11n-coco-val2017-imgsz{imgsz}-conf0001"
 
 
 def sha256_file(path: Path) -> str:
@@ -528,8 +565,21 @@ def verify_run(
     )
 
 
-def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_ref: str) -> ExperimentRecord:
-    """The ExperimentRecord for one verified run. Only measured values are populated."""
+def build_record(
+    run: VerifiedRun,
+    *,
+    exp_id: str,
+    baseline_id: str,
+    approval_ref: str,
+    hypothesis: str = HYPOTHESIS,
+    success_criteria: str = SUCCESS_CRITERIA,
+    series_note: str | None = None,
+) -> ExperimentRecord:
+    """The ExperimentRecord for one verified run. Only measured values are populated.
+
+    ``hypothesis``, ``success_criteria`` and ``series_note`` default to the EXP-20261004 series text; a
+    candidate record passes the text of its proposal (ADR-0017 amendment 2026-11-15).
+    """
     if run.approval_ref != approval_ref:
         raise RecordError(
             [f"run approval_ref {run.approval_ref!r} != requested {approval_ref!r}: "
@@ -544,7 +594,9 @@ def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_re
     fps = run.images / run.wall_seconds
     is_control = run.quantize is None
     notes = {
-        "series": (
+        "series": series_note
+        if series_note is not None
+        else (
             f"{FP32_CONTROL_SERIES_ID} FP32 control (measurement-only, D-069, ADR-0018)"
             if is_control
             else f"{SERIES_ID} measurement-only (D-069); this record is one image size of the series"
@@ -590,8 +642,8 @@ def build_record(run: VerifiedRun, *, exp_id: str, baseline_id: str, approval_re
     return ExperimentRecord(
         exp_id=exp_id,
         status="completed",
-        hypothesis=HYPOTHESIS,
-        success_criteria=SUCCESS_CRITERIA,
+        hypothesis=hypothesis,
+        success_criteria=success_criteria,
         baseline_id=baseline_id,
         created_at=run.started_at,
         completed_at=run.ended_at,

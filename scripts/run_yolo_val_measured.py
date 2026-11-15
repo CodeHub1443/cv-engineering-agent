@@ -1,4 +1,4 @@
-"""One controlled `yolo val` run for EXP-20261004-01 (measurement-only, D-069).
+"""One controlled `yolo val` run: the EXP-20261004-01 series or one owner-fixed candidate.
 
 Runs YOLO11n on COCO val2017 persons at conf=0.001 (Q28), batch=1, device 0, quantize=16, with
 only --imgsz varying. It writes the artifacts that scripts/record_evaluation_runs.py verifies:
@@ -7,6 +7,10 @@ only --imgsz varying. It writes the artifacts that scripts/record_evaluation_run
     <project>/<name>.val.log            full stdout+stderr of the run
     <project>/<name>.run.json           how the run was executed (exit code, timing, hashes,
                                         approval reference, GPU identity, peak VRAM, peak RAM)
+
+Series mode (no --exp-id): --imgsz is one of 640/960/1280 (measurement-only, D-069). Candidate mode
+(--exp-id EXP-YYYYMMDD-NN): one owner-fixed candidate per approved proposal, imgsz a multiple of 32 in
+[320, 1280], FP16 only; the run name and `series` derive from the exp id (ADR-0017 amendment 2026-11-15).
 
 Operator-run exception (ADR-0017 §4): this wrapper runs `yolo val` directly, not through
 JobExecutor. ADR-0013 and ADR-0009 remain authoritative for agent-initiated execution. The
@@ -38,6 +42,8 @@ from cv_agent.execution.jobs.runtimes.yolo_eval import (  # noqa: E402
     build_command,
 )
 from cv_agent.experiments.evaluation_records import (  # noqa: E402
+    candidate_problems,
+    candidate_run_name,
     FP32_CONTROL_SERIES_ID,
     QUANTIZE,
     RUN_SCHEMA,
@@ -66,7 +72,9 @@ FP32_CONTROL_IMGSZ = 640
 PRECISIONS = {"fp16": QUANTIZE, "fp32": None}
 
 
-def run_name(imgsz: int, quantize: int | None = QUANTIZE) -> str:
+def run_name(imgsz: int, quantize: int | None = QUANTIZE, exp_id: str | None = None) -> str:
+    if exp_id is not None:
+        return candidate_run_name(exp_id, imgsz)
     suffix = "" if quantize is not None else "-fp32"
     return f"e1-yolo11n-coco-val2017-imgsz{imgsz}-conf0001{suffix}"
 
@@ -77,6 +85,7 @@ def build_argv(
     state_root: Path,
     executable: str = DEFAULT_YOLO_EXECUTABLE,
     quantize: int | None = QUANTIZE,
+    exp_id: str | None = None,
 ) -> list[str]:
     """The `yolo val` argv: the binding's builder, plus the settings it does not expose.
 
@@ -89,7 +98,7 @@ def build_argv(
         "model": str(state_root / "models" / MODEL_NAME),
         "data": str(state_root / "evaluations" / DATA_YAML_NAME),
         "output_dir": str(state_root / "evaluations"),
-        "run_name": run_name(imgsz, quantize),
+        "run_name": run_name(imgsz, quantize, exp_id),
         "conf": CONF,
         "imgsz": imgsz,
         "classes": CLASSES,
@@ -241,7 +250,16 @@ def gpu_identity() -> dict[str, str | int | None]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--imgsz", type=int, required=True, choices=APPROVED_IMGSZ)
+    parser.add_argument(
+        "--imgsz",
+        type=int,
+        required=True,
+        help=f"{'/'.join(map(str, APPROVED_IMGSZ))} for the series; any other multiple of 32 in [320, 1280] needs --exp-id",
+    )
+    parser.add_argument(
+        "--exp-id",
+        help="the owner-fixed candidate id (EXP-YYYYMMDD-NN) from the approved proposal; required outside the series sizes",
+    )
     parser.add_argument(
         "--approval-ref",
         required=True,
@@ -259,6 +277,18 @@ def main(argv: list[str] | None = None) -> int:
         print("REFUSED: --approval-ref must not be blank", file=sys.stderr)
         return 2
     quantize = PRECISIONS[args.precision]
+    exp_id = args.exp_id.strip() if args.exp_id is not None else None
+    if exp_id is not None:
+        if quantize is None:
+            print("REFUSED: fp32 is only the approved 640 control (ADR-0018), not a candidate", file=sys.stderr)
+            return 2
+        bad = candidate_problems(exp_id, args.imgsz)
+        if bad:
+            print(f"REFUSED: {'; '.join(bad)}", file=sys.stderr)
+            return 2
+    elif args.imgsz not in APPROVED_IMGSZ:
+        print(f"REFUSED: imgsz {args.imgsz} needs --exp-id (the series sizes are {list(APPROVED_IMGSZ)})", file=sys.stderr)
+        return 2
     if quantize is None and args.imgsz != FP32_CONTROL_IMGSZ:
         print("REFUSED: fp32 is only the approved 640 control (ADR-0018)", file=sys.stderr)
         return 2
@@ -271,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
 
     state = repository_state_root()
     project = state / "evaluations"
-    name = run_name(args.imgsz, quantize)
+    name = run_name(args.imgsz, quantize, exp_id)
     run_dir = project / name
     run_json = project / f"{name}.run.json"
     val_log = project / f"{name}.val.log"
@@ -297,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
         "data_yaml_sha256": sha256_file(data_yaml),
         "val_txt_sha256": sha256_file(val_txt),
     }
-    command = build_argv(args.imgsz, state_root=state, quantize=quantize)
+    command = build_argv(args.imgsz, state_root=state, quantize=quantize, exp_id=exp_id)
     print(f"running from commit {commit}")
     print("command:", " ".join(command))
 
@@ -333,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run = {
         "schema": RUN_SCHEMA,
-        "series": FP32_CONTROL_SERIES_ID if quantize is None else "EXP-20261004-01",
+        "series": exp_id or (FP32_CONTROL_SERIES_ID if quantize is None else "EXP-20261004-01"),
         "imgsz": args.imgsz,
         "conf": CONF,
         "batch": BATCH,
