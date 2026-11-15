@@ -1144,3 +1144,122 @@ def test_wrapper_candidate_run_json_series_is_the_exp_id(tmp_path: Path, monkeyp
     run = json.loads((state / "evaluations" / f"{CAND_NAME}.run.json").read_text())
     assert run["series"] == CAND and run["imgsz"] == 768 and run["approval_ref"] == "X"
 
+
+# ── recorder candidate mode ─────────────────────────────────────────────────────────
+
+
+def _candidate_case(tmp_path: Path, monkeypatch, *, proposal: str = PROPOSAL, run_imgsz: int = 768, **make):
+    writer = _load_writer()
+    monkeypatch.setattr(writer, "require_clean_worktree", lambda _root: HEAD)
+    monkeypatch.setattr(writer, "DatasetExpectation", lambda: EXPECT)
+    run_dir, coco = make_run(
+        tmp_path / "r",
+        imgsz=run_imgsz,
+        name=make.pop("name", candidate_run_name(CAND, run_imgsz)),
+        series=make.pop("series", CAND),
+        run_overrides={"approval_ref": "CAND-REF"},
+    )
+    prop = tmp_path / "proposal.md"
+    prop.write_text(proposal, encoding="utf-8")
+    argv = [
+        "--approval-ref", "CAND-REF", "--candidate", f"{CAND}={run_dir}",
+        "--baseline", "EXP-20261004-01", "--proposal", str(prop), "--coco-root", str(coco), "--dry-run",
+    ]
+    return writer, argv
+
+
+def test_candidate_dry_run_records_the_proposal_text(tmp_path: Path, monkeypatch, capsys) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch)
+    assert writer.main(argv) == 0
+    out = capsys.readouterr().out
+    assert f'"{CAND}"' in out and '"EXP-20261004-01"' in out and "768x768" in out
+    assert "overall AP rises" in out and "precision floor 0.75" in out and "proposal.md" in out
+    assert "dry run" in out
+
+
+@pytest.mark.parametrize(
+    "proposal, message",
+    [
+        (PROPOSAL.replace(f"**Candidate:** {CAND}, imgsz 768\n", ""), "exactly one"),
+        (PROPOSAL + f"\n**Candidate:** {CAND}, imgsz 768\n", "exactly one"),
+        (PROPOSAL.replace(f"{CAND}, imgsz", "EXP-20261115-02, imgsz"), "EXP-20261115-02"),
+        (PROPOSAL.replace("imgsz 768", "imgsz 960"), "imgsz 960"),
+        (PROPOSAL.replace("## 3. Hypothesis (stated before the run)", "## 3. Idea"), "Hypothesis"),
+        (PROPOSAL.replace("## 5. Success criteria", "## 5. Criteria"), "Success criteria"),
+    ],
+)
+def test_candidate_refuses_a_proposal_that_does_not_bind_this_run(
+    tmp_path: Path, monkeypatch, capsys, proposal: str, message: str
+) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch, proposal=proposal)
+    assert writer.main(argv) in (1, 2)
+    err = capsys.readouterr().err
+    assert message in err and "nothing recorded" in err
+
+
+def test_candidate_does_not_read_imgsz_from_the_prose(tmp_path: Path, monkeypatch, capsys) -> None:
+    prose = PROPOSAL.replace("At imgsz 768 overall", "At imgsz 960 overall")
+    writer, argv = _candidate_case(tmp_path, monkeypatch, proposal=prose)
+    assert writer.main(argv) == 0  # the Candidate line, not the prose, binds the size
+
+
+def test_candidate_refuses_a_run_whose_series_is_another_id(tmp_path: Path, monkeypatch, capsys) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch, series="EXP-20261115-02")
+    assert writer.main(argv) == 1
+    assert "series" in capsys.readouterr().err
+
+
+def test_candidate_refuses_a_run_dir_with_the_wrong_name(tmp_path: Path, monkeypatch, capsys) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch, name="some-other-run")
+    assert writer.main(argv) == 1
+    assert CAND_NAME in capsys.readouterr().err
+
+
+def test_candidate_refuses_a_run_json_imgsz_that_disagrees_with_the_proposal(tmp_path: Path, monkeypatch, capsys) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch, run_imgsz=960, name=CAND_NAME)
+    assert writer.main(argv) == 1
+    assert "imgsz" in capsys.readouterr().err
+
+
+def test_candidate_refuses_a_different_approval(tmp_path: Path, monkeypatch, capsys) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch)
+    argv[argv.index("--approval-ref") + 1] = "OTHER"
+    assert writer.main(argv) == 1
+    assert "!= --approval-ref 'OTHER'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("drop", ["--baseline", "--proposal"])
+def test_candidate_requires_baseline_and_proposal(tmp_path: Path, monkeypatch, capsys, drop: str) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch)
+    i = argv.index(drop)
+    assert writer.main(argv[:i] + argv[i + 2:]) == 2
+    assert drop in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("baseline", [CAND, "SELF", "bad"])
+def test_candidate_refuses_a_bad_baseline(tmp_path: Path, monkeypatch, capsys, baseline: str) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch)
+    argv[argv.index("--baseline") + 1] = baseline
+    assert writer.main(argv) == 2
+    assert "baseline" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("extra", [["--fp32-control", "/x"], ["--run", "640=/x"]])
+def test_candidate_mode_is_exclusive_with_the_other_modes(tmp_path: Path, monkeypatch, capsys, extra) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch)
+    assert writer.main([*argv, *extra]) == 2
+    assert "separate" in capsys.readouterr().err
+
+
+def test_candidate_write_refuses_a_baseline_missing_from_the_ledger(tmp_path: Path, monkeypatch, capsys) -> None:
+    writer, argv = _candidate_case(tmp_path, monkeypatch)
+    argv.remove("--dry-run")
+    ledger = open_ledger(db_path=tmp_path / "ledger.sqlite", create=True)
+    monkeypatch.setattr(writer, "open_ledger", lambda create=False: ledger)
+    assert writer.main(argv) == 1
+    assert "EXP-20261004-01" in capsys.readouterr().err
+    reopened = open_ledger(db_path=tmp_path / "ledger.sqlite", create=False)
+    try:
+        assert reopened.get_experiment(CAND) is None
+    finally:
+        reopened.close()  # type: ignore[attr-defined]
