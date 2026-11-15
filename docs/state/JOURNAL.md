@@ -2564,6 +2564,14 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 
 **Left open:** Issue B (ADR-0017 amendment, generalised wrapper and recorder, about 300 lines) and Issue C (read-only comparison entry point, about 150 lines). No GPU, no run, no key, no network, no LLM call, ledger unchanged (10 records), no code under `cv_agent/`, `scripts/` or `tests/`, no ADR modified.
 
+## 2026-11-15 — Issue C: compare_candidate.py (feature/claude/compare-candidate, issue #160)
+
+**Changed:** new `scripts/compare_candidate.py` (read-only ledger reads, `evaluate_candidate(..., variable_under_test="input_resolution")`, verdict plus each criterion with its margin; exit 0/1/2). `acceptance.py`: the provisional-gains caveat now cites D-113; flag unchanged. Tests first (shown failing): `tests/test_compare_candidate.py` (pass, precision floor, each gain, missing candidate and baseline row, precision / dataset / model difference, unchanged resolution, ledger bytes unchanged, missing ledger) and one caveat test in `test_acceptance.py`. DECISIONS D-118, OPEN_QUESTIONS Q68.
+
+**Learned:** `invalid` is exit 2 so a comparison that cannot be judged is never read as a failed candidate. Smoke run on the real ledger (read-only): EXP-20261004-02 vs the baseline reports 960 fails the D-077 floor (0.7273) while both gains pass. A test helper parameter named `precision` collided with the record field of the same name; renamed.
+
+**Left open:** Issue B (wrapper, recorder, ADR-0017 amendment; takes D-117). Q68 (whether to widen the gate). No GPU run, ledger unchanged.
+
 ## 2026-11-15 — Issue B1: ADR-0017 amendment, shared candidate rule and wrapper (feature/claude/measured-run-candidate, issue #159)
 
 **Changed:** ADR-0017 amendment (appended; §3.7 and §4a unedited). `scripts/run_yolo_val_measured.py`: `--exp-id`, imgsz rule (multiple of 32 in [320, 1280]), run name and `series` from the exp id; every existing refusal kept. `cv_agent/experiments/evaluation_records.py`: `build_record` takes hypothesis, criteria and series note (defaults unchanged), plus the shared `candidate_problems`, `candidate_run_name`, `is_exp_id`, `RESERVED_SERIES_IDS`. DECISIONS D-117. 31 new test cases (106 to 137) in `tests/test_evaluation_records.py`, written first and shown failing (import error on the new contract); the EXP-20261004 tests are unchanged apart from two optional `make_run` parameters.
