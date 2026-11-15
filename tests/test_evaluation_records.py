@@ -440,10 +440,12 @@ def test_wrapper_refuses_a_dirty_tree_before_running_anything(monkeypatch, capsy
     assert "REFUSED" in capsys.readouterr().err
 
 
-def test_wrapper_rejects_unapproved_image_size() -> None:
+def test_wrapper_rejects_unapproved_image_size(monkeypatch, capsys) -> None:
     wrapper = _load_wrapper()
-    with pytest.raises(SystemExit):
-        wrapper.main(["--imgsz", "800"])
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: pytest.fail("no git check first"))
+    monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run"))
+    assert wrapper.main(["--imgsz", "800", "--approval-ref", "APPROVAL-TEST"]) == 2
+    assert "imgsz 800 needs --exp-id" in capsys.readouterr().err
 
 
 # ── Review changes (ADR-0017 §3.2–§3.8): precision label, approval, system metrics ───────
