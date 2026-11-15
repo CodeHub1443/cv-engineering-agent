@@ -2547,3 +2547,11 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** `tests/test_knowledge_ingest_writers.py` flags `dataclasses.replace` in any module that uses `KnowledgeItem`, so the candidate is rebuilt explicitly. Q67 records that curated evidence is never staleness-filtered.
 
 **Left open:** K4b (a production caller; ADR-0023 §7.3 gates 2 and 3, so the strong tier stays `offline`). No key read, no network, no GPU, no LLM call, ledger unchanged. No history was rewritten.
+
+## 2026-11-15 — Q32 decisions and #154 (docs/claude/q32-decisions-run-baseline, closes #154)
+
+**Changed:** DECISIONS D-112 (variance protocol), D-113 (improvement rule), D-114 (`scripts/run_baseline.py` is historical). OPEN_QUESTIONS Q32: (c) and (d) struck (D-113); (a) annotated as resolved for the `.pt` evaluation path. `scripts/run_baseline.py` gained a one-line HISTORICAL docstring header and no other code change. EXPERIMENTS.md gained an appended note pinning the last working commit for EXP-20260929-01.
+
+**Learned:** the first draft of D-112 assumed EXP-20261004-01 was a TensorRT engine. It is a PyTorch `yolo11n.pt` evaluation with `quantize=16` on the Linux PC (RTX 3060 12 GB), a deterministic path (EXPERIMENTS.md:222-223, :158), so no repeat runs are needed for it; engine-build and seed variance are measured with the first candidate on those paths. The owner revised D-112 before it was written. The last working commit of the runner is `2478588` and `a0aba1c` broke it; checked by comparing the `run_reference_selection` signature at `65ff0f9^` and `65ff0f9`, the script was not run.
+
+**Left open:** Q32 (a) for engine-build and training-seed variance; the thresholds stay provisional. The Q32 header no longer carries "OWNER INPUT REQUIRED", which the owner's revised wording replaced. No GPU, no key, no network, no LLM call, ledger unchanged, no code under `cv_agent/` or `tests/`, no ADR modified.

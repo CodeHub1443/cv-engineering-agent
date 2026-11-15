@@ -1,6 +1,8 @@
 """
 scripts/run_baseline.py — First real baseline execution for the reference task.
 
+HISTORICAL: runner for EXP-20260929-01; does not run on main since a0aba1c (ADR-0023 S4); see EXPERIMENTS.md and #154.
+
 Person Detection + Tracking · D-043 · baseline_id="SELF" · exp_id=EXP-20260929-01
 
 Runs the selected YOLO11n model through the full Agent architecture:
