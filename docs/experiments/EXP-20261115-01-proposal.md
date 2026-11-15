@@ -2,6 +2,7 @@
 
 **Status:** proposed 2026-11-15, owner-approved as candidate C1 (D-115). Issue #157. No GPU run has happened and none starts until the code prerequisites in §10 are merged.
 **Experiment id:** `EXP-20261115-01` (owner-fixed). **Approval reference:** `EXP-20261115-01-OWNER-20261115` (owner-issued under the D-080/D-087 standing grant; bound to this one experiment and the cost ceiling in §8).
+**Candidate:** EXP-20261115-01, imgsz 768
 **Baseline:** `EXP-20261004-01` (FP16-requested, imgsz 640; D-082). **Kind:** inference-only, deterministic, one run. **Hardware figures are RTX 3060 proxies:** the deployment GPU is still unnamed (Q25, annotated 2026-11-15).
 
 ## 1. Operational problem `[P§5]`
