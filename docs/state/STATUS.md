@@ -32,7 +32,7 @@ Baseline origin/main includes K1 (store), K2 (`cv-agent knowledge`) and K3 (`res
 
 ## Next actions
 
-0. **Issue B:** ADR-0017 amendment plus a generalised measured-run wrapper and recorder (about 300 lines), then **Issue C:** a read-only candidate comparison entry point (about 150 lines). Then the EXP-20261115-01 run on the Linux PC after the proposal's preflight.
+0. **Issue B:** ADR-0017 amendment plus a generalised measured-run wrapper and recorder (about 300 lines), then the EXP-20261115-01 verdict via `scripts/compare_candidate.py` (**Issue C**, #160, D-118, PR open, not merged). The run on the Linux PC after the proposal's preflight.
 1. The owner's re-run of `research --live` on the YOLO11 page (the HTML-to-text fix has merged).
 2. **K4b** (a production caller of `select_candidate`, fail-closed on a missing store; owner to brief).
 3. ADR-0023 §7.3: the SELECTION route switch still needs a production caller of `select_candidate` and a recorded comparison against the deterministic ranker.

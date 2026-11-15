@@ -273,3 +273,12 @@ def test_nan_metric_is_invalid_not_a_failed_criterion(role: str, key: str) -> No
     target.val_metrics[key] = float("nan")  # the dict is mutable after validation
     report = evaluate_candidate(base, cand)
     assert report.verdict == "invalid" and any("not a finite number" in p for p in report.problems)
+
+
+def test_default_caveat_cites_d113_and_keeps_the_provisional_flag() -> None:
+    crit = AcceptanceCriteria()
+    assert crit.gains_provisional
+    text = " ".join(crit.caveats())
+    assert "D-113" in text and "+0.010 / +0.020" in text
+    assert "provisional until a noisy path is measured" in text
+    assert "D-078" not in text
