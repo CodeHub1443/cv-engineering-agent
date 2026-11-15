@@ -90,8 +90,8 @@ class AcceptanceCriteria:
         out: list[str] = []
         if self.gains_provisional:
             out.append(
-                "overall and small-person AP gains are provisional acceptance thresholds (D-078, Q32); "
-                "run-to-run variance is not measured"
+                f"AP gain thresholds +{D078_MIN_OVERALL_GAIN:.3f} / +{D078_MIN_SMALL_GAIN:.3f} per D-113, "
+                "provisional until a noisy path is measured"
             )
         else:
             out.append("AP gain thresholds were marked non-provisional by the caller: NOT the D-078 basis")
