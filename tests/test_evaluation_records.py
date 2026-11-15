@@ -18,10 +18,15 @@ from pathlib import Path
 import pytest
 
 from cv_agent.experiments.evaluation_records import (
+    HYPOTHESIS,
+    RESERVED_SERIES_IDS,
     RUN_SCHEMA,
+    SUCCESS_CRITERIA,
     DatasetExpectation,
     RecordError,
     build_record,
+    candidate_problems,
+    candidate_run_name,
     preflight_new_ids,
     run_paths,
     sha256_file,
@@ -83,6 +88,8 @@ def make_run(
     predictions: str | None = None,
     run_overrides: dict | None = None,
     quantize: int | None = 16,
+    name: str | None = None,
+    series: str = "EXP-20261004-01",
 ) -> tuple[Path, Path]:
     """Build <tmp>/state/evaluations/<name>/ plus .val.log and .run.json. Returns (run_dir, coco_root)."""
     state = tmp / "state"
@@ -95,7 +102,7 @@ def make_run(
     weights.write_bytes(b"weights-bytes")
     data_yaml = evals / "coco-person-val.yaml"
     data_yaml.write_text(f"path: {coco}\ntrain: val2017.txt\nval: val2017.txt\nnames:\n  0: person\n")
-    name = f"e1-yolo11n-coco-val2017-imgsz{imgsz}-conf0001"
+    name = name or f"e1-yolo11n-coco-val2017-imgsz{imgsz}-conf0001"
     run_dir = evals / name
     run_dir.mkdir()
     (run_dir / "predictions.json").write_text(
@@ -105,7 +112,7 @@ def make_run(
     val_log_path.write_text(val_log)
     run = {
         "schema": RUN_SCHEMA,
-        "series": "EXP-20261004-01",
+        "series": series,
         "imgsz": imgsz,
         "conf": 0.001,
         "batch": 1,
@@ -433,10 +440,12 @@ def test_wrapper_refuses_a_dirty_tree_before_running_anything(monkeypatch, capsy
     assert "REFUSED" in capsys.readouterr().err
 
 
-def test_wrapper_rejects_unapproved_image_size() -> None:
+def test_wrapper_rejects_unapproved_image_size(monkeypatch, capsys) -> None:
     wrapper = _load_wrapper()
-    with pytest.raises(SystemExit):
-        wrapper.main(["--imgsz", "800"])
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: pytest.fail("no git check first"))
+    monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run"))
+    assert wrapper.main(["--imgsz", "800", "--approval-ref", "APPROVAL-TEST"]) == 2
+    assert "imgsz 800 needs --exp-id" in capsys.readouterr().err
 
 
 # ── Review changes (ADR-0017 §3.2–§3.8): precision label, approval, system metrics ───────
@@ -1000,3 +1009,138 @@ def test_the_exemption_is_exactly_the_nomachine_path() -> None:
     from cv_agent.experiments.evaluation_records import EXEMPT_GPU_PROCESS_NAMES
 
     assert EXEMPT_GPU_PROCESS_NAMES == frozenset({"/usr/NX/bin/nxnode.bin"})
+
+
+# ── One owner-fixed candidate per approved proposal (ADR-0017 amendment 2026-11-15, Issue B) ───────
+
+CAND = "EXP-20261115-01"
+CAND_NAME = "exp-20261115-01-yolo11n-coco-val2017-imgsz768-conf0001"
+PROPOSAL = f"""# {CAND} — proposal
+
+**Candidate:** {CAND}, imgsz 768
+
+## 3. Hypothesis (stated before the run)
+
+At imgsz 768 overall AP rises by at least +0.010.
+
+## 5. Success criteria
+
+All three must hold: gain +0.010, small +0.020, precision floor 0.75.
+
+## 6. Protocol
+"""
+
+
+def test_candidate_run_name_is_derived_from_the_exp_id_and_imgsz() -> None:
+    assert candidate_run_name(CAND, 768) == CAND_NAME
+
+
+@pytest.mark.parametrize("imgsz", [320, 640, 768, 1280])
+def test_candidate_accepts_a_multiple_of_32_in_range(imgsz: int) -> None:
+    assert candidate_problems(CAND, imgsz) == []
+
+
+@pytest.mark.parametrize("imgsz", [288, 770, 810, 1312, 0, -32])
+def test_candidate_refuses_an_imgsz_outside_the_rule(imgsz: int) -> None:
+    assert "imgsz" in " ".join(candidate_problems(CAND, imgsz))
+
+
+@pytest.mark.parametrize("exp_id", ["", "EXP-1", "exp-20261115-01", "EXP-20261115-1", "EXP-20261115-01 "])
+def test_candidate_refuses_a_malformed_exp_id(exp_id: str) -> None:
+    assert "exp id" in " ".join(candidate_problems(exp_id, 768))
+
+
+@pytest.mark.parametrize("exp_id", sorted(RESERVED_SERIES_IDS))
+def test_candidate_refuses_a_reserved_series_id(exp_id: str) -> None:
+    assert "reserved" in " ".join(candidate_problems(exp_id, 768))
+
+
+def test_build_record_defaults_keep_the_series_text(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
+    assert record.hypothesis == HYPOTHESIS and record.success_criteria == SUCCESS_CRITERIA
+    assert "measurement-only (D-069)" in json.loads(record.notes or "{}")["series"]
+
+
+def test_build_record_takes_hypothesis_criteria_and_series_note(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, imgsz=768, name=CAND_NAME, series=CAND)
+    record = build_record(
+        _verify(run_dir, coco, imgsz=768),
+        exp_id=CAND,
+        baseline_id="EXP-20261004-01",
+        approval_ref="APPROVAL-TEST",
+        hypothesis="H-text",
+        success_criteria="C-text",
+        series_note="S-text",
+    )
+    assert (record.hypothesis, record.success_criteria) == ("H-text", "C-text")
+    assert json.loads(record.notes or "{}")["series"] == "S-text"
+    assert record.input_resolution == "768x768"
+
+
+def test_wrapper_candidate_argv_uses_the_candidate_name_and_the_same_protocol(tmp_path: Path) -> None:
+    wrapper = _load_wrapper()
+    argv = wrapper.build_argv(768, state_root=tmp_path, executable="yolo", exp_id=CAND)
+    for token in ("conf=0.001", "imgsz=768", "batch=1", "device=0", "classes=[0]", "quantize=16", "exist_ok=True"):
+        assert token in argv
+    assert any(a.endswith(CAND_NAME) for a in argv)
+    base = wrapper.build_argv(640, state_root=tmp_path, executable="yolo")
+    assert [a for a in argv if not a.startswith(("imgsz=", "name="))] == [
+        a for a in base if not a.startswith(("imgsz=", "name="))
+    ]
+    assert wrapper.run_name(640) == "e1-yolo11n-coco-val2017-imgsz640-conf0001"  # series name unchanged
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [
+        (["--imgsz", "768"], "needs --exp-id"),
+        (["--imgsz", "770", "--exp-id", CAND], "imgsz"),
+        (["--imgsz", "1312", "--exp-id", CAND], "imgsz"),
+        (["--imgsz", "768", "--exp-id", "EXP-1"], "exp id"),
+        (["--imgsz", "768", "--exp-id", "EXP-20261004-02"], "reserved"),
+        (["--imgsz", "640", "--precision", "fp32", "--exp-id", CAND], "fp32"),
+    ],
+)
+def test_wrapper_refuses_a_bad_candidate_before_any_check_or_run(monkeypatch, capsys, args, message) -> None:
+    wrapper = _load_wrapper()
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: pytest.fail("no git check first"))
+    monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run"))
+    assert wrapper.main([*args, "--approval-ref", "X"]) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_wrapper_refuses_an_existing_candidate_run_directory(tmp_path: Path, monkeypatch, capsys) -> None:
+    wrapper = _load_wrapper()
+    make_run(tmp_path, imgsz=768, name=CAND_NAME, series=CAND)
+    state = tmp_path / "state"
+    monkeypatch.setattr(wrapper, "repository_state_root", lambda: state)
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: HEAD)
+    monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run over an existing run"))
+    assert wrapper.main(["--imgsz", "768", "--exp-id", CAND, "--approval-ref", "X"]) == 2
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_wrapper_candidate_run_json_series_is_the_exp_id(tmp_path: Path, monkeypatch) -> None:
+    wrapper = _load_wrapper()
+    make_run(tmp_path / "inputs")  # supplies models/ and the data yaml only
+    state = tmp_path / "inputs" / "state"
+    monkeypatch.setattr(wrapper, "repository_state_root", lambda: state)
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: HEAD)
+    monkeypatch.setattr(wrapper.subprocess, "run", _fake_nvidia_smi(""))
+
+    class FakeProc:
+        pid = 777
+        stdout: list[str] = []
+
+        def __init__(self, *_a, **_k) -> None:
+            pass
+
+        def wait(self) -> int:
+            return 0
+
+    monkeypatch.setattr(wrapper.subprocess, "Popen", FakeProc)
+    assert wrapper.main(["--imgsz", "768", "--exp-id", CAND, "--approval-ref", "X"]) == 0
+    run = json.loads((state / "evaluations" / f"{CAND_NAME}.run.json").read_text())
+    assert run["series"] == CAND and run["imgsz"] == 768 and run["approval_ref"] == "X"
+
