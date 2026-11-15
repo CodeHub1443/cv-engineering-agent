@@ -3,12 +3,12 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-11-14 · **Phase:** 5e/6 — LLM gateway v2 complete; ADR-0023 S1 to S5 merged (ADR-0023 complete); Q58 resolved (`research --live`, #138); ADR-0024 K1 (#142, #147, #148), K2 (#150) and K3 (#152) merged; K4 landing (#153); research HTML-to-text fix merged (#144, #145).
+**Updated:** 2026-11-15 · **Phase:** 5e/6 — LLM gateway v2 complete; ADR-0023 S1 to S5 merged (ADR-0023 complete); Q58 resolved (`research --live`, #138); ADR-0024 K1 (#142, #147, #148), K2 (#150) and K3 (#152) merged; K4 (#155) merged; research HTML-to-text fix merged (#144, #145).
 **Health:** Linux CI is authoritative. Windows local (D-103), measured on the K4 tree merged with origin/main: ruff clean; mypy only the Windows `SIGKILL` error; pytest 26 failed, 2594 passed, 10 skipped, all failures in `test_evaluation_records.py` (18), `test_linux_nvidia_runtime.py` (5), `test_yolo_eval_binding.py` (1), `test_yolo_inference_binding.py` (2). Any other failure is a defect.
 
 ## Where we are
 
-Baseline origin/main includes K1 (store), K2 (`cv-agent knowledge`) and K3 (`research` persists by default). Landing: **ADR-0024 K4** (issue #153): `model_selection/stored_evidence.py` merges fresh stored items, keyed by candidate id, into the reference comparison (`evidence` + `as_of`; stale excluded; D-111). No production caller yet (K4b); the SELECTION route stays offline.
+Baseline origin/main includes K1 (store), K2 (`cv-agent knowledge`) and K3 (`research` persists by default). Merged: **ADR-0024 K4** (#153, PR #155): `model_selection/stored_evidence.py` merges fresh stored items, keyed by candidate id, into the reference comparison (`evidence` + `as_of`; stale excluded; D-111). No production caller yet (K4b); the SELECTION route stays offline.
 **Ledger:** 10 records, unchanged (sha256 `9251eb0c…8fef8fa`, full value in JOURNAL).
 **LLM gateway:** ADR-0020 and ADR-0021 Accepted; ADR-0020 amended 2026-11-13 (per-invocation CLI route override). ADR-0023 Accepted (D-095), amended by D-097. Every task class routes to `offline` in the repo and the packaged default stays all-offline. **D-098 is applied per invocation (D-102):** `cv-agent research --live` sends EXTRACTION to `fast` (Haiku) for that run only; it needs `CV_AGENT_ANTHROPIC_API_KEY` and an initialised call log (`cv-agent llm-log init`). Hosted tiers run only on the owner's Windows PC (D-091, D-092).
 **Done earlier:** EXP-20261004-01..04 (measurement only); failure analysis (#75); annotation-label review, see `docs/experiments/`; ADR-0019 foundation (D-079, D-081, D-084; fake runtimes only).
@@ -19,7 +19,7 @@ Baseline origin/main includes K1 (store), K2 (`cv-agent knowledge`) and K3 (`res
 - **D-080 / D-087:** standing grant for local tools and GPU runs. Each run records a cost estimate and an approval reference bound to one experiment and one cost ceiling; ADR-0018 §6 checks still apply.
 - **D-084:** ADR-0019 Accepted. **D-085 / D-090:** merge commits once CI is green (no squash, no rebase, no `--admin`).
 - **D-088 to D-093:** LLM gateway v2 (ADR-0020, ADR-0021). **D-094 / D-095:** ADR-0023 (Q40: `PROJECT_DATA` stays blocked). **D-096:** parallel worktree batches. **D-097:** ADR-0023 amendment.
-- **D-101:** ADR-0024 accepted. **D-102:** `research --live`. **D-103:** four known Windows-only failing files. **D-104:** K1 split into K1a/K1b/K1c. **D-105:** local history rewriting only on never-pushed commits, and reported; never after a push. **D-106:** research prepares visible text and a claim-term window before the 8,000-character cut (fetcher unchanged). **D-107:** K1b implementation choices (second-precision `recorded_at`, naive clock refused, un-normalised stored key is a bad row, `query` order). **D-108:** K1c choices (optional `writer`/`recorded_at`; `model_names` any-of, empty = no filter). **D-109:** K2 CLI flags (no `--json`; `--fresh-only`; `show` unknown = exit 1). **D-110:** K3 research persists by default; store, then credential, then fetch. **D-111:** K4 stored evidence joins by exact normalised candidate id, fresh only, curated first.
+- **D-101:** ADR-0024 accepted. **D-102:** `research --live`. **D-103:** four known Windows-only failing files. **D-104:** K1 split into K1a/K1b/K1c. **D-105:** local history rewriting only on never-pushed commits, and reported; never after a push. **D-106:** research prepares visible text and a claim-term window before the 8,000-character cut (fetcher unchanged). **D-107:** K1b implementation choices (second-precision `recorded_at`, naive clock refused, un-normalised stored key is a bad row, `query` order). **D-108:** K1c choices (optional `writer`/`recorded_at`; `model_names` any-of, empty = no filter). **D-109:** K2 CLI flags (no `--json`; `--fresh-only`; `show` unknown = exit 1). **D-110:** K3 research persists by default; store, then credential, then fetch. **D-111:** K4 stored evidence joins by exact normalised candidate id, fresh only, curated first. **D-112:** EXP-20261004-01 is a deterministic `.pt` evaluation (spread below 0.001, no repeats); engine-build and seed variance are measured with the first candidate on those paths. **D-113:** improve = overall AP gain ≥ max(+0.010, 2×spread), small-person AP@0.5 gain ≥ max(+0.020, 2×spread), D-077 floor holds; provisional. **D-114:** `scripts/run_baseline.py` is historical (last working `2478588`; broken since `a0aba1c`; #154 closed by this PR).
 
 ## Open (owner)
 
@@ -27,14 +27,15 @@ Baseline origin/main includes K1 (store), K2 (`cv-agent knowledge`) and K3 (`res
 2. **Q39:** NARRATIVE tier. ADR-0023 recommends the deterministic template as the default narrative, so no hosted narrative route exists yet.
 3. **Q54** is answered (durable store; K3). **Q55–Q57:** research polish. **Q67:** curated evidence is never staleness-filtered. **Q65–Q66:** fetcher redirects; `truncated` flag ignored (Q63–Q64 reserved for K1).
 4. **Q59 to Q62** (safe defaults recorded): water-fill fairness for the §7.3 comparison; reference `task_support` always empty; rationale E-ordinals not mapped to item IDs; selection builder uses the 24,000 default, not the configured `max_input_chars`.
-5. **Q32** (a) variance, (c) delta rationale, (d) meaning of "improve"; **Q27**, **Q31**, **Q33** (typed identities); annotation labels for ranks 011, 013, 027.
+5. **Q32** (a) variance for engine builds and training seeds only (c and d answered, D-113); **Q27**, **Q31**, **Q33** (typed identities); annotation labels for ranks 011, 013, 027.
 
 ## Next actions
 
-0. The owner's re-run of `research --live` on the YOLO11 page (the HTML-to-text fix has merged).
-1. **K4b** (a production caller of `select_candidate`, fail-closed on a missing store; owner to brief) and the owner's decision on #154 (`scripts/run_baseline.py` TypeError).
-2. ADR-0023 §7.3: the SELECTION route switch still needs a production caller of `select_candidate` and a recorded comparison against the deterministic ranker.
-3. The owner's first real `cv-agent research --live` run (needs a key, `llm-log init` and `knowledge init`).
+0. Plan the first optimisation candidate (no TensorRT).
+1. The owner's re-run of `research --live` on the YOLO11 page (the HTML-to-text fix has merged).
+2. **K4b** (a production caller of `select_candidate`, fail-closed on a missing store; owner to brief).
+3. ADR-0023 §7.3: the SELECTION route switch still needs a production caller of `select_candidate` and a recorded comparison against the deterministic ranker.
+4. The owner's first real `cv-agent research --live` run (needs a key, `llm-log init` and `knowledge init`).
 
 ## Do not start yet
 

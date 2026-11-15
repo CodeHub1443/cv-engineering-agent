@@ -422,3 +422,7 @@ comparison, not evidence of a general FP16 or FP32 property, and it is not a pro
 
 **Not done here:** no production winner, no pass/fail threshold, no precision floor, no operating point (Q30 open),
 no change to D-069 (OPEN). No ADR was modified.
+
+### Note 2026-11-15 — last working commit of the EXP-20260929-01 runner (#154, D-114)
+
+`scripts/run_baseline.py`, the runner for EXP-20260929-01, last matched the `run_reference_selection` signature at commit `2478588` (merge of PR #134, ADR-0023 S4b). Merge `a0aba1c` (PR #135, ADR-0023 S4c, 2026-11-13) made `requirements=` required, so the script raises `TypeError` on main from `a0aba1c` onward. Checked by comparing the signature at `65ff0f9^` and `65ff0f9`; the script was not run. The script is historical (D-114, issue #154). No existing row above was edited.
