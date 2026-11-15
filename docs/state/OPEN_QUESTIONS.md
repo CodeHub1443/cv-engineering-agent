@@ -167,6 +167,7 @@ named, only the platform class is); whether the controller runs on the same phys
 machine as the workload or a different one (D-040 said "separate processes," which does
 not by itself say "separate hosts"); the job lifecycle/supervision design (see D-046,
 new ADR-0013).
+*Note (2026-11-15, owner; D-116):* the **deployment GPU is still unnamed**. Q25's "named target" gap is unresolved: D-044 named only the platform class and Q45 (D-091) named the two measured hosts, not a deployment target. Until it is named, every hardware figure in a proposal or record is an RTX 3060 proxy (for example EXP-20261115-01), and latency, memory and power on the target are not claimed.
 
 ## Deferrable
 
