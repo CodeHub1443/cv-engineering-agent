@@ -2617,3 +2617,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** D-082's baseline (EXP-20261004-01) is superseded for future COCO candidates by D-120; `compare_candidate.py` still defaults to EXP-20261004-01 and its default is unchanged here (not verified or changed in this PR).
 
 **Left open:** the next track, finishing the D-043 reference task (person detection and tracking evaluated on video; planning; a proving-ground task, not a specialisation; no data or issue yet). STATUS next actions refreshed: the live research call and `knowledge init` are done (2026-11-14; item stored as revision 1), so those two items were removed; Q25 deployment target (deferred); Q70 to Q72.
+
+## 2026-11-16 — D-043 I1: ADR-0025 and interface stubs (docs/claude/d043-i1-adr-0025, issue #168)
+
+**Changed:** ADR-0025 (Proposed); `cv_agent/datasets/eval_ref.py` (types and signatures only, bodies raise `NotImplementedError`, no callers) and `tests/test_eval_ref.py`; appended amendments to ADR-0012 and ADR-0017; `docs/experiments/D043-video-research.md`; D-122 to D-126; Q73 to Q76; STATUS. No GPU run, download, video access or key.
+
+**Why:** the owner accepted D-043 plan revision 2. The measured path assumes COCO and does not fingerprint labels (Q69); ADR-0025 sets the reference type, label digest, spec hash, frame ids, ignore rule and tracking metric keys before any implementation.
+
+**Learned:** MEVA person boxes cover only people involved in an annotated activity, so MEVA is unsuitable for precision. testVid1.mp4 is the in-repo fixture (D-126). Dataset facts that could not be checked against a primary source are marked UNVERIFIED in the research note.
+
+**Left open:** Q73 to Q76; ADR-0025 acceptance by the owner; issues I2 to I10.
