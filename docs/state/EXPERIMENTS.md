@@ -432,7 +432,8 @@ no change to D-069 (OPEN). No ADR was modified.
 **Status: completed and recorded. Integrity check, not a candidate.** Source of figures: the ledger on the Linux PC
 is authoritative; this worktree has no copy, so the values below are transcribed exactly from the owner's report of
 that ledger and were not re-read here. Baseline `EXP-20261004-01`; approval `EXP-20261116-01-OWNER-20261116`;
-proposal `docs/experiments/EXP-20261116-01-proposal.md` (D-119, #164). Model yolo11n.pt, COCO val2017 persons,
+proposal `docs/experiments/EXP-20261116-01-proposal.md` (D-119, #164).
+Commit `ae94ff5691c750582b642595ece55fa6bafd3ae0` (owner's report: the Linux PC HEAD was ae94ff5 with a clean tree, and the recorder refuses unless run.json's commit equals HEAD; the ledger on the Linux PC remains authoritative). Model yolo11n.pt, COCO val2017 persons,
 imgsz 640, conf 0.001, RTX 3060 12GB (a proxy; the deployment GPU is unnamed).
 
 **Result: all 12 val_metrics are identical to EXP-20261004-01** (delta 0.0 at full stored precision, checked by a
@@ -468,7 +469,8 @@ proposal's gate for running EXP-20261115-01 is met. No owner verdict decision id
 **Status: completed and recorded.** Source of figures: the ledger on the Linux PC is authoritative; this worktree
 has no copy, so the values are transcribed exactly from the owner's report of that ledger. Baseline
 `EXP-20261004-01` (D-082); approval `EXP-20261115-01-OWNER-20261115`; proposal
-`docs/experiments/EXP-20261115-01-proposal.md` (sha256 `a9906e3d…`); predictions sha256 `bdc0f137…`. Model
+`docs/experiments/EXP-20261115-01-proposal.md` (sha256 `a9906e3d…`); predictions sha256 `bdc0f137…`.
+Commit `ae94ff5691c750582b642595ece55fa6bafd3ae0` (owner's report: the Linux PC HEAD was ae94ff5 with a clean tree, and the recorder refuses unless run.json's commit equals HEAD; the ledger on the Linux PC remains authoritative). Model
 yolo11n.pt, COCO val2017 persons, imgsz 768 (variable under test), conf 0.001, inference-only, one run (D-115).
 
 | Metric | Value | vs baseline / margin |
