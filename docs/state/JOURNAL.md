@@ -2617,3 +2617,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** D-082's baseline (EXP-20261004-01) is superseded for future COCO candidates by D-120; `compare_candidate.py` still defaults to EXP-20261004-01 and its default is unchanged here (not verified or changed in this PR).
 
 **Left open:** the next track, finishing the D-043 reference task (person detection and tracking evaluated on video; planning; a proving-ground task, not a specialisation; no data or issue yet). STATUS next actions refreshed: the live research call and `knowledge init` are done (2026-11-14; item stored as revision 1), so those two items were removed; Q25 deployment target (deferred); Q70 to Q72.
+
+## 2026-11-16 — I2: compare_candidate --replication, closes Q72 (feature/claude/compare-replication)
+
+**Changed:** `scripts/compare_candidate.py` gains a read-only `--replication` mode; 13 new tests in `tests/test_compare_candidate.py`; Q72 struck through. Default candidate mode untouched. No GPU, key, network or LLM call.
+
+**Why:** the candidate comparer returned `invalid` for a same-configuration replication (Q72). Replication needs an exact integrity check, not an acceptance judgement.
+
+**Learned:** the ledger refuses NaN in `val_metrics`, so the NaN rule is tested on the pure `replication_verdict` function by bypassing record validation. Protocol fields compared: precision, input_resolution, model, confidence_protocol, plus hardware and the recorded input hashes (weights, data yaml, val list) where present: one side only or different is `invalid`, absent on both is ignored.
+
+**Left open:** not run against the real ledger (none on this Windows checkout); the owner verifies EXP-20261116-01 vs EXP-20261004-01 on the Linux PC after merge. DECISIONS and STATUS untouched (I1 owns them this round).
