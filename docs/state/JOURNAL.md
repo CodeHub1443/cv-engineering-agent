@@ -2597,3 +2597,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** read from the code, not run: the wrapper and recorder accept `--exp-id EXP-20261116-01` with imgsz 640 (`candidate_problems`, `evaluation_records.py:170-184`; the id is not reserved), and the run name `exp-20261116-01-yolo11n-coco-val2017-imgsz640-conf0001` differs from the baseline's `e1-yolo11n-coco-val2017-imgsz640-conf0001`. `compare_candidate.py` will say does_not_meet_criteria for a replication, by design; the check is that every delta is 0.
 
 **Left open:** the run itself (Linux PC, owner), then EXP-20261115-01; Q69.
+
+## 2026-11-16 — Results: EXP-20261116-01 and EXP-20261115-01 (docs/claude/exp-20261115-results, closes #164)
+
+**Changed:** docs only. EXPERIMENTS.md: two result sections. OPEN_QUESTIONS Q70 to Q72. STATUS rewritten. No code, GPU run, key, network or LLM call from this worktree; figures are transcribed from the Linux PC ledger (authoritative; this worktree has no copy).
+
+**What happened:** COCO val2017 had been deleted and the owner restored it. Attempt 1 of EXP-20261116-01 was invalid: the restored labels were polygons (coco2017labels-segments.zip), so `load_person_gt` (5 columns only) counted 0 persons and the recorder refused; its COCO annotations file also made Ultralytics auto-install faster-coco-eval mid-run (the owner uninstalled it). It is kept under `.cv_agent/evaluations/_invalid-20261116/`. Attempt 2 used box labels from coco2017labels.zip, no label cache and the annotations moved aside; checks: list sha256 `4d010d0d…`, 0 non-5-column lines, 10777 persons. All 12 val_metrics equal EXP-20261004-01 (delta 0.0, read-only ledger diff), so the gate for EXP-20261115-01 was met. `compare_candidate.py` returned `invalid` for the replication (the predicted does_not_meet_criteria was wrong). EXP-20261115-01 then ran: mAP@0.5:0.95 0.534 (+0.0170), small AP@0.5 0.4133 (+0.0576), precision at 0.25 0.7576 (floor margin +0.0076); verdict meets_provisional_criteria.
+
+**Learned:** a restore needs label-format and annotation-file checks, not only counts (Q69, Q70). Idle VRAM differs by day (Q71). A comparer built for candidates cannot judge replications (Q72).
+
+**Left open:** the owner's decision on the reference baseline and the next track; the owner's verdict D-id is not recorded yet. A pass is not a production decision [P§24].
