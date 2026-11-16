@@ -2607,3 +2607,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** a restore needs label-format and annotation-file checks, not only counts (Q69, Q70). Idle VRAM differs by day (Q71). A comparer built for candidates cannot judge replications (Q72).
 
 **Left open:** the owner's decision on the reference baseline and the next track; the owner's verdict D-id is not recorded yet. A pass is not a production decision [P§24].
+
+## 2026-11-16 — Owner decisions D-120 and D-121 (docs/claude/d120-d121)
+
+**Changed:** docs only. DECISIONS D-120 and D-121; EXPERIMENTS.md one appended verdict line under EXP-20261115-01; Q25 annotated; STATUS. No code, GPU run, key, network or LLM call.
+
+**Why:** the owner made EXP-20261115-01 the reference baseline for future COCO candidates (D-120) and put deployment out of scope for now, with the Linux PC (RTX 3060 12 GB, driver 535.309.01, ultralytics 8.4.138, torch 2.5.1) as the measurement reference (D-121).
+
+**Learned:** D-082's baseline (EXP-20261004-01) is superseded for future COCO candidates by D-120; `compare_candidate.py` still defaults to EXP-20261004-01 and its default is unchanged here (not verified or changed in this PR).
+
+**Left open:** the CCTV evaluation set (planning; no data, no issue yet); Q25 deployment target (deferred); Q70 to Q72.
