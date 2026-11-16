@@ -2587,3 +2587,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** the recorder's parser was run against the real merged proposal (31a6d1a): no problems at imgsz 768, one problem at 960. A test pins that imgsz in the prose does not bind the size. Windows: the full suite on this tree is 35 failures, all in the four D-103 files (`test_evaluation_records.py` 27, `test_linux_nvidia_runtime.py` 5, `test_yolo_eval_binding.py` 1, `test_yolo_inference_binding.py` 2); the new recorder tests pass on Windows, only the 9 wrapper tests from B1 fail there.
 
 **Left open:** the owner's merges (B1 first); Issue C; no GPU run, key, network or LLM call; ledger unchanged.
+
+## 2026-11-16 — EXP-20261116-01 proposal: dataset loss and restore (docs/claude/exp-20261116-01-integrity, issue #164)
+
+**Changed:** docs only. New `docs/experiments/EXP-20261116-01-proposal.md` (integrity replication of EXP-20261004-01 at imgsz 640), D-119, Q69, STATUS. Branch from origin/main at 9515a8d. No code, no GPU run, no key, network or LLM call, ledger unchanged (10 records).
+
+**Why:** COCO val2017 had been deleted from the Linux PC (`~/Documents/data_cleaner` was gone). The owner restored it to the original path from Ultralytics' coco2017labels-segments.zip plus the official val2017.zip and verified on CPU: `val2017.txt` sha256 `4d010d0d7200a7b9176acd164d36c9769350a2e41661152f2cf8ba16c9e2aa73` (matches the baseline), 5000 list lines, 5000 images, 10777 person boxes (matches). The label files are not fingerprinted by the wrapper (Q69), so a deterministic 640 re-run must prove the restore exact before EXP-20261115-01 (768) runs.
+
+**Learned:** read from the code, not run: the wrapper and recorder accept `--exp-id EXP-20261116-01` with imgsz 640 (`candidate_problems`, `evaluation_records.py:170-184`; the id is not reserved), and the run name `exp-20261116-01-yolo11n-coco-val2017-imgsz640-conf0001` differs from the baseline's `e1-yolo11n-coco-val2017-imgsz640-conf0001`. `compare_candidate.py` will say does_not_meet_criteria for a replication, by design; the check is that every delta is 0.
+
+**Left open:** the run itself (Linux PC, owner), then EXP-20261115-01; Q69.
