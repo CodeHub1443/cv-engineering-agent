@@ -426,3 +426,76 @@ no change to D-069 (OPEN). No ADR was modified.
 ### Note 2026-11-15 — last working commit of the EXP-20260929-01 runner (#154, D-114)
 
 `scripts/run_baseline.py`, the runner for EXP-20260929-01, last matched the `run_reference_selection` signature at commit `2478588` (merge of PR #134, ADR-0023 S4b). Merge `a0aba1c` (PR #135, ADR-0023 S4c, 2026-11-13) made `requirements=` required, so the script raises `TypeError` on main from `a0aba1c` onward. Checked by comparing the signature at `65ff0f9^` and `65ff0f9`; the script was not run. The script is historical (D-114, issue #154). No existing row above was edited.
+
+### EXP-20261116-01 — integrity replication at 640 (completed 2026-11-16)
+
+**Status: completed and recorded. Integrity check, not a candidate.** Source of figures: the ledger on the Linux PC
+is authoritative; this worktree has no copy, so the values below are transcribed exactly from the owner's report of
+that ledger and were not re-read here. Baseline `EXP-20261004-01`; approval `EXP-20261116-01-OWNER-20261116`;
+proposal `docs/experiments/EXP-20261116-01-proposal.md` (D-119, #164).
+Commit `ae94ff5691c750582b642595ece55fa6bafd3ae0` (owner's report: the Linux PC HEAD was ae94ff5 with a clean tree, and the recorder refuses unless run.json's commit equals HEAD; the ledger on the Linux PC remains authoritative). Model yolo11n.pt, COCO val2017 persons,
+imgsz 640, conf 0.001, RTX 3060 12GB (a proxy; the deployment GPU is unnamed).
+
+**Result: all 12 val_metrics are identical to EXP-20261004-01** (delta 0.0 at full stored precision, checked by a
+read-only ledger diff on the Linux PC).
+
+| Metric | Value (equal to baseline) |
+|---|---|
+| mAP@0.5 / mAP@0.5:0.95 | 0.75 / 0.517 |
+| AP@0.5 small / medium / large | 0.3556127289636236 / 0.7258519584743843 / 0.9410025862808117 |
+| fixed_thr@0.25 precision / recall | 0.7768097235667419 / 0.6701308341839102 |
+| FPS (e2e) | 89.7 |
+| latency inference / end to end (ms) | 5.5 / 6.5 |
+| VRAM peak (device-wide) / idle | 399 MiB / 119 MiB |
+| RAM | 2233 MiB |
+| wall / gpu_hours | 55.73 s / 0.0155 |
+
+**Verdict tool.** `scripts/compare_candidate.py` returned `invalid`: the declared variable must differ, so it cannot
+judge a replication (Q72). The proposal predicted `does_not_meet_criteria`; that prediction was wrong (planner's
+brief), so the integrity check was the direct diff above instead.
+
+**Attempt 1 is invalid** and preserved under `.cv_agent/evaluations/_invalid-20261116/` on the Linux PC. The
+restored dataset first carried polygon labels (`coco2017labels-segments.zip`); `load_person_gt`
+(`detection_metrics.py:127`, 5 columns only) counted 0 persons, so the recorder refused. Its COCO annotations file
+also made Ultralytics auto-install `faster-coco-eval` mid-run (the owner uninstalled it; Q70).
+**Fix:** box labels from `coco2017labels.zip`, label cache removed, annotations moved aside (the baseline `val.log`
+has no COCO-eval lines). Verified: `val2017.txt` sha256 `4d010d0d…`, 0 non-5-column lines, 10777 persons.
+
+**Notes:** VRAM peak includes the GPU's idle usage (Q71). The restored data reproduces the baseline exactly, so the
+proposal's gate for running EXP-20261115-01 is met. No owner verdict decision id is recorded here yet.
+
+### EXP-20261115-01 — yolo11n at imgsz 768 (completed 2026-11-16, verdict meets_provisional_criteria)
+
+**Status: completed and recorded.** Source of figures: the ledger on the Linux PC is authoritative; this worktree
+has no copy, so the values are transcribed exactly from the owner's report of that ledger. Baseline
+`EXP-20261004-01` (D-082); approval `EXP-20261115-01-OWNER-20261115`; proposal
+`docs/experiments/EXP-20261115-01-proposal.md` (sha256 `a9906e3d…`); predictions sha256 `bdc0f137…`.
+Commit `ae94ff5691c750582b642595ece55fa6bafd3ae0` (owner's report: the Linux PC HEAD was ae94ff5 with a clean tree, and the recorder refuses unless run.json's commit equals HEAD; the ledger on the Linux PC remains authoritative). Model
+yolo11n.pt, COCO val2017 persons, imgsz 768 (variable under test), conf 0.001, inference-only, one run (D-115).
+
+| Metric | Value | vs baseline / margin |
+|---|---|---|
+| mAP@0.5 / mAP@0.5:0.95 | 0.772 / 0.534 | +0.0170 overall, margin +0.0070 over the +0.010 bar |
+| AP@0.5 small | 0.41325473665683415 | +0.0576, margin +0.0376 over the +0.020 bar |
+| AP@0.5 medium / large | 0.7528193201845513 / 0.9400243530832193 | not part of the criteria |
+| fixed_thr@0.25 precision | 0.7575878594249201 | floor 0.75 (D-077), margin +0.0076 |
+| fixed_thr@0.25 recall / recall small | 0.7040920478797439 / 0.3432601880877743 | reference |
+| FPS (e2e) | 87.7 | |
+| latency inference / end to end (ms) | 5.6 / 6.7 | |
+| VRAM peak (device-wide) / idle | 441 MiB / 119 MiB | |
+| RAM | 2124 MiB | |
+| wall / gpu_hours | 56.98 s / 0.0158 | |
+
+**Verdict (`scripts/compare_candidate.py`, D-118): meets_provisional_criteria.** The D-113 gains are provisional.
+
+**Results.**
+
+- **A pass.** Both APs improve by more than their bars and the D-077 floor holds.
+- **The floor margin is thin.** Precision at 0.25 is 0.7576 against 0.75, a margin of +0.0076. One run gives no
+  spread for this value, so a small shift could cross it.
+- **COCO is not CCTV.** val2017 persons are not the deployment scene, camera height or lighting, so this does not
+  predict CCTV accuracy.
+- **The deployment GPU is unnamed.** Every latency, FPS and VRAM figure is an RTX 3060 proxy `[P§12]`, `[P§13]`.
+- **A pass is not a production decision `[P§24]`.** The reference baseline and the next track await the owner.
+
+**Not done here:** no owner decision id recorded yet (added when the owner sends it); no further imgsz (D-115).
