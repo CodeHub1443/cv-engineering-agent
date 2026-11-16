@@ -3,7 +3,7 @@
 > **Rewritten** every session. Describes **now**, never history — history lives in
 > `JOURNAL.md`. Hard cap: 60 lines. If it exceeds that, you are logging, not stating.
 
-**Updated:** 2026-11-16 · **Phase:** 5e/6 — EXP-20261115-01 (yolo11n at imgsz 768) passed and is now the reference baseline (D-120); deployment is out of scope for now, the Linux PC is the measurement reference (D-121). Next track: a CCTV evaluation set (planning). Integrity replication EXP-20261116-01 matched; Issues B1, B2, C and #164 merged; LLM gateway v2, ADR-0023 and ADR-0024 K1 to K4 complete.
+**Updated:** 2026-11-16 · **Phase:** 5e/6 — EXP-20261115-01 (yolo11n at imgsz 768) passed and is now the reference baseline (D-120); deployment is out of scope for now, the Linux PC is the measurement reference (D-121). Next track: finish the D-043 reference task: person detection and tracking evaluated on video (planning). D-043 is a proving-ground task, not a specialisation. Integrity replication EXP-20261116-01 matched; Issues B1, B2, C and #164 merged; LLM gateway v2, ADR-0023 and ADR-0024 K1 to K4 complete.
 **Health:** Linux CI is authoritative. Windows local (D-103), measured on the Issue B2 tree merged with origin/main (82d28fe): ruff clean; mypy only the Windows `SIGKILL` error; pytest 35 failed, 2647 passed, 10 skipped, all failures in `test_evaluation_records.py` (27; the 9 new wrapper tests import `resource`), `test_linux_nvidia_runtime.py` (5), `test_yolo_eval_binding.py` (1), `test_yolo_inference_binding.py` (2). Any other failure is a defect.
 
 ## Where we are
@@ -33,11 +33,9 @@ Baseline origin/main includes K1 (store), K2 (`cv-agent knowledge`) and K3 (`res
 
 ## Next actions
 
-0. **Next track: a CCTV evaluation set (planning).** COCO is not CCTV; no data, issue or ADR exists yet. The reference baseline is EXP-20261115-01 (D-120); hardware is relative to the Linux PC (D-121).
-1. The owner's re-run of `research --live` on the YOLO11 page (the HTML-to-text fix has merged).
-2. **K4b** (a production caller of `select_candidate`, fail-closed on a missing store; owner to brief).
-3. ADR-0023 §7.3: the SELECTION route switch still needs a production caller of `select_candidate` and a recorded comparison against the deterministic ranker.
-4. The owner's first real `cv-agent research --live` run (needs a key, `llm-log init` and `knowledge init`).
+0. **Next track: finish the D-043 reference task: person detection and tracking evaluated on video (planning). D-043 is a proving-ground task, not a specialisation.** No data, issue or ADR exists yet for it. The reference baseline is EXP-20261115-01 (D-120); hardware is relative to the Linux PC (D-121).
+1. **K4b** (a production caller of `select_candidate`, fail-closed on a missing store; owner to brief).
+2. ADR-0023 §7.3: the SELECTION route switch still needs a production caller of `select_candidate` and a recorded comparison against the deterministic ranker.
 
 ## Do not start yet
 

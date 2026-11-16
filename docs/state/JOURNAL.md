@@ -2616,4 +2616,4 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 
 **Learned:** D-082's baseline (EXP-20261004-01) is superseded for future COCO candidates by D-120; `compare_candidate.py` still defaults to EXP-20261004-01 and its default is unchanged here (not verified or changed in this PR).
 
-**Left open:** the CCTV evaluation set (planning; no data, no issue yet); Q25 deployment target (deferred); Q70 to Q72.
+**Left open:** the next track, finishing the D-043 reference task (person detection and tracking evaluated on video; planning; a proving-ground task, not a specialisation; no data or issue yet). STATUS next actions refreshed: the live research call and `knowledge init` are done (2026-11-14; item stored as revision 1), so those two items were removed; Q25 deployment target (deferred); Q70 to Q72.
