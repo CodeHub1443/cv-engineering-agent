@@ -499,3 +499,5 @@ yolo11n.pt, COCO val2017 persons, imgsz 768 (variable under test), conf 0.001, i
 - **A pass is not a production decision `[P§24]`.** The reference baseline and the next track await the owner.
 
 **Not done here:** no owner decision id recorded yet (added when the owner sends it); no further imgsz (D-115).
+
+**Owner verdict (2026-11-16, D-120):** EXP-20261115-01 becomes the reference baseline for future COCO candidates; D-113's gains and the D-077 floor are measured against it. Appended after the fact; the lines above are unchanged. Not a production decision `[P§24]`. Hardware figures are relative to the Linux PC measurement reference (D-121).
