@@ -2699,3 +2699,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** the replication comparer's optional-evidence rule (one side only is invalid) would have voided R1, because R1 carries a digest and its baseline EXP-20261004-01 cannot; the digest therefore gets its own rule there (owner correction).
 
 **Left open:** Q69 closes after R1 (EXP-20261118-01) records a digest on the Linux PC. DECISIONS not touched.
+
+## 2026-11-18 — R1 proposal written (#181; EXP-20261118-01)
+
+**Changed:** added `docs/experiments/EXP-20261118-01-proposal.md`, the R1 integrity replication through the EvalDatasetRef path (same protocol as EXP-20261004-01/EXP-20261116-01; judged by `compare_candidate.py --replication`). Docs only; no GPU, no code.
+
+**Why:** prove I3–I5 and I4a changed no measurement, and obtain the first ledger row carrying `label_digest` (closes Q69).
+
+**Learned:** the run directory is now `candidate_run_name(exp_id, imgsz, dataset_id)` (evaluation_records.py:207), and the commit gate (:435) needs run and record at the same HEAD, so the proposal fixes the order: merge I4b, merge this PR, pull, clean status, run, record, judge. Expected notes `confidence_protocol wording differs` and `label_digest on one side only` are not defects.
+
+**Left open:** the run itself (owner/Linux PC). DECISIONS, STATUS and OPEN_QUESTIONS untouched (I4b owns them this round).
