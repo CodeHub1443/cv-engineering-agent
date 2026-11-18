@@ -297,3 +297,28 @@ def test_replication_record_not_declaring_full_curve_conf_is_invalid(
     rc = _rrun(tmp_path, _rep(notes=bad)) if side == "candidate" else _rrun(tmp_path, _rep(), _rep_base(notes=bad))
     out = capsys.readouterr().out
     assert rc == 2 and "invalid" in out and "full-curve" in out
+
+
+# ── co-resident GPU process note (ADR-0018 amendment 2026-11-18, D-128) ──────────────────
+
+_CORES = {"gpu_coresident": [{"pid": 2001, "process_name": "/usr/share/rustdesk/rustdesk", "used_mib": 140}]}
+
+
+def test_acceptance_prints_a_note_naming_a_co_resident_process_and_keeps_the_verdict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    clean = _ledger(tmp_path / "a", BASE, _cand())
+    (tmp_path / "b").mkdir()
+    shared = _ledger(tmp_path / "b", BASE, _cand(notes=json.dumps({**json.loads(PROTOCOL), **_CORES})))
+    assert _run(clean) == 0
+    assert "co-resident" not in capsys.readouterr().out
+    assert _run(shared) == 0  # verdict logic unchanged
+    out = capsys.readouterr().out
+    assert "note:" in out and "/usr/share/rustdesk/rustdesk" in out and CAND_ID in out
+
+
+def test_replication_prints_the_note_when_the_baseline_was_shared(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _rep_base(notes=_notes(**_CORES))
+    assert _rrun(tmp_path, _rep(), base) == 0
+    out = capsys.readouterr().out
+    assert "note:" in out and "/usr/share/rustdesk/rustdesk" in out and BASE_ID in out

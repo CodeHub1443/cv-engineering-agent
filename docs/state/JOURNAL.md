@@ -2709,3 +2709,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** the run directory is now `candidate_run_name(exp_id, imgsz, dataset_id)` (evaluation_records.py:207), and the commit gate (:435) needs run and record at the same HEAD, so the proposal fixes the order: merge I4b, merge this PR, pull, clean status, run, record, judge. Expected notes `confidence_protocol wording differs` and `label_digest on one side only` are not defects.
 
 **Left open:** the run itself (owner/Linux PC). DECISIONS, STATUS and OPEN_QUESTIONS untouched (I4b owns them this round).
+
+## 2026-11-18 — Co-resident GPU process opt-in (#184; ADR-0018 amendment, D-127, D-128)
+
+**Changed:** `run_yolo_val_measured.py` gains a repeatable `--allow-gpu-process EXECUTABLE_PATH` (absolute path, exact match on the nvidia-smi process name; no default list, no config file). Present named processes are recorded in `run.json` as `gpu_coresident: [{pid, process_name, used_mib}]`, absent ones record `[]`. The compute-apps query adds `used_memory`; two-column rows still parse. `evaluation_records.py` treats recorded names as non-foreign in the writer (start, during, end, and the recomputed `foreign_process_seen`), validates the field, and adds `gpu_coresident` plus the comparability caveat to notes when non-empty. `compare_candidate.py` prints an informational note in both modes. `acceptance.py` untouched. ADR-0018 amended (append only). Tests in the new `tests/test_gpu_coresident.py` and two in `tests/test_compare_candidate.py`, seen failing first. No GPU run.
+
+**Why:** RustDesk is a compute process, so ADR-0018's idle check refused R1 (EXP-20261118-01); the owner keeps it running.
+
+**Learned:** the writer, not only the wrapper, refused any non-exempt process, so a wrapper-only opt-in would have produced a run the recorder rejected; the allowed names therefore travel in `run.json` and the writer reads them from there. A name absent at the start snapshot is not allowed to appear later (fail closed). `run_yolo_val_measured.py` imports `resource` (POSIX only), which is why `test_evaluation_records.py` is a known Windows failure (D-103); the new test file stubs `resource` so it runs on Windows.
+
+**Left open:** R1 itself (Linux PC, `--allow-gpu-process /usr/share/rustdesk/rustdesk`). OPEN_QUESTIONS untouched.

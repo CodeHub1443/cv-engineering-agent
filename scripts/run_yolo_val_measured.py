@@ -59,6 +59,7 @@ from cv_agent.experiments.evaluation_records import (  # noqa: E402
     QUANTIZE,
     RUN_SCHEMA,
     EXEMPT_GPU_PROCESS_NAMES,
+    coresident_names,
     foreign_process_seen,
     is_exempt_process,
     precision_label,
@@ -143,14 +144,15 @@ def parse_memory_used(text: str) -> int | None:
     return None
 
 
-COMPUTE_APPS_ARGV = ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader,nounits"]
+COMPUTE_APPS_ARGV = ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"]
 
 
 def parse_compute_apps(text: str) -> list[dict[str, int | str]] | None:
     """Compute processes from `nvidia-smi --query-compute-apps`. [] means none; None means unreadable.
 
     Any row whose pid is not a number (for example ``[Insufficient Permissions]``) makes the whole
-    snapshot unreadable, so it cannot be mistaken for an idle GPU (fail closed, ADR-0018).
+    snapshot unreadable, so it cannot be mistaken for an idle GPU (fail closed, ADR-0018). A row may
+    end in a used-memory column (MiB, or ``[N/A]`` -> None); a two-column row has no ``used_mib`` key.
     """
     if "no running" in text.lower():
         return []
@@ -158,11 +160,35 @@ def parse_compute_apps(text: str) -> list[dict[str, int | str]] | None:
     for line in text.strip().splitlines():
         if not line.strip():
             continue
-        pid_text, _, name = line.partition(",")
+        pid_text, _, rest = line.partition(",")
         if not pid_text.strip().isdigit():
             return None
-        processes.append({"pid": int(pid_text.strip()), "name": name.strip()})
+        head, sep, tail = rest.rpartition(",")
+        used = tail.strip()
+        if sep and head.strip() and (used.isdigit() or used == "[N/A]"):
+            processes.append({"pid": int(pid_text.strip()), "name": head.strip(), "used_mib": int(used) if used.isdigit() else None})
+        else:
+            processes.append({"pid": int(pid_text.strip()), "name": rest.strip()})
     return processes
+
+
+def allow_path_problems(paths: list[str]) -> list[str]:
+    """Why an --allow-gpu-process value cannot be matched exactly: it must be an absolute POSIX path (ADR-0018 amendment)."""
+    return [f"--allow-gpu-process {p!r} must be an absolute executable path" for p in paths if not p.startswith("/")]
+
+
+def split_preflight(processes: list[dict], allowed: frozenset[str]) -> tuple[list[dict], list[dict]]:
+    """(blocking, gpu_coresident) for a start snapshot. A process is allowed only by an exact name match.
+
+    ``gpu_coresident`` is what run.json records: ``{pid, process_name, used_mib}`` for each allowed process present.
+    """
+    blocking = [p for p in processes if not is_exempt_process(p) and p.get("name") not in allowed]
+    coresident = [
+        {"pid": p["pid"], "process_name": p["name"], "used_mib": p.get("used_mib")}
+        for p in processes
+        if p.get("name") in allowed and not is_exempt_process(p)
+    ]
+    return blocking, coresident
 
 
 def snapshot_compute_apps(*, at: str) -> dict:
@@ -405,7 +431,22 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="the ultralytics data yaml; its path, val and names must agree with the spec",
     )
+    parser.add_argument(
+        "--allow-gpu-process",
+        action="append",
+        default=[],
+        metavar="EXECUTABLE_PATH",
+        help=(
+            "repeatable; absolute path of a co-resident GPU process allowed for this run (exact match on the "
+            "nvidia-smi process name). Any other compute process still refuses. Recorded as gpu_coresident; "
+            "such a run's latency/FPS/VRAM are not comparable with clean-GPU runs (ADR-0018 amendment)"
+        ),
+    )
     args = parser.parse_args(argv)
+    bad_allow = allow_path_problems(args.allow_gpu_process)
+    if bad_allow:
+        print(f"REFUSED: {'; '.join(bad_allow)}", file=sys.stderr)
+        return 2
     approval_ref = args.approval_ref.strip()
     if not approval_ref:
         print("REFUSED: --approval-ref must not be blank", file=sys.stderr)
@@ -494,7 +535,7 @@ def main(argv: list[str] | None = None) -> int:
     if start_snapshot["processes"] is None:
         print("REFUSED: cannot read the GPU process list (nvidia-smi); no run started", file=sys.stderr)
         return 2
-    blocking = [p for p in start_snapshot["processes"] if not is_exempt_process(p)]
+    blocking, gpu_coresident = split_preflight(start_snapshot["processes"], frozenset(args.allow_gpu_process))
     if blocking:
         pids = [p["pid"] for p in blocking]
         print(f"REFUSED: GPU has {len(pids)} compute process(es) before the run, pids {pids}; no run started", file=sys.stderr)
@@ -559,10 +600,11 @@ def main(argv: list[str] | None = None) -> int:
         "vram_samples": len(sampler.samples),
         "own_pid": proc.pid,
         "gpu_process_snapshots": gpu_snapshots,
-        "foreign_process_seen": foreign_process_seen(gpu_snapshots, proc.pid),
+        "gpu_coresident": gpu_coresident,
+        "foreign_process_seen": foreign_process_seen(gpu_snapshots, proc.pid, allowed=coresident_names(gpu_coresident)),
         "gpu_exempt_process_names": sorted(EXEMPT_GPU_PROCESS_NAMES),
         "gpu_process_measurement": (
-            "nvidia-smi --query-compute-apps at start (must be empty), every VRAM poll, and at end; "
+            "nvidia-smi --query-compute-apps at start (must be empty except processes named by --allow-gpu-process), every VRAM poll, and at end; "
             f"polled every {VRAM_POLL_SECONDS}s, so a process that starts and exits between polls is not seen"
         ),
         "vram_measurement": f"nvidia-smi memory.used polled every {VRAM_POLL_SECONDS}s; peak in MiB",

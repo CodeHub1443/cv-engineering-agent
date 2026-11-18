@@ -120,6 +120,20 @@ def _label_digest_check(base: ExperimentRecord, cand: ExperimentRecord) -> tuple
     return problems, notes
 
 
+def coresident_notes(*records: ExperimentRecord) -> list[str]:
+    """Informational only (ADR-0018 amendment 2026-11-18): a record whose run shared the GPU names the process."""
+    out: list[str] = []
+    for record in records:
+        shared = _notes(record).get("gpu_coresident")
+        names = sorted({str(e.get("process_name")) for e in shared if isinstance(e, dict)}) if isinstance(shared, list) else []
+        if names:
+            out.append(
+                f"note: {record.exp_id} ran with co-resident GPU process(es) {', '.join(names)}; "
+                "latency/FPS/VRAM not comparable with clean-GPU runs"
+            )
+    return out
+
+
 def replication_verdict(base: ExperimentRecord, cand: ExperimentRecord) -> tuple[str, list[str]]:
     """Return ("replicates" | "differs" | "invalid", report lines). Exact comparison, no tolerance."""
     digest_problems, digest_notes = _label_digest_check(base, cand)
@@ -169,10 +183,11 @@ def main(argv: list[str] | None = None) -> int:
     assert candidate is not None and baseline is not None
     if args.replication:
         verdict, lines = replication_verdict(baseline, candidate)
-        print("\n".join([f"replication {args.candidate} vs {args.baseline}", f"verdict: {verdict}", *lines]))
+        header = [f"replication {args.candidate} vs {args.baseline}", f"verdict: {verdict}"]
+        print("\n".join([*header, *lines, *coresident_notes(baseline, candidate)]))
         return {"replicates": EXIT_MEETS, "differs": EXIT_FAILS}.get(verdict, EXIT_ERROR)
     report = evaluate_candidate(baseline, candidate, variable_under_test=VARIABLE_UNDER_TEST)
-    print(format_report(report))
+    print("\n".join([format_report(report), *coresident_notes(baseline, candidate)]))
     if report.verdict == "invalid":
         return EXIT_ERROR
     return EXIT_MEETS if report.ok else EXIT_FAILS
