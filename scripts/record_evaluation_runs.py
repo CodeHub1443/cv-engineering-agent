@@ -1,14 +1,15 @@
 """Verify the three EXP-20261004-01 image-size runs and record them in the experiment ledger.
 
-    python3 scripts/record_evaluation_runs.py --approval-ref "<approval id>" \\
+    python3 scripts/record_evaluation_runs.py --approval-ref "<approval id>" --dataset-spec <spec> \\
         --run 640=<run dir> --run 960=<run dir> --run 1280=<run dir> [--dry-run]
-    python3 scripts/record_evaluation_runs.py --approval-ref "<approval id>" \\
+    python3 scripts/record_evaluation_runs.py --approval-ref "<approval id>" --dataset-spec <spec> \\
         --fp32-control <run dir> [--dry-run]     (ADR-0018: one FP32 640 control record)
-    python3 scripts/record_evaluation_runs.py --approval-ref "<approval id>" \\
+    python3 scripts/record_evaluation_runs.py --approval-ref "<approval id>" --dataset-spec <spec> \\
         --candidate EXP-ID=<run dir> --baseline EXP-ID --proposal <path> [--dry-run]
                                                  (ADR-0017 amendment 2026-11-15: one owner-fixed candidate)
 
-Each --run points at the run directory written by scripts/run_yolo_val_measured.py. All three runs
+--dataset-spec is the eval_dataset_ref.json at the dataset root (ADR-0025); the layout, expected counts and
+target class come from it, and the label digest is recomputed from the files. Each --run points at the run directory written by scripts/run_yolo_val_measured.py. All three runs
 are verified before anything is written. If any run fails, nothing is recorded and every problem
 is listed (ADR-0017). --dry-run prints the records as JSON and writes nothing.
 
@@ -32,7 +33,6 @@ sys.path.insert(0, str(REPO_ROOT))
 from cv_agent.experiments.evaluation_records import (  # noqa: E402
     FP32_CONTROL_BASELINE,
     FP32_CONTROL_SERIES_ID,
-    DatasetExpectation,
     RecordError,
     build_record,
     candidate_problems,
@@ -52,7 +52,6 @@ SERIES = {
     960: ("EXP-20261004-02", "EXP-20261004-01"),
     1280: ("EXP-20261004-03", "EXP-20261004-01"),
 }
-COCO_ROOT = Path("/home/dev/Documents/data_cleaner/datasets/coco")
 FP32_CONTROL_IMGSZ = 640
 # The one machine-readable line that binds a proposal to its candidate (owner, Issue B).
 CANDIDATE_LINE = re.compile(r"^\*\*Candidate:\*\*\s+(\S+?),\s*imgsz\s+(\S+)\s*$", re.MULTILINE)
@@ -86,7 +85,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", metavar="EXP-ID", help="the candidate's baseline experiment, already in the ledger")
     parser.add_argument("--proposal", type=Path, metavar="PATH", help="the approved proposal that names this candidate")
     parser.add_argument("--dry-run", action="store_true", help="verify and print records; write nothing")
-    parser.add_argument("--coco-root", type=Path, default=COCO_ROOT)
+    parser.add_argument(
+        "--dataset-spec", type=Path, required=True, metavar="PATH", help="eval_dataset_ref.json at the dataset root (ADR-0025)"
+    )
     args = parser.parse_args(argv)
 
     if not args.approval_ref.strip():
@@ -124,9 +125,8 @@ def main(argv: list[str] | None = None) -> int:
             verified[size] = verify_run(
                 run_dir,
                 imgsz=size,
-                coco_root=args.coco_root,
+                dataset_spec=args.dataset_spec,
                 head_commit=head,
-                dataset=DatasetExpectation(),
             )
         except RecordError as exc:
             problems.extend(f"[{size}] {p}" for p in exc.problems)
@@ -196,9 +196,8 @@ def record_fp32_control(args: argparse.Namespace) -> int:
         run = verify_run(
             args.fp32_control,
             imgsz=FP32_CONTROL_IMGSZ,
-            coco_root=args.coco_root,
+            dataset_spec=args.dataset_spec,
             head_commit=head,
-            dataset=DatasetExpectation(),
             quantize=None,
         )
     except RecordError as exc:
@@ -284,20 +283,19 @@ def record_candidate(args: argparse.Namespace) -> int:
         problems.append(f"run.json series {raw.get('series')!r} != candidate {exp_id!r}")
     size_problems = candidate_problems(exp_id, imgsz)  # type: ignore[arg-type]
     problems.extend(size_problems)
-    if not size_problems and run_dir.name != candidate_run_name(exp_id, imgsz):  # type: ignore[arg-type]
-        problems.append(f"run directory {run_dir.name!r} != {candidate_run_name(exp_id, imgsz)!r}")  # type: ignore[arg-type]
     hypothesis, criteria, proposal_problems = read_proposal(args.proposal, exp_id, imgsz)
     problems.extend(proposal_problems)
 
     run = None
     if not size_problems:
         try:
-            run = verify_run(
-                run_dir, imgsz=imgsz, coco_root=args.coco_root, head_commit=head, dataset=DatasetExpectation()  # type: ignore[arg-type]
-            )
+            run = verify_run(run_dir, imgsz=imgsz, dataset_spec=args.dataset_spec, head_commit=head)  # type: ignore[arg-type]
         except RecordError as exc:
             problems.extend(exc.problems)
         else:
+            expected_name = candidate_run_name(exp_id, imgsz, run.dataset_id)  # type: ignore[arg-type]
+            if run_dir.name != expected_name:
+                problems.append(f"run directory {run_dir.name!r} != {expected_name!r}")
             if run.approval_ref != args.approval_ref:
                 problems.append(f"run approval {run.approval_ref!r} != --approval-ref {args.approval_ref!r}")
     if problems or run is None:

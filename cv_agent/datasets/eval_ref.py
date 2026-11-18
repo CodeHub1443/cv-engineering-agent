@@ -10,8 +10,8 @@ It is not a `DatasetManifest`: no items, splits or leakage checks. It does not r
 images, measure anything, or convert formats (experiments and dataset ingestion own
 those, ADR-0025 section 2).
 
-Implements ADR-0025 sections 3.1 to 3.4 (I3). There are no callers outside tests; I4
-wires it into the wrapper, recorder and `verify_run`. Standard library only, enforced by
+Implements ADR-0025 sections 3.1 to 3.4 (I3). I4a wires it into the wrapper, recorder
+and `verify_run`. Standard library only, enforced by
 tests/test_datasets.py. Everything fails closed with `EvalDatasetRefError`.
 """
 
@@ -178,6 +178,33 @@ def _read_utf8(path: Path, what: str) -> str:
     return text
 
 
+def eval_items(ref: EvalDatasetRef, dataset_root: Path) -> tuple[tuple[str, Path, Path], ...]:
+    """
+    The listed images as `(stem, image_path, label_path)`, sorted by stem (ADR-0025 section 3.3).
+
+    The only reader of the list file: a file starting with a UTF-8 BOM, an entry leaving
+    the root and a repeated stem all raise. The label path is `<labels_dir>/<stem>.txt`
+    and may not exist; the image path is the list entry resolved under the root.
+    """
+    try:
+        root = Path(dataset_root).resolve(strict=True)
+    except OSError as exc:
+        raise EvalDatasetRefError(f"dataset root {dataset_root} is not readable: {exc}") from exc
+    labels_dir = _inside(root, ref.labels_dir, "labels_dir")
+    listing = _read_utf8(_inside(root, ref.list_file, "list_file"), "list file")
+    items: dict[str, tuple[str, Path, Path]] = {}
+    for line in listing.split("\n"):
+        entry = line.strip()
+        if not entry:
+            continue
+        image = _inside(root, entry, "list entry")
+        stem = Path(entry).stem
+        if stem in items:
+            raise EvalDatasetRefError("list file has a duplicate image stem")
+        items[stem] = (stem, image, labels_dir / f"{stem}.txt")
+    return tuple(items[stem] for stem in sorted(items))
+
+
 def compute_label_digest(ref: EvalDatasetRef, dataset_root: Path) -> str:
     """
     Compute the label digest of the listed images under `dataset_root` (ADR-0025 section 3.3).
@@ -187,26 +214,11 @@ def compute_label_digest(ref: EvalDatasetRef, dataset_root: Path) -> str:
     non-empty label line, whitespace-normalised (`" ".join(line.split())`), sorted, each
     followed by `"\\n"`. An empty label file therefore contributes the stem only. A file
     starting with a UTF-8 BOM, a path leaving the root and a repeated stem all raise.
-    This does not compare with `ref.label_digest`; the caller does (I4).
+    This does not compare with `ref.label_digest`; the caller does (I4a).
     """
-    try:
-        root = Path(dataset_root).resolve(strict=True)
-    except OSError as exc:
-        raise EvalDatasetRefError(f"dataset root {dataset_root} is not readable: {exc}") from exc
-    labels_dir = _inside(root, ref.labels_dir, "labels_dir")
-    listing = _read_utf8(_inside(root, ref.list_file, "list_file"), "list file")
-    stems: list[str] = []
-    for line in listing.split("\n"):
-        entry = line.strip()
-        if entry:
-            _inside(root, entry, "list entry")
-            stems.append(Path(entry).stem)
-    if len(set(stems)) != len(stems):
-        raise EvalDatasetRefError("list file has a duplicate image stem")
     digest = hashlib.sha256()
-    for stem in sorted(stems):
+    for stem, _image, label_path in eval_items(ref, dataset_root):
         digest.update(f"{stem}\n".encode())
-        label_path = labels_dir / f"{stem}.txt"
         if not label_path.exists():
             digest.update(b"<none>\n")
             continue

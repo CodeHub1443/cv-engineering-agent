@@ -355,6 +355,28 @@ def test_coco_ledger_label_reproduces_the_existing_string_byte_for_byte() -> Non
     assert COCO_LIST_SHA.startswith("4d010d0d") and len(COCO_LIST_SHA) == 64
     ref = load_eval_dataset_ref(COCO_SPEC)
     assert ref.render_ledger_label(list_sha256=COCO_LIST_SHA) == COCO_LABEL
-    # Tie the expectation to the recorder's own f-string (read as text; experiments is not imported).
+    # I4a: the recorder renders the label from the reference and keeps no COCO literal (read as text).
     source = (REPO / "cv_agent" / "experiments" / "evaluation_records.py").read_text(encoding="utf-8")
-    assert 'dataset_version=f"coco-val2017-5k (val2017.txt sha256 {run.val_txt_sha256})"' in source
+    assert "render_ledger_label(" in source and "coco-val2017-5k" not in source
+
+
+# ── I4a: eval_items, the one reader of the list file ──────────────────────────────────────────
+
+
+def test_eval_items_are_sorted_by_stem_with_image_and_label_paths(tmp_path: Path) -> None:
+    from cv_agent.datasets.eval_ref import eval_items
+
+    make_dataset(tmp_path, {"b": "0 1 1 1 1\n", "a": None}, order=["b", "a"])
+    items = eval_items(make_ref(), tmp_path)
+    root = tmp_path.resolve()
+    assert [stem for stem, _, _ in items] == ["a", "b"]
+    assert items[0][1] == root / "images" / "a.jpg"
+    assert items[1][2] == root / "labels" / "b.txt"
+
+
+def test_eval_items_refuse_a_duplicate_stem(tmp_path: Path) -> None:
+    from cv_agent.datasets.eval_ref import eval_items
+
+    make_dataset(tmp_path, {"a": ""}, order=["a", "a"])
+    with pytest.raises(EvalDatasetRefError, match="duplicate"):
+        eval_items(make_ref(), tmp_path)
