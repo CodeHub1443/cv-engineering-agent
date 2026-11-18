@@ -8,8 +8,10 @@ Each fail-closed test breaks exactly one thing and expects a refusal that names 
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
+import os
 import struct
 import sys
 import time
@@ -1128,13 +1130,16 @@ def test_wrapper_candidate_run_json_series_is_the_exp_id(tmp_path: Path, monkeyp
     monkeypatch.setattr(wrapper, "repository_state_root", lambda: state)
     monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: HEAD)
     monkeypatch.setattr(wrapper.subprocess, "run", _fake_nvidia_smi(""))
+    fingerprint = dict(zip(ENV_KEYS, ("3.11.9", "2.5.1", "12.4", "8.4.138", "ab" * 32)))
+    monkeypatch.setattr(wrapper, "environment_fingerprint", lambda: fingerprint)
+    seen_env: list[dict] = []
 
     class FakeProc:
         pid = 777
         stdout: list[str] = []
 
-        def __init__(self, *_a, **_k) -> None:
-            pass
+        def __init__(self, *_a, **k) -> None:
+            seen_env.append(k["env"])
 
         def wait(self) -> int:
             return 0
@@ -1143,6 +1148,8 @@ def test_wrapper_candidate_run_json_series_is_the_exp_id(tmp_path: Path, monkeyp
     assert wrapper.main(["--imgsz", "768", "--exp-id", CAND, "--approval-ref", "X"]) == 0
     run = json.loads((state / "evaluations" / f"{CAND_NAME}.run.json").read_text())
     assert run["series"] == CAND and run["imgsz"] == 768 and run["approval_ref"] == "X"
+    assert run["environment"] == fingerprint and seen_env[0]["YOLO_AUTOINSTALL"] == "False"
+    assert run["vram_peak_above_idle_mib"] == run["vram_peak_mib"] - run["vram_baseline_mib"]
 
 
 # ── recorder candidate mode ─────────────────────────────────────────────────────────
@@ -1263,3 +1270,93 @@ def test_candidate_write_refuses_a_baseline_missing_from_the_ledger(tmp_path: Pa
         assert reopened.get_experiment(CAND) is None
     finally:
         reopened.close()  # type: ignore[attr-defined]
+
+
+# ── run hygiene (I5, ADR-0017 amendment 2026-11-16 item 3; Q70, Q71) ──────────────────
+
+ENV_KEYS = ("python_version", "torch_version", "torch_cuda_version", "ultralytics_version", "pip_freeze_sha256")
+FAKE_VERSIONS = {"python_version": "3.11.9", "torch_version": "2.5.1", "torch_cuda_version": "12.4", "ultralytics_version": "8.4.138"}
+
+
+def test_child_env_disables_autoinstall_and_leaves_the_parent_env_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    wrapper = _load_wrapper()
+    monkeypatch.delenv("YOLO_AUTOINSTALL", raising=False)
+    monkeypatch.setenv("SOME_VAR", "kept")
+    env = wrapper.child_env()
+    assert env["YOLO_AUTOINSTALL"] == "False" and env["SOME_VAR"] == "kept"
+    assert "YOLO_AUTOINSTALL" not in os.environ
+
+
+def test_fingerprint_has_exactly_the_five_keys_and_hashes_pip_freeze() -> None:
+    wrapper = _load_wrapper()
+    fp = wrapper.environment_fingerprint(versions=lambda: dict(FAKE_VERSIONS), pip_freeze=lambda: "torch==2.5.1\n")
+    assert tuple(fp) == ENV_KEYS
+    assert fp["pip_freeze_sha256"] == hashlib.sha256(b"torch==2.5.1\n").hexdigest()
+    assert fp["ultralytics_version"] == "8.4.138"
+
+
+@pytest.mark.parametrize("missing", ["python_version", "torch_version", "torch_cuda_version", "ultralytics_version"])
+@pytest.mark.parametrize("bad", [None, ""])
+def test_fingerprint_refuses_an_undeterminable_field(missing: str, bad: object) -> None:
+    wrapper = _load_wrapper()
+    versions = {**FAKE_VERSIONS, missing: bad}
+    with pytest.raises(wrapper.FingerprintError, match=missing):
+        wrapper.environment_fingerprint(versions=lambda: versions, pip_freeze=lambda: "x==1\n")
+
+
+@pytest.mark.parametrize("freeze", [None, ""])
+def test_fingerprint_refuses_when_pip_freeze_fails(freeze: str | None) -> None:
+    wrapper = _load_wrapper()
+    with pytest.raises(wrapper.FingerprintError, match="pip_freeze_sha256"):
+        wrapper.environment_fingerprint(versions=lambda: dict(FAKE_VERSIONS), pip_freeze=lambda: freeze)
+
+
+def test_fingerprint_error_creates_no_run_directory_and_never_starts_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wrapper = _load_wrapper()
+    evals, models = tmp_path / "evaluations", tmp_path / "models"
+    evals.mkdir()
+    models.mkdir()
+    (models / "yolo11n.pt").write_bytes(b"w")
+    (tmp_path / "val.txt").write_text("a.jpg\n")
+    (evals / "coco-person-val.yaml").write_text(f"path: {tmp_path}\nval: val.txt\n")
+    before = sorted(p.name for p in tmp_path.rglob("*"))
+
+    def boom() -> dict:
+        raise wrapper.FingerprintError("torch_version cannot be determined")
+
+    def no_popen(*a: object, **k: object) -> None:
+        raise AssertionError("Popen must not be called")
+
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda root: "c" * 40)
+    monkeypatch.setattr(wrapper, "repository_state_root", lambda: tmp_path)
+    monkeypatch.setattr(wrapper, "snapshot_compute_apps", lambda *, at: {"at": at, "processes": []})
+    monkeypatch.setattr(wrapper, "environment_fingerprint", boom)
+    monkeypatch.setattr(wrapper.subprocess, "Popen", no_popen)
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "A-1"]) == 2
+    assert sorted(p.name for p in tmp_path.rglob("*")) == before
+
+
+def test_peak_above_idle_is_peak_minus_idle_and_none_when_either_is_missing() -> None:
+    wrapper = _load_wrapper()
+    assert wrapper.vram_above_idle(600, 360) == 240
+    assert wrapper.vram_above_idle(None, 360) is None
+    assert wrapper.vram_above_idle(600, None) is None
+
+
+def test_environment_and_above_idle_reach_the_record_notes(tmp_path: Path) -> None:
+    env = dict(zip(ENV_KEYS, ("3.11.9", "2.5.1", "12.4", "8.4.138", "ab" * 32)))
+    run_dir, coco = make_run(tmp_path, run_overrides={"environment": env, "vram_peak_above_idle_mib": 240})
+    run = _verify(run_dir, coco)
+    assert run.environment == env and run.vram_peak_above_idle_mib == 240
+    notes = json.loads(build_record(run, exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST").notes)
+    assert notes["environment"] == env and notes["vram_peak_above_idle_mib"] == 240
+
+
+def test_old_format_run_json_still_parses_and_omits_the_new_notes(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)  # no environment / above-idle keys
+    run = _verify(run_dir, coco)
+    assert run.environment is None and run.vram_peak_above_idle_mib is None
+    notes = json.loads(build_record(run, exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST").notes)
+    assert "environment" not in notes and "vram_peak_above_idle_mib" not in notes

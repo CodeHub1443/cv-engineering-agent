@@ -151,6 +151,8 @@ class VerifiedRun:
     vram_peak_mib: int
     ram_peak_mib: float
     quantize: int | None = QUANTIZE
+    environment: dict[str, str] | None = None
+    vram_peak_above_idle_mib: int | None = None
 
 
 def precision_label(quantize: int | None) -> str:
@@ -562,6 +564,8 @@ def verify_run(
         vram_peak_mib=int(vram_peak or 0),
         quantize=quantize,
         ram_peak_mib=ram_peak,
+        environment=run.get("environment") if isinstance(run.get("environment"), dict) else None,
+        vram_peak_above_idle_mib=above if isinstance(above := run.get("vram_peak_above_idle_mib"), int) else None,
     )
 
 
@@ -634,6 +638,8 @@ def build_record(
         },
         "not_measured": ["train_time", "power", "flops (ultralytics reports GFLOPs only; see notes)"],
         "vram_baseline_mib": run.vram_baseline_mib,
+        **({"vram_peak_above_idle_mib": run.vram_peak_above_idle_mib} if run.vram_peak_above_idle_mib is not None else {}),
+        **({"environment": run.environment} if run.environment is not None else {}),
         "omitted_metrics": list(run.omitted_strata),
         "predictions_min_person_score": run.min_person_score,
         "artifacts": run.artifacts,

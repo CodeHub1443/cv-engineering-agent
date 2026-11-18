@@ -2645,3 +2645,12 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Fix:** `acceptance.py` exposes `declares_full_curve_protocol(record)` (built on `_declared_protocol` and `_CONF_TOKEN`; `_validity_problems` uses it, behaviour unchanged). `--replication` is now `invalid` only if either record does not declare conf=0.001; differing wording prints `note: confidence_protocol wording differs`, not a problem. Fixed-threshold metrics stay covered by the exact `val_metrics` key comparison. Regression tests use the two real ledger strings verbatim. No GPU, key, network or LLM call; DECISIONS and STATUS untouched.
 
 **Left open:** the owner re-runs EXP-20261116-01 vs EXP-20261004-01 on the Linux PC after merge (no ledger copy on this checkout).
+
+
+## 2026-11-18 — I5 measured-run hygiene (#176; Q70, Q71; ADR-0017 amendment 2026-11-16 item 3)
+
+**Changed:** `scripts/run_yolo_val_measured.py` runs the yolo child with a copy of `os.environ` plus `YOLO_AUTOINSTALL=False` (parent env untouched). run.json gains `environment` (exactly: python_version, torch_version, torch_cuda_version, ultralytics_version, pip_freeze_sha256 of `python -m pip freeze` from the same interpreter); an undeterminable field refuses the run before Popen, after the existing ADR-0018 preflight. run.json also gains `vram_peak_above_idle_mib` = peak minus the existing idle sample (`vram_baseline_mib`; no second nvidia-smi path). `VerifiedRun` gets both as optional fields (None for old run.json) and the ledger notes carry them when present.
+
+**Why:** a run that installs packages mid-run is not reproducible (Q70). The raw peak stays; no comparison rule (D-125).
+
+**Learned:** the gate is `AUTOINSTALL = str(os.getenv("YOLO_AUTOINSTALL", True)).lower() == "true"` (utils/__init__.py:45), used at utils/checks.py:472, called from `check_requirements("faster-coco-eval>=1.6.7")` in models/yolo/detect/val.py:480. Verified only against ultralytics 8.4.6 on this Windows checkout; the Linux PC's 8.4.138 source was not checked. The wrapper imports `resource` (POSIX), so wrapper tests need Linux here. Q77 recorded (mAP rounding in the ledger).
