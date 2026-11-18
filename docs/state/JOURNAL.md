@@ -2690,6 +2690,7 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 
 2026-11-18 correction to the I5 entry: the YOLO_AUTOINSTALL gate was verified on the Linux PC's ultralytics 8.4.138 (utils/__init__.py:72 env_bool, utils/checks.py:625, models/yolo/detect/val.py:590), not only 8.4.6; see Q70.
 
+<<<<<<< HEAD
 ## 2026-11-18 — R1 proposal written (#181; EXP-20261118-01)
 
 **Changed:** added `docs/experiments/EXP-20261118-01-proposal.md`, the R1 integrity replication through the EvalDatasetRef path (same protocol as EXP-20261004-01/EXP-20261116-01; judged by `compare_candidate.py --replication`). Docs only; no GPU, no code.
@@ -2699,3 +2700,14 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** the run directory is now `candidate_run_name(exp_id, imgsz, dataset_id)` (evaluation_records.py:207), and the commit gate (:435) needs run and record at the same HEAD, so the proposal fixes the order: merge I4b, merge this PR, pull, clean status, run, record, judge. Expected notes `confidence_protocol wording differs` and `label_digest on one side only` are not defects.
 
 **Left open:** the run itself (owner/Linux PC). DECISIONS, STATUS and OPEN_QUESTIONS untouched (I4b owns them this round).
+=======
+## 2026-11-18 — I4b label_digest in the like-for-like gate (#180; Q69; ADR-0025 §3.4)
+
+**Changed:** `cv_agent/experiments/acceptance.py`: `_notes(record)` factored out of `_declared_protocol`; `_comparison_problems` now calls `_label_digest_problems`. Both digests present and different: `invalid` ("label_digest differs … (comparison void, [P§29.3])"). Present but not 64 lowercase hex, on either side: `invalid`. One side only, or absent on both: no problem. `dataset_version` equality is unchanged. `scripts/compare_candidate.py --replication`: the same rules, except a one-sided digest prints "note: label_digest on one side only (older record predates digests)" and is not a problem. Tests in `tests/test_acceptance.py` and `tests/test_compare_candidate.py`, written first and seen failing on behaviour.
+
+**Why:** I4a records the digest but nothing compared it, so two runs on different label contents under one version label would pass as like for like (Q69).
+
+**Learned:** the replication comparer's optional-evidence rule (one side only is invalid) would have voided R1, because R1 carries a digest and its baseline EXP-20261004-01 cannot; the digest therefore gets its own rule there (owner correction).
+
+**Left open:** Q69 closes after R1 (EXP-20261118-01) records a digest on the Linux PC. DECISIONS not touched.
+>>>>>>> origin/main

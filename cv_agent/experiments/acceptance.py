@@ -13,7 +13,8 @@ Rules encoded (docs/state/DECISIONS.md, ADR-0019):
   measurement and are never read as AP. The two key families are not interchangeable.
 
 Fails closed: a missing or non-finite metric, a non-completed record, a baseline mismatch, an
-undeclared difference in dataset_version, precision, input_resolution or model, or a record that does
+undeclared difference in dataset_version, precision, input_resolution or model, label_digests that
+differ (or are malformed) when both records carry one, or a record that does
 not declare the full-curve protocol yields verdict ``invalid``, never a pass. At most one of
 precision / input_resolution / model may be declared as the variable under test; a declared
 difference is listed in the report, never ignored. Criteria that differ from the D-077 / D-078 basis
@@ -52,7 +53,8 @@ DECLARABLE_VARIABLES = ("precision", "input_resolution", "model")
 """Fields that may differ between candidate and baseline: one at a time, and only when declared."""
 _GAIN_TOLERANCE = 1e-9  # float representation of exact-threshold gains (0.527 - 0.517)
 _CONF_TOKEN = re.compile(r"(?<![\w.])conf=(\d+(?:\.\d+)?)(?![\d.])")
-_NOT_A_PROMOTION = "a pass is not a production decision and does not promote a model ([P§24])"
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+_NOT_A_PROMOTION ="a pass is not a production decision and does not promote a model ([P§24])"
 
 
 @dataclass(frozen=True)
@@ -134,12 +136,16 @@ class AcceptanceReport:
         return self.verdict == "meets_provisional_criteria" and not self.deviations
 
 
-def _declared_protocol(record: ExperimentRecord) -> str:
+def _notes(record: ExperimentRecord) -> dict[str, object]:
     try:
         parsed = json.loads(record.notes) if record.notes else {}
     except json.JSONDecodeError:
-        return ""
-    return str(parsed.get("confidence_protocol", "")) if isinstance(parsed, dict) else ""
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _declared_protocol(record: ExperimentRecord) -> str:
+    return str(_notes(record).get("confidence_protocol", ""))
 
 
 def declares_full_curve_protocol(record: ExperimentRecord) -> bool:
@@ -169,6 +175,23 @@ def _validity_problems(record: ExperimentRecord, role: str) -> list[str]:
     return problems
 
 
+def _label_digest_problems(baseline: ExperimentRecord, candidate: ExperimentRecord) -> list[str]:
+    """Label-content gate (ADR-0025 §3.4): equal digests when both sides carry one; one-sided or absent is fine."""
+    problems: list[str] = []
+    digests: list[str] = []
+    for role, record in (("baseline", baseline), ("candidate", candidate)):
+        value = _notes(record).get("label_digest")
+        if value is None:
+            continue
+        if isinstance(value, str) and _HEX64.fullmatch(value):
+            digests.append(value)
+        else:
+            problems.append(f"{role} {record.exp_id} label_digest is not 64 lowercase hex characters ({value!r})")
+    if len(digests) == 2 and digests[0] != digests[1]:
+        problems.append("label_digest differs between candidate and baseline (comparison void, [P§29.3])")
+    return problems
+
+
 def _comparison_problems(
     baseline: ExperimentRecord, candidate: ExperimentRecord, variable: str | None
 ) -> tuple[list[str], list[str]]:
@@ -177,6 +200,7 @@ def _comparison_problems(
     declared: list[str] = []
     if candidate.dataset_version != baseline.dataset_version:
         problems.append("dataset_version differs between candidate and baseline (comparison void, [P§29.3])")
+    problems += _label_digest_problems(baseline, candidate)
     if variable is not None and variable not in DECLARABLE_VARIABLES:
         problems.append(f"variable_under_test {variable!r} is not declarable; use one of {DECLARABLE_VARIABLES}")
     for name in DECLARABLE_VARIABLES:
