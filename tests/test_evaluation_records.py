@@ -8,6 +8,7 @@ Each fail-closed test breaks exactly one thing and expects a refusal that names 
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import importlib.util
 import json
@@ -64,16 +65,19 @@ def _spec(coco: Path) -> Path:
     return coco / "eval_dataset_ref.json"
 
 
-def _coco(root: Path, *, small_gt: bool = True, spec: dict | None = None, pin_digest: bool = False) -> Path:
+def _coco(
+    root: Path, *, small_gt: bool = True, spec: dict | None = None, pin_digest: bool = False, extra_a: str = ""
+) -> Path:
     """Two 100x100 images. A has one small person (4x4 px) unless small_gt is False. B has one large.
 
-    Also writes the dataset's eval_dataset_ref.json (the COCO spec with the fixture's counts)."""
+    ``extra_a`` is appended to A's label file. Also writes the dataset's eval_dataset_ref.json
+    (the COCO spec with the fixture's counts)."""
     (root / "images" / "val2017").mkdir(parents=True)
     (root / "labels" / "val2017").mkdir(parents=True)
     for stem in (STEM_A, STEM_B):
         (root / "images" / "val2017" / f"{stem}.jpg").write_bytes(_jpeg(100, 100))
     a_size = 0.04 if small_gt else 0.5  # normalized width/height: 0.04 -> 4x4 px (small)
-    (root / "labels" / "val2017" / f"{STEM_A}.txt").write_text(f"0 0.5 0.5 {a_size} {a_size}\n")
+    (root / "labels" / "val2017" / f"{STEM_A}.txt").write_text(f"0 0.5 0.5 {a_size} {a_size}\n{extra_a}")
     (root / "labels" / "val2017" / f"{STEM_B}.txt").write_text("0 0.5 0.5 0.5 0.5\n")
     (root / "val2017.txt").write_text(f"images/val2017/{STEM_A}.jpg\nimages/val2017/{STEM_B}.jpg\n")
     fields = {**FIXTURE_SPEC, **(spec or {})}
@@ -114,6 +118,7 @@ def make_run(
     series: str = "EXP-20261004-01",
     spec: dict | None = None,
     pin_digest: bool = False,
+    extra_a: str = "",
 ) -> tuple[Path, Path]:
     """Build <tmp>/state/evaluations/<name>/ plus .val.log and .run.json. Returns (run_dir, coco_root)."""
     state = tmp / "state"
@@ -121,7 +126,7 @@ def make_run(
     models = state / "models"
     evals.mkdir(parents=True, exist_ok=True)
     models.mkdir(parents=True, exist_ok=True)
-    coco = _coco(tmp / "coco", small_gt=small_gt, spec=spec, pin_digest=pin_digest)
+    coco = _coco(tmp / "coco", small_gt=small_gt, spec=spec, pin_digest=pin_digest, extra_a=extra_a)
     ref = load_eval_dataset_ref(_spec(coco))
     weights = models / "yolo11n.pt"
     weights.write_bytes(b"weights-bytes")
@@ -1466,12 +1471,56 @@ def test_a_pinned_label_digest_that_does_not_match_is_refused(tmp_path: Path) ->
     assert "differ from the spec's label_digest" in _problems(run_dir, coco)
 
 
-def test_a_non_person_target_or_ignore_classes_are_not_scorable_yet(tmp_path: Path) -> None:
+def test_a_non_person_target_is_not_scorable_yet(tmp_path: Path) -> None:
     run_dir, coco = make_run(tmp_path, spec={"target_class": 1})
     assert "target_class 1 is not scorable" in _problems(run_dir, coco)
-    run_dir, coco = make_run(tmp_path / "ign", spec={"ignore_classes": [7]})
-    assert "ignore_classes are not scorable" in _problems(run_dir, coco)
     assert scoring_problems(COCO_REF) == []
+    assert scoring_problems(dataclasses.replace(COCO_REF, ignore_classes=(1,))) == []
+
+
+# A 4x4 px ignore box over A's top-left corner, and a 0.5-score prediction on it (I6a, ADR-0025 §3.7).
+IGNORE_LINE = "1 0.02 0.02 0.04 0.04\n"
+ON_IGNORE = {"image_id": 1, "file_name": f"{STEM_A}.jpg", "category_id": 1, "bbox": [0, 0, 4, 4], "score": 0.5}
+
+
+def test_ignore_classes_discard_unmatched_predictions_on_ignore_boxes(tmp_path: Path) -> None:
+    predictions = json.dumps([*_predictions(), ON_IGNORE])
+    plain_dir, plain = make_run(tmp_path / "plain", predictions=predictions)
+    assert _verify(plain_dir, plain).fixed["precision"] == pytest.approx(2 / 3)
+
+    run_dir, coco = make_run(
+        tmp_path / "ign", spec={"ignore_classes": [1]}, extra_a=IGNORE_LINE, predictions=predictions
+    )
+    run = _verify(run_dir, coco)
+    assert run.fixed["precision"] == pytest.approx(1.0)  # the 0.5 prediction on the ignore box is discarded
+    assert run.fixed["recall"] == pytest.approx(1.0)  # ignore boxes are not GT: 2 persons, both found
+    record = build_record(run, exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
+    rule = json.loads(record.notes or "{}")["ignore_rule"]
+    assert rule["ignore_classes"] == [1]
+    # Full curve: the 0.5 and the 0.001 prediction both sit on the ignore box; at 0.25 only the 0.5 one.
+    assert rule["discarded_predictions"] == {"full_curve": 2, "fixed_thr@0.25": 1}
+    assert "mAP@0.5:0.95" in rule["not_applied_to"] and "ultralytics" in rule["not_applied_to"]
+
+
+def test_a_coco_record_has_no_ignore_rule_note(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    record = build_record(_verify(run_dir, coco), exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
+    assert "ignore_rule" not in json.loads(record.notes or "{}")
+
+
+def test_a_label_line_that_is_not_five_columns_is_refused_not_skipped(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, extra_a="0 0.5 0.5 0.1 0.1 0.9\n")
+    problems = _problems(run_dir, coco)
+    assert "unreadable" in problems and "6 columns, expected 5" in problems
+
+
+def test_the_wrapper_refuses_a_yaml_without_the_ignore_classes(tmp_path: Path) -> None:
+    wrapper = _load_wrapper()
+    root = tmp_path.resolve()
+    ref = dataclasses.replace(COCO_REF, ignore_classes=(1,))
+    args = (ref, root, root, root / ref.list_file)
+    assert "ignore class 1" in " ".join(wrapper.data_yaml_problems(*args, {0: "person"}))
+    assert wrapper.data_yaml_problems(*args, {0: "person", 1: "ignore"}) == []
 
 
 def test_run_json_list_file_must_be_the_specs_list_file(tmp_path: Path) -> None:

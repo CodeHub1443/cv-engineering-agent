@@ -296,6 +296,9 @@ def data_yaml_problems(
         problems.append(f"data yaml val {str(val)!r} is not the spec's list file {str(expected)!r}")
     if ref.target_class not in names:
         problems.append(f"data yaml names {sorted(names)} do not contain target_class {ref.target_class}")
+    for cls in ref.ignore_classes:  # ultralytics drops an image whose label class is not in names
+        if cls not in names:
+            problems.append(f"data yaml names {sorted(names)} do not contain ignore class {cls}")
     return problems
 
 

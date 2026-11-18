@@ -13,6 +13,8 @@ Two kinds of number, kept separate by callers:
   It is not mAP and not an operating point (Q30 is open).
 
 The matcher is greedy by score at IoU >= 0.5. It is an approximation, not the COCO evaluator.
+Label parsing fails closed (ADR-0025 §3.8); predictions on ignore boxes are discarded after
+target matching (``drop_ignored``, ADR-0025 §3.7).
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from pathlib import Path
 
 PERSON_CATEGORY_ID = 1  # COCO predictions.json category id for "person"
 MATCH_IOU = 0.5
+YOLO_DETECT_COLUMNS = 5  # class cx cy w h: the only label layout scored here (ADR-0025 §3.8)
 # Q28 (accepted 2026-10-04, D-067): standard mAP protocol is conf=0.001. A predictions
 # file whose lowest score is above 2x this value does not hold the full PR curve.
 MAP_PROTOCOL_CONF = 0.001
@@ -117,20 +120,70 @@ def match_predictions(preds: list[PredictedBox], gts: list[GroundTruthBox]) -> s
     return {j for _, j in greedy_match_pairs(preds, gts)}
 
 
-def load_person_gt(label_path: Path, width: int, height: int) -> list[GroundTruthBox]:
-    """Read YOLO-format person boxes (class 0) and convert them to pixel corners."""
+def parse_yolo_labels(
+    label_path: Path, width: int, height: int, *, target_class: int, ignore_classes: tuple[int, ...]
+) -> tuple[list[GroundTruthBox], list[GroundTruthBox]]:
+    """Read YOLO detection labels as (target boxes, ignore boxes) in pixel corners.
+
+    Fails closed (ADR-0025 §3.8): a line that is not ``YOLO_DETECT_COLUMNS`` columns, or whose
+    class is not a decimal integer, raises ValueError naming the file and line. Whitespace-only
+    lines are skipped, as in the label digest. Lines of any other class are filtered out (COCO's
+    non-person classes). A missing file has no boxes.
+    """
     if not label_path.exists():
-        return []
-    boxes: list[GroundTruthBox] = []
-    for line in label_path.read_text().splitlines():
+        return [], []
+    targets: list[GroundTruthBox] = []
+    ignores: list[GroundTruthBox] = []
+    for lineno, line in enumerate(label_path.read_text().splitlines(), start=1):
         parts = line.split()
-        if len(parts) != 5 or parts[0] != "0":
+        if not parts:
+            continue
+        if len(parts) != YOLO_DETECT_COLUMNS:
+            raise ValueError(f"{label_path}:{lineno}: {len(parts)} columns, expected {YOLO_DETECT_COLUMNS}")
+        if not (parts[0].isascii() and parts[0].isdigit()):
+            raise ValueError(f"{label_path}:{lineno}: class {parts[0]!r} is not a decimal integer")
+        cls = int(parts[0])
+        into = targets if cls == target_class else ignores if cls in ignore_classes else None
+        if into is None:
             continue
         cx, cy, nw, nh = (float(v) for v in parts[1:])
         x1 = (cx - nw / 2) * width
         y1 = (cy - nh / 2) * height
-        boxes.append(GroundTruthBox(x1, y1, x1 + nw * width, y1 + nh * height, nw * nh))
-    return boxes
+        into.append(GroundTruthBox(x1, y1, x1 + nw * width, y1 + nh * height, nw * nh))
+    return targets, ignores
+
+
+def load_person_gt(label_path: Path, width: int, height: int) -> list[GroundTruthBox]:
+    """Read YOLO-format person boxes (class 0) and convert them to pixel corners (fails closed)."""
+    return parse_yolo_labels(label_path, width, height, target_class=0, ignore_classes=())[0]
+
+
+def drop_ignored(
+    preds_by_stem: dict[str, list[PredictedBox]],
+    gt_by_stem: dict[str, list[GroundTruthBox]],
+    ignore_by_stem: dict[str, list[GroundTruthBox]],
+) -> dict[str, list[PredictedBox]]:
+    """Discard predictions on ignore boxes (ADR-0025 §3.7, D-130), keeping order.
+
+    Target GT matching runs first (``greedy_match_pairs``). Each prediction it leaves unmatched
+    is discarded if its IoU with any ignore box reaches ``MATCH_IOU``; one ignore box can absorb
+    several predictions. Matching is greedy by score, so filtering the full curve and then
+    applying a confidence threshold equals filtering the thresholded set.
+    """
+    kept: dict[str, list[PredictedBox]] = {}
+    for stem, preds in preds_by_stem.items():
+        ignores = ignore_by_stem.get(stem, [])
+        if not ignores:
+            kept[stem] = preds
+            continue
+        matched = {i for i, _ in greedy_match_pairs(preds, gt_by_stem.get(stem, []))}
+        kept[stem] = [
+            pred
+            for i, pred in enumerate(preds)
+            if i in matched
+            or all(iou((pred.x1, pred.y1, pred.x2, pred.y2), (g.x1, g.y1, g.x2, g.y2)) < MATCH_IOU for g in ignores)
+        ]
+    return kept
 
 
 def load_person_predictions(

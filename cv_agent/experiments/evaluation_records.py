@@ -38,10 +38,11 @@ from cv_agent.datasets.eval_ref import (
 from cv_agent.experiments.detection_metrics import (
     MAP_PROTOCOL_CONF,
     assert_full_curve,
+    drop_ignored,
     evaluate,
     jpeg_size,
-    load_person_gt,
     load_person_predictions,
+    parse_yolo_labels,
     stratum_ap50,
 )
 from cv_agent.experiments.models import (
@@ -156,6 +157,8 @@ class VerifiedRun:
     quantize: int | None = QUANTIZE
     environment: dict[str, str] | None = None
     vram_peak_above_idle_mib: int | None = None
+    ignore_classes: tuple[int, ...] = ()
+    ignore_discarded: dict[str, int] | None = None  # predictions discarded on ignore boxes (ADR-0025 §3.7)
 
 
 def precision_label(quantize: int | None) -> str:
@@ -210,12 +213,13 @@ def candidate_run_name(exp_id: str, imgsz: int, dataset_id: str) -> str:
 
 
 def scoring_problems(ref: EvalDatasetRef) -> list[str]:
-    """Why detection_metrics cannot score this reference yet. It scores class 0 only and has no ignore rule (I6)."""
+    """Why detection_metrics cannot score this reference. Predictions are read as COCO person only.
+
+    Ignore classes are scorable (ADR-0025 §3.7, I6a).
+    """
     problems: list[str] = []
     if ref.target_class != 0:
-        problems.append(f"target_class {ref.target_class} is not scorable: detection_metrics scores class 0 only (I6)")
-    if ref.ignore_classes:
-        problems.append("ignore_classes are not scorable: detection_metrics has no ignore rule yet (I6)")
+        problems.append(f"target_class {ref.target_class} is not scorable: detection_metrics scores class 0 only")
     return problems
 
 
@@ -529,13 +533,16 @@ def verify_run(
 
     size_by_stem: dict[str, tuple[int, int]] = {}
     gt_by_stem = {}
+    ignore_by_stem = {}
     try:
         items = eval_items(ref, dataset_root)
         label_digest = compute_label_digest(ref, dataset_root)
         for stem, image, label_path in items:
             width, height = jpeg_size(image)
             size_by_stem[stem] = (width, height)
-            gt_by_stem[stem] = load_person_gt(label_path, width, height)
+            gt_by_stem[stem], ignore_by_stem[stem] = parse_yolo_labels(
+                label_path, width, height, target_class=ref.target_class, ignore_classes=ref.ignore_classes
+            )
     except (EvalDatasetRefError, OSError, ValueError) as exc:
         raise RecordError([f"dataset under {dataset_root} is unreadable: {exc}"]) from exc
     n_images = len(size_by_stem)
@@ -557,6 +564,16 @@ def verify_run(
         raise RecordError(digest_problems)
 
     full = load_person_predictions(predictions, MAP_PROTOCOL_CONF)
+    fixed_preds = load_person_predictions(predictions, FIXED_THRESHOLD)
+    discarded: dict[str, int] | None = None
+    if ref.ignore_classes:  # never called for COCO, so its path is unchanged (R1)
+        counts = [sum(map(len, p.values())) for p in (full, fixed_preds)]
+        full = drop_ignored(full, gt_by_stem, ignore_by_stem)
+        fixed_preds = drop_ignored(fixed_preds, gt_by_stem, ignore_by_stem)
+        discarded = {
+            "full_curve": counts[0] - sum(map(len, full.values())),
+            f"fixed_thr@{FIXED_THRESHOLD}": counts[1] - sum(map(len, fixed_preds.values())),
+        }
     ap50: dict[str, float] = {}
     omitted: list[str] = []
     for stratum in ("small", "medium", "large"):
@@ -566,7 +583,6 @@ def verify_run(
         else:
             ap50[stratum] = value
 
-    fixed_preds = load_person_predictions(predictions, FIXED_THRESHOLD)
     report = evaluate(fixed_preds, gt_by_stem, FIXED_THRESHOLD)
     fixed: dict[str, float] = {
         "precision": report.precision(),
@@ -626,6 +642,8 @@ def verify_run(
         ram_peak_mib=ram_peak,
         environment=run.get("environment") if isinstance(run.get("environment"), dict) else None,
         vram_peak_above_idle_mib=above if isinstance(above := run.get("vram_peak_above_idle_mib"), int) else None,
+        ignore_classes=ref.ignore_classes,
+        ignore_discarded=discarded,
     )
 
 
@@ -706,6 +724,19 @@ def build_record(
         "label_digest": run.label_digest,
         "spec_sha256": run.spec_sha256,
         "artifacts": run.artifacts,
+        **(
+            {
+                "ignore_rule": {  # ADR-0025 §3.7, D-129, D-130; absent for COCO
+                    "ignore_classes": list(run.ignore_classes),
+                    "discarded_predictions": run.ignore_discarded,
+                    "rule": "target GT matched first; an unmatched prediction with IoU >= 0.5 to any ignore box is discarded",
+                    "applied_to": "AP@0.5/* and fixed_thr@0.25/*",
+                    "not_applied_to": "mAP@0.5 and mAP@0.5:0.95 (from ultralytics, which has no ignore rule)",
+                }
+            }
+            if run.ignore_classes
+            else {}
+        ),
     }
     target = run.gpu_name if not run.driver_version else f"{run.gpu_name}, driver {run.driver_version}"
     return ExperimentRecord(

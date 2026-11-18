@@ -2709,3 +2709,34 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** the run directory is now `candidate_run_name(exp_id, imgsz, dataset_id)` (evaluation_records.py:207), and the commit gate (:435) needs run and record at the same HEAD, so the proposal fixes the order: merge I4b, merge this PR, pull, clean status, run, record, judge. Expected notes `confidence_protocol wording differs` and `label_digest on one side only` are not defects.
 
 **Left open:** the run itself (owner/Linux PC). DECISIONS, STATUS and OPEN_QUESTIONS untouched (I4b owns them this round).
+
+## 2026-11-18 — I6a fail-closed label parsing and ignore rule (#186; ADR-0025 §3.7, §3.8; D-129, D-130)
+
+**Changed:**
+- `cv_agent/experiments/detection_metrics.py`:
+  - `parse_yolo_labels` returns target and ignore boxes. A non-blank line that is not `YOLO_DETECT_COLUMNS` (5) columns raises with `file:line`, and so does a class token that is not a decimal integer. Whitespace-only lines are skipped, as in the digest. Other classes are still filtered out.
+  - `load_person_gt` keeps its signature and delegates.
+  - `drop_ignored` runs target matching first (`greedy_match_pairs`), then discards unmatched predictions at IoU ≥ 0.5 to any ignore box. It is many-to-one (D-130).
+- `verify_run`:
+  - loads ignore boxes for `ref.ignore_classes`;
+  - only when they are non-empty, filters the full-curve and the 0.25 predictions before `stratum_ap50` and `evaluate`;
+  - records an `ignore_rule` note with the discarded counts and the statement that the ultralytics mAP does not apply it (D-129).
+- `scoring_problems` no longer refuses `ignore_classes`; the `target_class != 0` refusal stays.
+- The wrapper's `data_yaml_problems` requires every ignore class in `names`.
+- Tests were written first and seen failing on behaviour:
+  - `tests/test_detection_metrics.py` (new; runs on Windows), including a frozen copy of the pre-I6 parser as the COCO oracle and a seeded check that filtering then thresholding equals thresholding then filtering;
+  - `tests/test_evaluation_records.py`.
+
+**Why:** ADR-0025 §3.8 replaces the silent skip at `detection_metrics.py:127`. §3.7 is the precondition for scoring MOTChallenge-format video data (I6b and I6c convert it).
+
+**COCO unchanged:** for files where every line has 5 columns, the target boxes equal the old parser's. `drop_ignored` is never called when `ignore_classes` is empty, and the COCO notes keys are unchanged. One residual difference: a class token such as `00` now counts as class 0, where the old string compare skipped it. The owner's `awk 'NF{print NF}'` check on the Linux PC confirms the COCO labels are all 5 columns.
+
+**Size:**
+- Production +100/−15: `detection_metrics` +59/−8, `evaluation_records` +38/−7, wrapper +3.
+- Tests +271/−7.
+
+**Learned:**
+- Greedy matching by score makes a prediction's match depend only on predictions scoring at least as high. So one filter on the full curve also serves the 0.25 threshold.
+- `tests/test_linux_nvidia_runtime.py` fails 20 times from PowerShell (no `echo`/`true`/`sleep`) but 6 under Git Bash, which is the D-103 baseline.
+
+**Left open:** merge hold until R1 (EXP-20261118-01) is recorded. I6b (converter library and ADR-0025 amendment: D-131 to D-134, Q79, Q80) and I6c (operator script). OPEN_QUESTIONS untouched.
