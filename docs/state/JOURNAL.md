@@ -2663,3 +2663,11 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Left open:** `label_digest` is `null` in the COCO spec (the labels are on the Linux PC); recording it in `run.json` and the ledger and comparing it in the like-for-like gate is I4. Count checks (`expected_images`, `expected_instances`) are I4 too. Linux CI not yet seen.
 
 **Size:** 520 added (329 tests, ~170 production); owner accepted a one-time exception to the ~400-line rule (2026-11-18) rather than separating tests from code.
+
+## 2026-11-18 — I5 measured-run hygiene (#176; Q70, Q71; ADR-0017 amendment 2026-11-16 item 3)
+
+**Changed:** `scripts/run_yolo_val_measured.py` runs the yolo child with a copy of `os.environ` plus `YOLO_AUTOINSTALL=False` (parent env untouched). run.json gains `environment` (exactly: python_version, torch_version, torch_cuda_version, ultralytics_version, pip_freeze_sha256 of `python -m pip freeze` from the same interpreter); an undeterminable field refuses the run before Popen, after the existing ADR-0018 preflight. run.json also gains `vram_peak_above_idle_mib` = peak minus the existing idle sample (`vram_baseline_mib`; no second nvidia-smi path). `VerifiedRun` gets both as optional fields (None for old run.json) and the ledger notes carry them when present.
+
+**Why:** a run that installs packages mid-run is not reproducible (Q70). The raw peak stays; no comparison rule (D-125).
+
+**Learned:** the gate is `AUTOINSTALL = str(os.getenv("YOLO_AUTOINSTALL", True)).lower() == "true"` (utils/__init__.py:45), used at utils/checks.py:472, called from `check_requirements("faster-coco-eval>=1.6.7")` in models/yolo/detect/val.py:480. Citations (utils/__init__.py:45, utils/checks.py:472, models/yolo/detect/val.py:480) are from ultralytics 8.4.6 (Windows); 8.4.138 (the version the repo records for the Linux PC, e.g. DECISIONS.md and `yolo_eval.py`; not confirmed this session) to be checked on Linux. The wrapper imports `resource` (POSIX), so wrapper tests need Linux here. Q77 recorded (mAP rounding in the ledger).

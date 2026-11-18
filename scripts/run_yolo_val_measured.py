@@ -26,6 +26,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import platform
 import resource
 import subprocess
 import sys
@@ -66,6 +68,11 @@ CLASSES = [0]
 MODEL_NAME = "yolo11n.pt"
 DATA_YAML_NAME = "coco-person-val.yaml"
 VRAM_POLL_SECONDS = 1.0
+# Ultralytics' auto-install gate: `AUTOINSTALL = str(os.getenv("YOLO_AUTOINSTALL", True)).lower() == "true"`
+# (ultralytics/utils/__init__.py:45, read at utils/checks.py:472; ultralytics 8.4.6 (Windows); 8.4.138 to be checked on Linux),
+# so any value but "true" disables it (Q70).
+AUTOINSTALL_ENV = "YOLO_AUTOINSTALL"
+ENVIRONMENT_KEYS = ("python_version", "torch_version", "torch_cuda_version", "ultralytics_version", "pip_freeze_sha256")
 
 
 FP32_CONTROL_IMGSZ = 640
@@ -248,6 +255,59 @@ def gpu_identity() -> dict[str, str | int | None]:
         return {"gpu_name": None, "gpu_memory_mib": None, "driver_version": None}
 
 
+class FingerprintError(Exception):
+    """A field of the environment fingerprint could not be determined (fail closed, Q70)."""
+
+
+def child_env() -> dict[str, str]:
+    """A copy of os.environ for the yolo child with Ultralytics auto-install off. The parent is not changed."""
+    return {**os.environ, AUTOINSTALL_ENV: "False"}
+
+
+def _installed_versions() -> dict[str, str | None]:
+    """Python, torch, torch's CUDA and ultralytics versions. A package that cannot be imported gives None."""
+    versions: dict[str, str | None] = {"python_version": platform.python_version()}
+    try:
+        import torch
+
+        versions["torch_version"] = str(torch.__version__)
+        versions["torch_cuda_version"] = torch.version.cuda
+    except Exception:  # noqa: BLE001 - any import failure means the field is undeterminable
+        versions["torch_version"] = versions["torch_cuda_version"] = None
+    try:
+        from importlib import metadata
+
+        versions["ultralytics_version"] = metadata.version("ultralytics")
+    except Exception:  # noqa: BLE001
+        versions["ultralytics_version"] = None
+    return versions
+
+
+def _pip_freeze() -> str | None:
+    """`python -m pip freeze` from this interpreter, or None when it fails."""
+    try:
+        done = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True, timeout=120, env=child_env())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def environment_fingerprint(*, versions=_installed_versions, pip_freeze=_pip_freeze) -> dict[str, str]:
+    """The five-key environment fingerprint for run.json. Raises FingerprintError if any field is missing."""
+    found: dict[str, str | None] = dict(versions())
+    freeze = pip_freeze()
+    found["pip_freeze_sha256"] = hashlib.sha256(freeze.encode("utf-8")).hexdigest() if freeze else None
+    missing = [k for k in ENVIRONMENT_KEYS if not found.get(k)]
+    if missing:
+        raise FingerprintError(f"cannot determine {', '.join(missing)}")
+    return {k: str(found[k]) for k in ENVIRONMENT_KEYS}
+
+
+def vram_above_idle(peak_mib: int | None, idle_mib: int | None) -> int | None:
+    """Peak minus the idle sample taken before the run; None when either is missing. No comparison rule (D-125)."""
+    return None if peak_mib is None or idle_mib is None else peak_mib - idle_mib
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -342,12 +402,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"REFUSED: GPU has {len(pids)} compute process(es) before the run, pids {pids}; no run started", file=sys.stderr)
         return 2
 
+    try:
+        environment = environment_fingerprint()
+    except FingerprintError as exc:
+        print(f"REFUSED: {exc}; no run started", file=sys.stderr)
+        return 2
+
     sampler = VramSampler()
     sampler.baseline_mib = sampler.sample_once()  # before the run process exists
     started = datetime.now(timezone.utc)
     t0 = time.monotonic()
     with val_log.open("w", encoding="utf-8") as log:
-        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=child_env())
         sampler.start(proc.pid)
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -386,6 +452,8 @@ def main(argv: list[str] | None = None) -> int:
         "commit": commit,
         "vram_baseline_mib": sampler.baseline_mib,
         "vram_peak_mib": vram_peak,
+        "vram_peak_above_idle_mib": vram_above_idle(vram_peak, sampler.baseline_mib),
+        "environment": environment,
         "vram_samples": len(sampler.samples),
         "own_pid": proc.pid,
         "gpu_process_snapshots": gpu_snapshots,
