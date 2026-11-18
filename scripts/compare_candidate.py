@@ -10,7 +10,7 @@ judged (invalid evidence, a missing row, an unreadable ledger).
 
 ``--replication`` (Q72) is an integrity check, not an acceptance judgement: both rows must share
 dataset_version and identical precision, input_resolution and model (plus hardware and recorded input
-hashes where present), and both must declare the full-curve conf=0.001 (the protocol, judged as in
+hashes where present; label_digest too, but one-sided only prints a note), and both must declare the full-curve conf=0.001 (the protocol, judged as in
 acceptance.py; differing confidence_protocol wording is only noted). Then every val_metrics key in either
 row is compared exactly. Exit 0 "replicates" (same keys, every delta == 0.0); 1 "differs" (a delta, a one-sided key,
 NaN); 2 "invalid" (missing row, dataset_version, protocol mismatch or undeclared conf). Read-only.
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -61,6 +62,7 @@ def format_report(report: AcceptanceReport) -> str:
     return "\n".join(lines)
 
 
+_HEX64 = re.compile(r"[0-9a-f]{64}")
 INPUT_HASHES = ("weights", "data_yaml", "val_txt")  # recorded inputs; the other artifacts are outputs
 
 
@@ -99,13 +101,33 @@ def _protocol_problems(base: ExperimentRecord, cand: ExperimentRecord) -> list[s
     return problems
 
 
+def _label_digest_check(base: ExperimentRecord, cand: ExperimentRecord) -> tuple[list[str], list[str]]:
+    """(problems, notes). Both present and different, or malformed: invalid. One side only: a note (older
+    records predate digests, so a one-sided digest must not void the replication)."""
+    problems: list[str] = []
+    values: dict[str, str] = {}
+    for role, record in (("baseline", base), ("candidate", cand)):
+        value = _notes(record).get("label_digest")
+        if value is None:
+            continue
+        if isinstance(value, str) and _HEX64.fullmatch(value):
+            values[role] = value
+        else:
+            problems.append(f"{role} {record.exp_id} label_digest is not 64 lowercase hex characters ({value!r})")
+    if len(values) == 2 and values["baseline"] != values["candidate"]:
+        problems.append(f"label_digest: baseline {values['baseline']} != candidate {values['candidate']}")
+    notes = ["note: label_digest on one side only (older record predates digests)"] if len(values) == 1 and not problems else []
+    return problems, notes
+
+
 def replication_verdict(base: ExperimentRecord, cand: ExperimentRecord) -> tuple[str, list[str]]:
     """Return ("replicates" | "differs" | "invalid", report lines). Exact comparison, no tolerance."""
-    problems = _protocol_problems(base, cand)
+    digest_problems, digest_notes = _label_digest_check(base, cand)
+    problems = _protocol_problems(base, cand) + digest_problems
     if problems:
         return "invalid", [f"problem: {p}" for p in problems]
     bm, cm = base.val_metrics or {}, cand.val_metrics or {}
-    lines: list[str] = []
+    lines: list[str] = list(digest_notes)
     if _notes(base).get("confidence_protocol") != _notes(cand).get("confidence_protocol"):
         lines.append("note: confidence_protocol wording differs (both declare the full-curve protocol)")
     differing: list[str] = []
