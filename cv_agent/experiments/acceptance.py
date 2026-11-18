@@ -142,6 +142,12 @@ def _declared_protocol(record: ExperimentRecord) -> str:
     return str(parsed.get("confidence_protocol", "")) if isinstance(parsed, dict) else ""
 
 
+def declares_full_curve_protocol(record: ExperimentRecord) -> bool:
+    """True when the record's declared confidence protocol names the full-curve conf (Q28/D-067)."""
+    tokens = _CONF_TOKEN.findall(_declared_protocol(record))
+    return any(float(t) == FULL_CURVE_CONF for t in tokens)
+
+
 def _validity_problems(record: ExperimentRecord, role: str) -> list[str]:
     problems: list[str] = []
     if record.status != "completed":
@@ -149,8 +155,7 @@ def _validity_problems(record: ExperimentRecord, role: str) -> list[str]:
     for name in _REQUIRED_PROVENANCE:
         if getattr(record, name) is None:
             problems.append(f"{role} {record.exp_id} is missing {name} (provenance incomplete, [P§25])")
-    tokens = _CONF_TOKEN.findall(_declared_protocol(record))
-    if not any(float(t) == FULL_CURVE_CONF for t in tokens):
+    if not declares_full_curve_protocol(record):
         problems.append(
             f"{role} {record.exp_id} does not declare the full-curve protocol "
             f"conf={FULL_CURVE_CONF} (Q28/D-067)"

@@ -229,3 +229,42 @@ def test_replication_missing_record_exits_2_and_ledger_untouched(tmp_path: Path)
     before = _digest(db)
     assert compare_candidate.main(["--replication", "--candidate", REP_ID, "--db", str(db)]) == 2
     assert _digest(db) == before
+
+
+# Real ledger wordings (baseline recorded earlier, replication later): same conf=0.001 protocol.
+_BASE_PROSE = (
+    "conf=0.001 (Q28/D-067) for mAP and AP@0.5/* (full PR curve). fixed_thr@0.25/* are REFERENCE ONLY: "
+    "not mAP, not an operating point (Q30 open)."
+)
+_CAND_PROSE = (
+    "conf=0.001 (Q28/D-067) for mAP and AP@0.5/* (full PR curve). fixed_thr@0.25/* is the D-077 floor "
+    "measurement (conf 0.25, IoU>=0.5): never mAP, separate from full-curve AP."
+)
+
+
+def test_replication_wording_differs_but_both_declare_conf_replicates(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc = _rrun(
+        tmp_path,
+        _rep(notes=_notes(confidence_protocol=_CAND_PROSE)),
+        _rep_base(notes=_notes(confidence_protocol=_BASE_PROSE)),
+    )
+    out = capsys.readouterr().out
+    assert rc == 0 and "replicates" in out
+    assert "note: confidence_protocol wording differs" in out
+
+
+def test_replication_identical_wording_has_no_wording_note(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    assert _rrun(tmp_path, _rep()) == 0
+    assert "wording differs" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("side", ["candidate", "baseline"])
+def test_replication_record_not_declaring_full_curve_conf_is_invalid(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], side: str
+) -> None:
+    bad = _notes(confidence_protocol="conf=0.25 truncated")
+    rc = _rrun(tmp_path, _rep(notes=bad)) if side == "candidate" else _rrun(tmp_path, _rep(), _rep_base(notes=bad))
+    out = capsys.readouterr().out
+    assert rc == 2 and "invalid" in out and "full-curve" in out
