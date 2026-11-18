@@ -116,6 +116,52 @@ def test_dataset_mismatch_is_invalid() -> None:
     assert evaluate_candidate(BASE, cand).verdict == "invalid"
 
 
+def _with_digest(digest: object) -> str:
+    return json.dumps({"confidence_protocol": "conf=0.001 (Q28/D-067) for mAP", "label_digest": digest})
+
+
+def _digest_cand(base_digest: object, cand_digest: object) -> tuple[ExperimentRecord, ExperimentRecord]:
+    base = _record(BASE.exp_id, "SELF", 0.517, 0.3556, 0.7768, notes=_with_digest(base_digest))
+    return base, _record("EXP-20261014-01", base.exp_id, 0.527, 0.3756, 0.76, notes=_with_digest(cand_digest))
+
+
+def test_equal_label_digests_pass() -> None:
+    report = evaluate_candidate(*_digest_cand("a" * 64, "a" * 64))
+    assert report.ok and report.problems == ()
+
+
+def test_unequal_label_digests_are_invalid() -> None:
+    report = evaluate_candidate(*_digest_cand("a" * 64, "b" * 64))
+    assert report.verdict == "invalid"
+    assert any("label_digest differs" in p and "comparison void, [P§29.3]" in p for p in report.problems)
+
+
+@pytest.mark.parametrize("one_sided", ["baseline", "candidate"])
+def test_label_digest_on_one_side_only_is_no_problem(one_sided: str) -> None:
+    base = _record(BASE.exp_id, "SELF", 0.517, 0.3556, 0.7768)
+    cand = _record("EXP-20261014-01", base.exp_id, 0.527, 0.3756, 0.76)
+    if one_sided == "baseline":
+        base = _record(BASE.exp_id, "SELF", 0.517, 0.3556, 0.7768, notes=_with_digest("a" * 64))
+    else:
+        cand = _record("EXP-20261014-01", base.exp_id, 0.527, 0.3756, 0.76, notes=_with_digest("a" * 64))
+    report = evaluate_candidate(base, cand)
+    assert report.ok and report.problems == ()
+
+
+def test_label_digest_absent_on_both_sides_is_no_problem() -> None:
+    cand = _record("EXP-20261014-01", BASE.exp_id, 0.527, 0.3756, 0.76)
+    assert evaluate_candidate(BASE, cand).problems == ()
+
+
+@pytest.mark.parametrize("bad", ["A" * 64, "ab", "a" * 65, 123])
+@pytest.mark.parametrize("side", ["baseline", "candidate"])
+def test_malformed_label_digest_is_invalid(bad: object, side: str) -> None:
+    base, cand = _digest_cand(bad if side == "baseline" else "a" * 64, bad if side == "candidate" else "a" * 64)
+    report = evaluate_candidate(base, cand)
+    assert report.verdict == "invalid"
+    assert any(side in p and "label_digest" in p for p in report.problems)
+
+
 def test_non_completed_candidate_is_invalid() -> None:
     cand = _record("EXP-20261014-01", BASE.exp_id, 0.6, 0.6, 0.9, status="running", completed_at=None)
     report = evaluate_candidate(BASE, cand)

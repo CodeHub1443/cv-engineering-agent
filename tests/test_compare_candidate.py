@@ -224,6 +224,35 @@ def test_replication_hashes_absent_on_both_sides_are_ignored(tmp_path: Path) -> 
     assert _rrun(tmp_path, _rep(notes=bare), _rep_base(notes=bare)) == 0
 
 
+def test_replication_label_digest_equal_exits_0(tmp_path: Path) -> None:
+    n = _notes(label_digest="a" * 64)
+    assert _rrun(tmp_path, _rep(notes=n), _rep_base(notes=n)) == 0
+
+
+def test_replication_label_digest_different_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert _rrun(tmp_path, _rep(notes=_notes(label_digest="b" * 64)), _rep_base(notes=_notes(label_digest="a" * 64))) == 2
+    assert "label_digest" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("side", ["candidate", "baseline"])
+def test_replication_label_digest_one_sided_is_a_note_not_a_problem(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], side: str
+) -> None:
+    with_digest = _notes(label_digest="a" * 64)
+    rep, base = (_rep(notes=with_digest), _rep_base()) if side == "candidate" else (_rep(), _rep_base(notes=with_digest))
+    assert _rrun(tmp_path, rep, base) == 0
+    out = capsys.readouterr().out
+    assert "note: label_digest on one side only (older record predates digests)" in out and "problem" not in out
+
+
+@pytest.mark.parametrize("bad", ["A" * 64, "ab", 123])
+@pytest.mark.parametrize("side", ["candidate", "baseline"])
+def test_replication_malformed_label_digest_exits_2(tmp_path: Path, bad: object, side: str) -> None:
+    good, broken = _notes(label_digest="a" * 64), _notes(label_digest=bad)
+    rep, base = (_rep(notes=broken), _rep_base(notes=good)) if side == "candidate" else (_rep(notes=good), _rep_base(notes=broken))
+    assert _rrun(tmp_path, rep, base) == 2
+
+
 def test_replication_missing_record_exits_2_and_ledger_untouched(tmp_path: Path) -> None:
     db = _ledger(tmp_path, _rep_base())
     before = _digest(db)
