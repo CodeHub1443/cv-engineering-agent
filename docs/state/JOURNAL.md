@@ -2689,3 +2689,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 ## 2026-11-18 — correction to the I5 entry
 
 2026-11-18 correction to the I5 entry: the YOLO_AUTOINSTALL gate was verified on the Linux PC's ultralytics 8.4.138 (utils/__init__.py:72 env_bool, utils/checks.py:625, models/yolo/detect/val.py:590), not only 8.4.6; see Q70.
+
+## 2026-11-18 — R1 proposal written (#181; EXP-20261118-01)
+
+**Changed:** added `docs/experiments/EXP-20261118-01-proposal.md`, the R1 integrity replication through the EvalDatasetRef path (same protocol as EXP-20261004-01/EXP-20261116-01; judged by `compare_candidate.py --replication`). Docs only; no GPU, no code.
+
+**Why:** prove I3–I5 and I4a changed no measurement, and obtain the first ledger row carrying `label_digest` (closes Q69).
+
+**Learned:** the run directory is now `candidate_run_name(exp_id, imgsz, dataset_id)` (evaluation_records.py:207), and the commit gate (:435) needs run and record at the same HEAD, so the proposal fixes the order: merge I4b, merge this PR, pull, clean status, run, record, judge. Expected notes `confidence_protocol wording differs` and `label_digest on one side only` are not defects.
+
+**Left open:** the run itself (owner/Linux PC). DECISIONS, STATUS and OPEN_QUESTIONS untouched (I4b owns them this round).
