@@ -9,10 +9,11 @@ ledger. Exit codes: 0 meets the (provisional, D-113) criteria; 1 judged and fail
 judged (invalid evidence, a missing row, an unreadable ledger).
 
 ``--replication`` (Q72) is an integrity check, not an acceptance judgement: both rows must share
-dataset_version and identical protocol fields (precision, input_resolution, model, confidence_protocol;
-hardware and recorded input hashes where present), then every val_metrics key in either row is compared
-exactly. Exit 0 "replicates" (same keys, every delta == 0.0); 1 "differs" (a delta, a one-sided key,
-NaN); 2 "invalid" (missing row, dataset_version or protocol mismatch). Read-only.
+dataset_version and identical precision, input_resolution and model (plus hardware and recorded input
+hashes where present), and both must declare the full-curve conf=0.001 (the protocol, judged as in
+acceptance.py; differing confidence_protocol wording is only noted). Then every val_metrics key in either
+row is compared exactly. Exit 0 "replicates" (same keys, every delta == 0.0); 1 "differs" (a delta, a one-sided key,
+NaN); 2 "invalid" (missing row, dataset_version, protocol mismatch or undeclared conf). Read-only.
 """
 
 from __future__ import annotations
@@ -25,7 +26,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from cv_agent.experiments.acceptance import AcceptanceReport, evaluate_candidate  # noqa: E402
+from cv_agent.experiments.acceptance import (  # noqa: E402
+    FULL_CURVE_CONF,
+    AcceptanceReport,
+    declares_full_curve_protocol,
+    evaluate_candidate,
+)
 from cv_agent.experiments.models import ExperimentRecord  # noqa: E402
 from cv_agent.experiments.store import ExperimentLedgerError, open_ledger  # noqa: E402
 
@@ -79,8 +85,9 @@ def _protocol_problems(base: ExperimentRecord, cand: ExperimentRecord) -> list[s
     for name in ("precision", "input_resolution", "model"):
         if getattr(base, name) != getattr(cand, name):
             problems.append(f"{name}: {getattr(base, name)!r} != {getattr(cand, name)!r}")
-    if _notes(base).get("confidence_protocol") != _notes(cand).get("confidence_protocol"):
-        problems.append("confidence_protocol differs")
+    for role, record in (("baseline", base), ("candidate", cand)):
+        if not declares_full_curve_protocol(record):
+            problems.append(f"{role} {record.exp_id} does not declare the full-curve protocol conf={FULL_CURVE_CONF} (Q28/D-067)")
     # Optional evidence: absent on both sides is ignored; on one side only, or different, is invalid.
     optional: list[tuple[str, object, object]] = [("hardware", base.hardware, cand.hardware)]
     optional += [(f"input hash {n}", _input_hash(base, n), _input_hash(cand, n)) for n in INPUT_HASHES]
@@ -99,6 +106,8 @@ def replication_verdict(base: ExperimentRecord, cand: ExperimentRecord) -> tuple
         return "invalid", [f"problem: {p}" for p in problems]
     bm, cm = base.val_metrics or {}, cand.val_metrics or {}
     lines: list[str] = []
+    if _notes(base).get("confidence_protocol") != _notes(cand).get("confidence_protocol"):
+        lines.append("note: confidence_protocol wording differs (both declare the full-curve protocol)")
     differing: list[str] = []
     for key in sorted(bm.keys() | cm.keys()):
         if key not in bm or key not in cm:
