@@ -2627,3 +2627,13 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Learned:** MEVA person boxes cover only people involved in an annotated activity, so MEVA is unsuitable for precision. testVid1.mp4 is the in-repo fixture (D-126). Dataset facts that could not be checked against a primary source are marked UNVERIFIED in the research note.
 
 **Left open:** Q73 to Q76; ADR-0025 acceptance by the owner; issues I2 to I10.
+
+## 2026-11-16 — I2: compare_candidate --replication, closes Q72 (feature/claude/compare-replication)
+
+**Changed:** `scripts/compare_candidate.py` gains a read-only `--replication` mode; 13 new tests in `tests/test_compare_candidate.py`; Q72 struck through. Default candidate mode untouched. No GPU, key, network or LLM call.
+
+**Why:** the candidate comparer returned `invalid` for a same-configuration replication (Q72). Replication needs an exact integrity check, not an acceptance judgement.
+
+**Learned:** the ledger refuses NaN in `val_metrics`, so the NaN rule is tested on the pure `replication_verdict` function by bypassing record validation. Protocol fields compared: precision, input_resolution, model, confidence_protocol, plus hardware and the recorded input hashes (weights, data yaml, val list) where present: one side only or different is `invalid`, absent on both is ignored.
+
+**Left open:** not run against the real ledger (none on this Windows checkout); the owner verifies EXP-20261116-01 vs EXP-20261004-01 on the Linux PC after merge. DECISIONS and STATUS untouched (I1 owns them this round).
