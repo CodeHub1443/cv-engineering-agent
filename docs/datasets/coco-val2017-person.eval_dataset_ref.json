@@ -1,0 +1,13 @@
+{
+  "dataset_id": "coco-val2017",
+  "version": "5k",
+  "images_dir": "images/val2017",
+  "labels_dir": "labels/val2017",
+  "list_file": "val2017.txt",
+  "target_class": 0,
+  "ignore_classes": [],
+  "expected_images": 5000,
+  "expected_instances": 10777,
+  "ledger_label": "coco-val2017-5k (val2017.txt sha256 {list_sha256})",
+  "label_digest": null
+}

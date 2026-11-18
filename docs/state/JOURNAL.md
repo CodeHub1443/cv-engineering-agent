@@ -2646,6 +2646,23 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 
 **Left open:** the owner re-runs EXP-20261116-01 vs EXP-20261004-01 on the Linux PC after merge (no ledger copy on this checkout).
 
+## 2026-11-18 — I3: EvalDatasetRef implementation and label digest (feature/claude/d043-i3-eval-ref)
+
+**Changed:** `cv_agent/datasets/eval_ref.py` (stdlib only, no callers outside tests): field validation, a strict spec loader, a ledger-label template that accepts only `{list_sha256}`, and `compute_label_digest` exactly as ADR-0025 §3.3. New `docs/datasets/coco-val2017-person.eval_dataset_ref.json` and a `.gitattributes` line (`docs/datasets/*.json text eol=lf`). `tests/test_eval_ref.py` grew from 3 to 83 tests, written first and shown failing (76 failed against the stubs). Issue #173, ADR-0025 sections 3.1 to 3.4. No GPU, download, video or `.env` access.
+
+**Why:** I1 fixed the interface; I4 needs a working reference to wire into the wrapper, recorder and `verify_run`. Q69's design (a label fingerprint) is now code; nothing records or compares it yet.
+
+**Learned:**
+- The full `val2017.txt` sha256 is not in `EXPERIMENTS.md` (prefix `4d010d0d…` only, line 462) or in `evaluation_records.py` (only the f-string). The full value is in `EXP-20261116-01-proposal.md:14` (the owner's CPU check, equal to the baseline's); the test uses it, checks the prefix, and reads the recorder's f-string as text so the COCO label stays byte for byte equal to the existing `dataset_version`.
+- `core.autocrlf=true` here and there is no `.gitattributes`, so a JSON spec would check out as CRLF on Windows and LF on Linux and `spec_sha256` would differ. The new `.gitattributes` rule makes the bytes LF everywhere.
+- Fail-closed choices beyond the brief: a UTF-8 BOM in a label file or the list file raises (the owner's addition), as do a duplicate JSON key, NaN, a repeated image stem, and a path leaving the dataset root. Duplicate label lines both count in the digest.
+- A spec's `ignore_classes` is refused if unsorted, never sorted silently.
+
+**Owner step on the Linux PC:** copy `docs/datasets/coco-val2017-person.eval_dataset_ref.json` to `<coco_root>/eval_dataset_ref.json` byte for byte (a git checkout or `scp`, never retyped). The two files must have the same sha256; `spec_sha256` is the hash of those bytes and goes in the run notes.
+
+**Left open:** `label_digest` is `null` in the COCO spec (the labels are on the Linux PC); recording it in `run.json` and the ledger and comparing it in the like-for-like gate is I4. Count checks (`expected_images`, `expected_instances`) are I4 too. Linux CI not yet seen.
+
+**Size:** 520 added (329 tests, ~170 production); owner accepted a one-time exception to the ~400-line rule (2026-11-18) rather than separating tests from code.
 
 ## 2026-11-18 — I5 measured-run hygiene (#176; Q70, Q71; ADR-0017 amendment 2026-11-16 item 3)
 
