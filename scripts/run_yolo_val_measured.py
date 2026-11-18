@@ -69,7 +69,8 @@ MODEL_NAME = "yolo11n.pt"
 DATA_YAML_NAME = "coco-person-val.yaml"
 VRAM_POLL_SECONDS = 1.0
 # Ultralytics' auto-install gate: `AUTOINSTALL = str(os.getenv("YOLO_AUTOINSTALL", True)).lower() == "true"`
-# (ultralytics/utils/__init__.py:45, read at utils/checks.py:472), so any value but "true" disables it (Q70).
+# (ultralytics/utils/__init__.py:45, read at utils/checks.py:472; ultralytics 8.4.6 (Windows); 8.4.138 to be checked on Linux),
+# so any value but "true" disables it (Q70).
 AUTOINSTALL_ENV = "YOLO_AUTOINSTALL"
 ENVIRONMENT_KEYS = ("python_version", "torch_version", "torch_cuda_version", "ultralytics_version", "pip_freeze_sha256")
 
