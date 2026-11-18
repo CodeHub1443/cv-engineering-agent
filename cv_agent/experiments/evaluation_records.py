@@ -28,6 +28,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeGuard
 
+from cv_agent.datasets.eval_ref import (
+    EvalDatasetRef,
+    EvalDatasetRefError,
+    compute_label_digest,
+    eval_items,
+    load_eval_dataset_ref,
+)
 from cv_agent.experiments.detection_metrics import (
     MAP_PROTOCOL_CONF,
     assert_full_curve,
@@ -108,14 +115,6 @@ class RecordError(Exception):
 
 
 @dataclass(frozen=True)
-class DatasetExpectation:
-    """Counts the dataset must have. Defaults are coco-val2017-5k; tests use small datasets."""
-
-    images: int = 5000
-    gt_persons: int = 10777
-
-
-@dataclass(frozen=True)
 class VerifiedRun:
     """A run whose artifacts passed every check. Only this type may be turned into a record."""
 
@@ -150,6 +149,10 @@ class VerifiedRun:
     vram_baseline_mib: int | None
     vram_peak_mib: int
     ram_peak_mib: float
+    dataset_id: str
+    dataset_version: str
+    label_digest: str
+    spec_sha256: str
     quantize: int | None = QUANTIZE
     environment: dict[str, str] | None = None
     vram_peak_above_idle_mib: int | None = None
@@ -186,9 +189,34 @@ def candidate_problems(exp_id: str, imgsz: int) -> list[str]:
     return problems
 
 
-def candidate_run_name(exp_id: str, imgsz: int) -> str:
-    """The run directory name for a candidate: derived from the exp id, never free text."""
-    return f"{exp_id.lower()}-yolo11n-coco-val2017-imgsz{imgsz}-conf0001"
+_DATASET_FRAGMENT = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
+
+
+def dataset_name_fragment(dataset_id: str) -> str:
+    """The run-name fragment for a dataset: its id, if it is a safe path component (COCO: coco-val2017)."""
+    if not isinstance(dataset_id, str) or not _DATASET_FRAGMENT.match(dataset_id):
+        raise ValueError(f"dataset_id {dataset_id!r} cannot be a run-name fragment (lowercase, digits, '-' and '.')")
+    return dataset_id
+
+
+def series_run_name(imgsz: int, dataset_id: str, *, fp32: bool = False) -> str:
+    """The EXP-20261004 series run directory name for a dataset."""
+    return f"e1-yolo11n-{dataset_name_fragment(dataset_id)}-imgsz{imgsz}-conf0001{'-fp32' if fp32 else ''}"
+
+
+def candidate_run_name(exp_id: str, imgsz: int, dataset_id: str) -> str:
+    """The run directory name for a candidate: derived from the exp id and the dataset id, never free text."""
+    return f"{exp_id.lower()}-yolo11n-{dataset_name_fragment(dataset_id)}-imgsz{imgsz}-conf0001"
+
+
+def scoring_problems(ref: EvalDatasetRef) -> list[str]:
+    """Why detection_metrics cannot score this reference yet. It scores class 0 only and has no ignore rule (I6)."""
+    problems: list[str] = []
+    if ref.target_class != 0:
+        problems.append(f"target_class {ref.target_class} is not scorable: detection_metrics scores class 0 only (I6)")
+    if ref.ignore_classes:
+        problems.append("ignore_classes are not scorable: detection_metrics has no ignore rule yet (I6)")
+    return problems
 
 
 def sha256_file(path: Path) -> str:
@@ -338,12 +366,14 @@ def verify_run(
     run_dir: Path,
     *,
     imgsz: int,
-    coco_root: Path,
+    dataset_spec: Path,
     head_commit: str,
-    dataset: DatasetExpectation = DatasetExpectation(),
     quantize: int | None = QUANTIZE,
 ) -> VerifiedRun:
     """Verify one run directory end to end. Raises RecordError listing every problem found.
+
+    ``dataset_spec`` is the ``eval_dataset_ref.json`` at the dataset root (ADR-0025): layout, list file,
+    expected counts and target class come from it, and the label digest is recomputed from the files.
 
     ``quantize`` is the protocol the run must have been executed under: 16 for the FP16 series,
     None for the FP32 control (ADR-0018).
@@ -366,13 +396,23 @@ def verify_run(
     if not isinstance(run, dict) or run.get("schema") != RUN_SCHEMA:
         raise RecordError([f"run.json schema is not {RUN_SCHEMA}"])
 
+    try:
+        ref = load_eval_dataset_ref(Path(dataset_spec))
+    except EvalDatasetRefError as exc:
+        raise RecordError([f"dataset spec: {exc}"]) from exc
+    dataset_root = Path(dataset_spec).resolve().parent
+    problems.extend(scoring_problems(ref))
+    for key, expected_value in (("spec_sha256", ref.spec_sha256), ("dataset_id", ref.dataset_id)):
+        if run.get(key) != expected_value:
+            problems.append(f"run.json {key}={run.get(key)!r}, the dataset spec has {expected_value!r}")
+
     protocol = {
         "imgsz": imgsz,
         "conf": MAP_PROTOCOL_CONF,
         "quantize": quantize,
         "batch": 1,
         "device": "0",
-        "classes": [0],
+        "classes": [ref.target_class],
         "model": MODEL_NAME_EXPECTED,
     }
     for key, expected in protocol.items():
@@ -419,10 +459,13 @@ def verify_run(
     model_path = Path(str(run.get("model_path", "")))
     data_yaml = Path(str(run.get("data_yaml", "")))
     val_txt = Path(str(run.get("val_txt", "")))
+    expected_list = (dataset_root / ref.list_file).resolve()
+    if val_txt.resolve() != expected_list:
+        problems.append(f"run.json val_txt {str(val_txt)!r} is not the dataset spec's list file {str(expected_list)!r}")
     for label, path, key in (
         ("weights", model_path, "model_sha256"),
         ("data yaml", data_yaml, "data_yaml_sha256"),
-        ("val2017.txt", val_txt, "val_txt_sha256"),
+        ("val list", val_txt, "val_txt_sha256"),
     ):
         if not path.is_file():
             problems.append(f"{label} is missing: {path}")
@@ -446,10 +489,10 @@ def verify_run(
         map50, map50_95 = float(row.group(6)), float(row.group(7))
         if not (0.0 <= map50 <= 1.0 and 0.0 <= map50_95 <= 1.0):
             problems.append("val.log mAP values are outside [0, 1]")
-        if images != dataset.images or instances != dataset.gt_persons:
+        if images != ref.expected_images or instances != ref.expected_instances:
             problems.append(
                 f"val.log counts images={images} instances={instances}; "
-                f"dataset expects {dataset.images}/{dataset.gt_persons}"
+                f"dataset expects {ref.expected_images}/{ref.expected_instances}"
             )
     speed = _SPEED.search(text)
     if speed is None:
@@ -478,27 +521,40 @@ def verify_run(
             problems.append(str(exc))
 
     # ── dataset counts and per-stratum metrics (only when everything above passed) ──
-    image_dir = coco_root / "images" / "val2017"
-    label_dir = coco_root / "labels" / "val2017"
-    if not image_dir.is_dir() or not label_dir.is_dir():
-        problems.append(f"dataset images/labels not found under {coco_root}")
+    if not (dataset_root / ref.images_dir).is_dir() or not (dataset_root / ref.labels_dir).is_dir():
+        problems.append(f"dataset images/labels not found under {dataset_root}")
     if problems:
         raise RecordError(problems)
     commit_text = str(run["commit"])
 
     size_by_stem: dict[str, tuple[int, int]] = {}
     gt_by_stem = {}
-    for image in sorted(image_dir.glob("*.jpg")):
-        width, height = jpeg_size(image)
-        size_by_stem[image.stem] = (width, height)
-        gt_by_stem[image.stem] = load_person_gt(label_dir / f"{image.stem}.txt", width, height)
+    try:
+        items = eval_items(ref, dataset_root)
+        label_digest = compute_label_digest(ref, dataset_root)
+        for stem, image, label_path in items:
+            width, height = jpeg_size(image)
+            size_by_stem[stem] = (width, height)
+            gt_by_stem[stem] = load_person_gt(label_path, width, height)
+    except (EvalDatasetRefError, OSError, ValueError) as exc:
+        raise RecordError([f"dataset under {dataset_root} is unreadable: {exc}"]) from exc
     n_images = len(size_by_stem)
     n_gt = sum(len(v) for v in gt_by_stem.values())
-    if n_images != dataset.images or n_gt != dataset.gt_persons:
+    if n_images != ref.expected_images or n_gt != ref.expected_instances:
         raise RecordError(
-            [f"dataset under {coco_root} has {n_images} images / {n_gt} GT persons; "
-             f"expected {dataset.images} / {dataset.gt_persons}"]
+            [f"dataset under {dataset_root} has {n_images} images / {n_gt} GT persons; "
+             f"expected {ref.expected_images} / {ref.expected_instances}"]
         )
+    digest_problems: list[str] = []
+    if run.get("label_digest") != label_digest:
+        digest_problems.append(
+            f"run.json label_digest={run.get('label_digest')!r} != the labels now on disk ({label_digest}): "
+            "labels changed since the run, or the run recorded none"
+        )
+    if ref.label_digest is not None and ref.label_digest != label_digest:
+        digest_problems.append(f"labels on disk ({label_digest}) differ from the spec's label_digest ({ref.label_digest})")
+    if digest_problems:
+        raise RecordError(digest_problems)
 
     full = load_person_predictions(predictions, MAP_PROTOCOL_CONF)
     ap50: dict[str, float] = {}
@@ -563,6 +619,10 @@ def verify_run(
         vram_baseline_mib=run["vram_baseline_mib"] if isinstance(run.get("vram_baseline_mib"), int) else None,
         vram_peak_mib=int(vram_peak or 0),
         quantize=quantize,
+        dataset_id=str(ref.dataset_id),
+        dataset_version=ref.render_ledger_label(list_sha256=str(run["val_txt_sha256"])),
+        label_digest=label_digest,
+        spec_sha256=ref.spec_sha256,
         ram_peak_mib=ram_peak,
         environment=run.get("environment") if isinstance(run.get("environment"), dict) else None,
         vram_peak_above_idle_mib=above if isinstance(above := run.get("vram_peak_above_idle_mib"), int) else None,
@@ -642,6 +702,9 @@ def build_record(
         **({"environment": run.environment} if run.environment is not None else {}),
         "omitted_metrics": list(run.omitted_strata),
         "predictions_min_person_score": run.min_person_score,
+        "dataset_ref": f"{run.dataset_id} (version label {run.dataset_version})",
+        "label_digest": run.label_digest,
+        "spec_sha256": run.spec_sha256,
         "artifacts": run.artifacts,
     }
     target = run.gpu_name if not run.driver_version else f"{run.gpu_name}, driver {run.driver_version}"
@@ -659,7 +722,7 @@ def build_record(
             f"yolo11n ({run.model_name} sha256 {run.model_sha256}, "
             f"{run.params:,} params, {run.gflops} GFLOPs as reported by ultralytics)"
         ),
-        dataset_version=f"coco-val2017-5k (val2017.txt sha256 {run.val_txt_sha256})",
+        dataset_version=run.dataset_version,
         input_resolution=f"{run.imgsz}x{run.imgsz}",
         batch_size=1,
         precision=precision_label(run.quantize),

@@ -1,12 +1,15 @@
 """One controlled `yolo val` run: the EXP-20261004-01 series or one owner-fixed candidate.
 
-Runs YOLO11n on COCO val2017 persons at conf=0.001 (Q28), batch=1, device 0, quantize=16, with
-only --imgsz varying. It writes the artifacts that scripts/record_evaluation_runs.py verifies:
+Runs YOLO11n on the dataset named by --dataset-spec (the eval_dataset_ref.json at the dataset root,
+ADR-0025) at conf=0.001 (Q28), batch=1, device 0, quantize=16, with only --imgsz varying. The spec
+gives the layout, expected counts and target class; --data-yaml is the ultralytics yaml, which must
+agree with it. It writes the artifacts that scripts/record_evaluation_runs.py verifies:
 
     <project>/<name>/predictions.json   written by ultralytics
     <project>/<name>.val.log            full stdout+stderr of the run
     <project>/<name>.run.json           how the run was executed (exit code, timing, hashes,
-                                        approval reference, GPU identity, peak VRAM, peak RAM)
+                                        approval reference, GPU identity, peak VRAM, peak RAM,
+                                        dataset id, spec sha256, label digest)
 
 Series mode (no --exp-id): --imgsz is one of 640/960/1280 (measurement-only, D-069). Candidate mode
 (--exp-id EXP-YYYYMMDD-NN): one owner-fixed candidate per approved proposal, imgsz a multiple of 32 in
@@ -39,6 +42,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from cv_agent.datasets.eval_ref import (  # noqa: E402
+    EvalDatasetRef,
+    EvalDatasetRefError,
+    compute_label_digest,
+    load_eval_dataset_ref,
+)
 from cv_agent.execution.jobs.runtimes.yolo_eval import (  # noqa: E402
     DEFAULT_YOLO_EXECUTABLE,
     build_command,
@@ -53,6 +62,8 @@ from cv_agent.experiments.evaluation_records import (  # noqa: E402
     foreign_process_seen,
     is_exempt_process,
     precision_label,
+    scoring_problems,
+    series_run_name,
 )
 from cv_agent.experiments.provenance import (  # noqa: E402
     ProvenanceError,
@@ -64,9 +75,7 @@ APPROVED_IMGSZ = (640, 960, 1280)
 CONF = 0.001
 BATCH = 1
 DEVICE = "0"
-CLASSES = [0]
 MODEL_NAME = "yolo11n.pt"
-DATA_YAML_NAME = "coco-person-val.yaml"
 VRAM_POLL_SECONDS = 1.0
 # Ultralytics' auto-install gate: `AUTOINSTALL = str(os.getenv("YOLO_AUTOINSTALL", True)).lower() == "true"`
 # (ultralytics/utils/__init__.py:45, read at utils/checks.py:472; ultralytics 8.4.6 (Windows); 8.4.138 to be checked on Linux),
@@ -79,17 +88,19 @@ FP32_CONTROL_IMGSZ = 640
 PRECISIONS = {"fp16": QUANTIZE, "fp32": None}
 
 
-def run_name(imgsz: int, quantize: int | None = QUANTIZE, exp_id: str | None = None) -> str:
+def run_name(imgsz: int, dataset_id: str, quantize: int | None = QUANTIZE, exp_id: str | None = None) -> str:
+    """The run directory name; the dataset fragment is the reference's id (COCO: coco-val2017)."""
     if exp_id is not None:
-        return candidate_run_name(exp_id, imgsz)
-    suffix = "" if quantize is not None else "-fp32"
-    return f"e1-yolo11n-coco-val2017-imgsz{imgsz}-conf0001{suffix}"
+        return candidate_run_name(exp_id, imgsz, dataset_id)
+    return series_run_name(imgsz, dataset_id, fp32=quantize is None)
 
 
 def build_argv(
     imgsz: int,
     *,
     state_root: Path,
+    ref: EvalDatasetRef,
+    data_yaml: Path,
     executable: str = DEFAULT_YOLO_EXECUTABLE,
     quantize: int | None = QUANTIZE,
     exp_id: str | None = None,
@@ -103,12 +114,12 @@ def build_argv(
     """
     inputs = {
         "model": str(state_root / "models" / MODEL_NAME),
-        "data": str(state_root / "evaluations" / DATA_YAML_NAME),
+        "data": str(data_yaml),
         "output_dir": str(state_root / "evaluations"),
-        "run_name": run_name(imgsz, quantize, exp_id),
+        "run_name": run_name(imgsz, ref.dataset_id, quantize, exp_id),
         "conf": CONF,
         "imgsz": imgsz,
-        "classes": CLASSES,
+        "classes": [ref.target_class],
         "device": DEVICE,
         "batch": BATCH,
         "yolo_executable": executable,
@@ -227,16 +238,65 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def read_val_split(data_yaml: Path) -> Path:
-    """The absolute val list path, from the yaml's ``path`` and ``val`` keys (no YAML library needed)."""
+def _parse_names(rest: str, block: list[str]) -> dict[int, str]:
+    """The ``names`` value: a block mapping (``0: person``), a flow list (``[person]``) or a block list (``- person``)."""
+    if rest:
+        if not (rest.startswith("[") and rest.endswith("]")):
+            raise ValueError("names must be a mapping or a list of class names")
+        items = [part.strip().strip("'\"") for part in rest[1:-1].split(",")]
+        if not items or not all(items):
+            raise ValueError("names list has an empty entry")
+        return dict(enumerate(items))
+    entries = [line.strip() for line in block if line.strip() and not line.strip().startswith("#")]
+    if not entries:
+        raise ValueError("names is empty")
+    if all(entry.startswith("- ") for entry in entries):
+        return dict(enumerate(entry[2:].strip().strip("'\"") for entry in entries))
+    names: dict[int, str] = {}
+    for entry in entries:
+        index, sep, label = entry.partition(":")
+        if not sep or not index.strip().isdigit() or not label.strip() or int(index) in names:
+            raise ValueError(f"names entry {entry!r} is not a unique 'N: name' or '- name' line")
+        names[int(index)] = label.strip()
+    return names
+
+
+def read_data_yaml(data_yaml: Path) -> tuple[Path, Path, dict[int, str]]:
+    """(dataset root, val list path, class names) from the ultralytics yaml, with no YAML library."""
+    lines = data_yaml.read_text(encoding="utf-8").splitlines()
     keys: dict[str, str] = {}
-    for line in data_yaml.read_text(encoding="utf-8").splitlines():
-        if line.startswith(("path:", "val:")):
+    names_at: int | None = None
+    for index, line in enumerate(lines):
+        if line.startswith(("path:", "val:", "names:")):
             key, _, value = line.partition(":")
             keys[key] = value.strip()
-    if "path" not in keys or "val" not in keys:
-        raise ValueError(f"{data_yaml} must define 'path:' and 'val:'")
-    return Path(keys["path"]) / keys["val"]
+            if key == "names":
+                names_at = index
+    if "path" not in keys or "val" not in keys or names_at is None:
+        raise ValueError(f"{data_yaml} must define 'path:', 'val:' and 'names:'")
+    block: list[str] = []
+    for line in lines[names_at + 1 :]:
+        if line[:1] not in (" ", "\t") and line.strip():
+            break
+        block.append(line)
+    names = _parse_names(keys["names"], block)
+    root = Path(keys["path"])
+    return root, root / keys["val"], names
+
+
+def data_yaml_problems(
+    ref: EvalDatasetRef, dataset_root: Path, yaml_root: Path, val: Path, names: dict[int, str]
+) -> list[str]:
+    """How the ultralytics yaml disagrees with the reference. Empty means it agrees."""
+    problems: list[str] = []
+    if yaml_root.resolve() != dataset_root:
+        problems.append(f"data yaml path {str(yaml_root)!r} is not the dataset root {str(dataset_root)!r}")
+    expected = (dataset_root / ref.list_file).resolve()
+    if val.resolve() != expected:
+        problems.append(f"data yaml val {str(val)!r} is not the spec's list file {str(expected)!r}")
+    if ref.target_class not in names:
+        problems.append(f"data yaml names {sorted(names)} do not contain target_class {ref.target_class}")
+    return problems
 
 
 def gpu_identity() -> dict[str, str | int | None]:
@@ -331,6 +391,20 @@ def main(argv: list[str] | None = None) -> int:
         default="fp16",
         help="fp16 (quantize=16, the EXP-20261004-01 series) or fp32 (quantize unset, the ADR-0018 control)",
     )
+    parser.add_argument(
+        "--dataset-spec",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="eval_dataset_ref.json at the dataset root (ADR-0025): layout, counts and target class",
+    )
+    parser.add_argument(
+        "--data-yaml",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="the ultralytics data yaml; its path, val and names must agree with the spec",
+    )
     args = parser.parse_args(argv)
     approval_ref = args.approval_ref.strip()
     if not approval_ref:
@@ -359,9 +433,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 2
 
+    try:
+        ref = load_eval_dataset_ref(args.dataset_spec)
+        name = run_name(args.imgsz, ref.dataset_id, quantize, exp_id)
+    except (EvalDatasetRefError, ValueError) as exc:
+        print(f"REFUSED: dataset spec: {exc}", file=sys.stderr)
+        return 2
+    unscorable = scoring_problems(ref)
+    if unscorable:
+        print(f"REFUSED: {'; '.join(unscorable)}", file=sys.stderr)
+        return 2
+    dataset_root = args.dataset_spec.resolve().parent
+
     state = repository_state_root()
     project = state / "evaluations"
-    name = run_name(args.imgsz, quantize, exp_id)
     run_dir = project / name
     run_json = project / f"{name}.run.json"
     val_log = project / f"{name}.val.log"
@@ -371,14 +456,27 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     model = state / "models" / MODEL_NAME
-    data_yaml = state / "evaluations" / DATA_YAML_NAME
+    data_yaml = args.data_yaml
     for path in (model, data_yaml):
         if not path.is_file():
             print(f"REFUSED: required input is missing: {path}", file=sys.stderr)
             return 2
-    val_txt = read_val_split(data_yaml)
+    try:
+        yaml_root, val_txt, names = read_data_yaml(data_yaml)
+    except (OSError, ValueError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    mismatch = data_yaml_problems(ref, dataset_root, yaml_root, val_txt, names)
+    if mismatch:
+        print(f"REFUSED: {'; '.join(mismatch)}", file=sys.stderr)
+        return 2
     if not val_txt.is_file():
         print(f"REFUSED: val list is missing: {val_txt}", file=sys.stderr)
+        return 2
+    try:
+        label_digest = compute_label_digest(ref, dataset_root)
+    except EvalDatasetRefError as exc:
+        print(f"REFUSED: cannot fingerprint the labels: {exc}", file=sys.stderr)
         return 2
 
     # Inputs are hashed before the run and again by the writer, so a swap in between is caught.
@@ -387,7 +485,7 @@ def main(argv: list[str] | None = None) -> int:
         "data_yaml_sha256": sha256_file(data_yaml),
         "val_txt_sha256": sha256_file(val_txt),
     }
-    command = build_argv(args.imgsz, state_root=state, quantize=quantize, exp_id=exp_id)
+    command = build_argv(args.imgsz, state_root=state, ref=ref, data_yaml=data_yaml, quantize=quantize, exp_id=exp_id)
     print(f"running from commit {commit}")
     print("command:", " ".join(command))
 
@@ -434,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
         "conf": CONF,
         "batch": BATCH,
         "device": DEVICE,
-        "classes": CLASSES,
+        "classes": [ref.target_class],
         "quantize": quantize,
         "precision_requested": precision_label(quantize),
         "approval_ref": approval_ref,
@@ -442,6 +540,10 @@ def main(argv: list[str] | None = None) -> int:
         "model_path": str(model),
         "data_yaml": str(data_yaml),
         "val_txt": str(val_txt),
+        "dataset_spec": str(args.dataset_spec),
+        "dataset_id": ref.dataset_id,
+        "spec_sha256": ref.spec_sha256,
+        "label_digest": label_digest,
         **hashes,
         "run_dir": str(run_dir),
         "command": command,

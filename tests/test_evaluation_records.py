@@ -24,23 +24,32 @@ from cv_agent.experiments.evaluation_records import (
     RESERVED_SERIES_IDS,
     RUN_SCHEMA,
     SUCCESS_CRITERIA,
-    DatasetExpectation,
     RecordError,
     build_record,
     candidate_problems,
     candidate_run_name,
     preflight_new_ids,
     run_paths,
+    scoring_problems,
+    series_run_name,
     sha256_file,
     verify_run,
     write_records,
 )
+from cv_agent.datasets.eval_ref import compute_label_digest, load_eval_dataset_ref
 from cv_agent.experiments.models import ExperimentRecord
 from cv_agent.experiments.store import ExperimentLedgerError, open_ledger
 
 HEAD = "c" * 40
 OTHER = "d" * 40
-EXPECT = DatasetExpectation(images=2, gt_persons=2)
+COCO_SPEC_PATH = Path(__file__).resolve().parent.parent / "docs" / "datasets" / "coco-val2017-person.eval_dataset_ref.json"
+COCO_LIST_SHA = "4d010d0d7200a7b9176acd164d36c9769350a2e41661152f2cf8ba16c9e2aa73"
+FIXTURE_SPEC = {  # the COCO spec with the counts of the two-image fixture
+    **json.loads(COCO_SPEC_PATH.read_text(encoding="utf-8")),
+    "expected_images": 2,
+    "expected_instances": 2,
+}
+DS_DUMMY = ["--dataset-spec", "spec.json", "--data-yaml", "data.yaml"]  # for refusals that happen before any load
 STEM_A = "000000000001"
 STEM_B = "000000000002"
 
@@ -51,8 +60,14 @@ def _jpeg(width: int, height: int) -> bytes:
     return b"\xff\xd8" + app0 + sof0 + b"\xff\xd9"
 
 
-def _coco(root: Path, *, small_gt: bool = True) -> Path:
-    """Two 100x100 images. A has one small person (4x4 px) unless small_gt is False. B has one large."""
+def _spec(coco: Path) -> Path:
+    return coco / "eval_dataset_ref.json"
+
+
+def _coco(root: Path, *, small_gt: bool = True, spec: dict | None = None, pin_digest: bool = False) -> Path:
+    """Two 100x100 images. A has one small person (4x4 px) unless small_gt is False. B has one large.
+
+    Also writes the dataset's eval_dataset_ref.json (the COCO spec with the fixture's counts)."""
     (root / "images" / "val2017").mkdir(parents=True)
     (root / "labels" / "val2017").mkdir(parents=True)
     for stem in (STEM_A, STEM_B):
@@ -60,7 +75,12 @@ def _coco(root: Path, *, small_gt: bool = True) -> Path:
     a_size = 0.04 if small_gt else 0.5  # normalized width/height: 0.04 -> 4x4 px (small)
     (root / "labels" / "val2017" / f"{STEM_A}.txt").write_text(f"0 0.5 0.5 {a_size} {a_size}\n")
     (root / "labels" / "val2017" / f"{STEM_B}.txt").write_text("0 0.5 0.5 0.5 0.5\n")
-    (root / "val2017.txt").write_text("images/val2017/a.jpg\n")
+    (root / "val2017.txt").write_text(f"images/val2017/{STEM_A}.jpg\nimages/val2017/{STEM_B}.jpg\n")
+    fields = {**FIXTURE_SPEC, **(spec or {})}
+    _spec(root).write_text(json.dumps(fields, indent=2), encoding="utf-8")
+    if pin_digest:
+        fields["label_digest"] = compute_label_digest(load_eval_dataset_ref(_spec(root)), root)
+        _spec(root).write_text(json.dumps(fields, indent=2), encoding="utf-8")
     return root
 
 
@@ -92,6 +112,8 @@ def make_run(
     quantize: int | None = 16,
     name: str | None = None,
     series: str = "EXP-20261004-01",
+    spec: dict | None = None,
+    pin_digest: bool = False,
 ) -> tuple[Path, Path]:
     """Build <tmp>/state/evaluations/<name>/ plus .val.log and .run.json. Returns (run_dir, coco_root)."""
     state = tmp / "state"
@@ -99,7 +121,8 @@ def make_run(
     models = state / "models"
     evals.mkdir(parents=True, exist_ok=True)
     models.mkdir(parents=True, exist_ok=True)
-    coco = _coco(tmp / "coco", small_gt=small_gt)
+    coco = _coco(tmp / "coco", small_gt=small_gt, spec=spec, pin_digest=pin_digest)
+    ref = load_eval_dataset_ref(_spec(coco))
     weights = models / "yolo11n.pt"
     weights.write_bytes(b"weights-bytes")
     data_yaml = evals / "coco-person-val.yaml"
@@ -135,6 +158,10 @@ def make_run(
         "model_path": str(weights),
         "data_yaml": str(data_yaml),
         "val_txt": str(coco / "val2017.txt"),
+        "dataset_spec": str(_spec(coco)),
+        "dataset_id": ref.dataset_id,
+        "spec_sha256": ref.spec_sha256,
+        "label_digest": compute_label_digest(ref, coco),
         "model_sha256": sha256_file(weights),
         "data_yaml_sha256": sha256_file(data_yaml),
         "val_txt_sha256": sha256_file(coco / "val2017.txt"),
@@ -157,8 +184,8 @@ def make_run(
     return run_dir, coco
 
 
-def _verify(run_dir: Path, coco: Path, *, imgsz: int = 640, head: str = HEAD, expect=EXPECT):
-    return verify_run(run_dir, imgsz=imgsz, coco_root=coco, head_commit=head, dataset=expect)
+def _verify(run_dir: Path, coco: Path, *, imgsz: int = 640, head: str = HEAD):
+    return verify_run(run_dir, imgsz=imgsz, dataset_spec=_spec(coco), head_commit=head)
 
 
 def _problems(run_dir: Path, coco: Path, **kwargs) -> str:
@@ -378,8 +405,8 @@ def test_traceback_in_log_is_refused(tmp_path: Path) -> None:
 
 
 def test_dataset_count_mismatch_is_refused(tmp_path: Path) -> None:
-    run_dir, coco = make_run(tmp_path)
-    assert "dataset expects 3/2" in _problems(run_dir, coco, expect=DatasetExpectation(images=3, gt_persons=2))
+    run_dir, coco = make_run(tmp_path, spec={"expected_images": 3})
+    assert "dataset expects 3/2" in _problems(run_dir, coco)
 
 
 def test_missing_gpu_identity_is_refused(tmp_path: Path) -> None:
@@ -412,15 +439,27 @@ def _load_wrapper():
     return mod
 
 
+COCO_REF = load_eval_dataset_ref(COCO_SPEC_PATH)
+YAML = Path("coco-person-val.yaml")
+
+
+def _ds_args(base: Path) -> list[str]:
+    """--dataset-spec/--data-yaml for the fixture that make_run(base) wrote."""
+    return [
+        "--dataset-spec", str(_spec(base / "coco")),
+        "--data-yaml", str(base / "state" / "evaluations" / "coco-person-val.yaml"),
+    ]
+
+
 def test_wrapper_argv_fixes_the_protocol_and_only_varies_imgsz(tmp_path: Path) -> None:
     wrapper = _load_wrapper()
-    argv = wrapper.build_argv(960, state_root=tmp_path, executable="yolo")
+    argv = wrapper.build_argv(960, state_root=tmp_path, ref=COCO_REF, data_yaml=YAML, executable="yolo")
     assert argv[:2] == ["yolo", "val"]
     for token in ("conf=0.001", "imgsz=960", "batch=1", "device=0", "classes=[0]", "quantize=16", "exist_ok=True"):
         assert token in argv
     assert not any(a.startswith("half") for a in argv)  # half is deprecated in ultralytics 8.4
     assert any(a.endswith("e1-yolo11n-coco-val2017-imgsz960-conf0001") for a in argv)
-    other = wrapper.build_argv(640, state_root=tmp_path, executable="yolo")
+    other = wrapper.build_argv(640, state_root=tmp_path, ref=COCO_REF, data_yaml=YAML, executable="yolo")
     # Same tokens except the image size and the run name.
     assert [a for a in argv if not a.startswith(("imgsz=", "name="))] == [
         a for a in other if not a.startswith(("imgsz=", "name="))
@@ -438,7 +477,7 @@ def test_wrapper_refuses_a_dirty_tree_before_running_anything(monkeypatch, capsy
 
     monkeypatch.setattr(wrapper, "require_clean_worktree", dirty)
     monkeypatch.setattr(wrapper.subprocess, "Popen", must_not_run)
-    assert wrapper.main(["--imgsz", "640", "--approval-ref", "APPROVAL-TEST"]) == 2
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "APPROVAL-TEST", *DS_DUMMY]) == 2
     assert "REFUSED" in capsys.readouterr().err
 
 
@@ -446,7 +485,7 @@ def test_wrapper_rejects_unapproved_image_size(monkeypatch, capsys) -> None:
     wrapper = _load_wrapper()
     monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: pytest.fail("no git check first"))
     monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run"))
-    assert wrapper.main(["--imgsz", "800", "--approval-ref", "APPROVAL-TEST"]) == 2
+    assert wrapper.main(["--imgsz", "800", "--approval-ref", "APPROVAL-TEST", *DS_DUMMY]) == 2
     assert "imgsz 800 needs --exp-id" in capsys.readouterr().err
 
 
@@ -545,13 +584,12 @@ def _load_writer():
 def test_writer_refuses_a_series_with_mixed_approvals(tmp_path: Path, monkeypatch, capsys) -> None:
     writer = _load_writer()
     monkeypatch.setattr(writer, "require_clean_worktree", lambda _root: HEAD)
-    monkeypatch.setattr(writer, "DatasetExpectation", lambda: EXPECT)  # 2 images / 2 persons fixture
     runs = []
     coco = None
     for size, approval in ((640, "APPROVAL-TEST"), (960, "APPROVAL-TEST"), (1280, "DIFFERENT")):
         run_dir, coco = make_run(tmp_path / f"s{size}", imgsz=size, run_overrides={"approval_ref": approval})
         runs += ["--run", f"{size}={run_dir}"]
-    code = writer.main(["--approval-ref", "APPROVAL-TEST", *runs, "--coco-root", str(coco), "--dry-run"])
+    code = writer.main(["--approval-ref", "APPROVAL-TEST", *runs, "--dataset-spec", str(_spec(coco)), "--dry-run"])
     err = capsys.readouterr().err
     assert code == 1
     assert "[1280] run approval 'DIFFERENT' != --approval-ref 'APPROVAL-TEST'" in err
@@ -560,7 +598,7 @@ def test_writer_refuses_a_series_with_mixed_approvals(tmp_path: Path, monkeypatc
 
 def test_writer_refuses_a_blank_approval_reference(monkeypatch, capsys) -> None:
     writer = _load_writer()
-    assert writer.main(["--approval-ref", "  ", "--run", "640=/x", "--run", "960=/x", "--run", "1280=/x"]) == 2
+    assert writer.main(["--approval-ref", "  ", "--dataset-spec", "s.json", "--run", "640=/x", "--run", "960=/x", "--run", "1280=/x"]) == 2
 
 
 def test_wrapper_requires_the_approval_argument() -> None:
@@ -572,7 +610,7 @@ def test_wrapper_requires_the_approval_argument() -> None:
 def test_wrapper_refuses_a_blank_approval_before_any_run(monkeypatch, capsys) -> None:
     wrapper = _load_wrapper()
     monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run on blank approval"))
-    assert wrapper.main(["--imgsz", "640", "--approval-ref", "   "]) == 2
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "   ", *DS_DUMMY]) == 2
     assert "must not be blank" in capsys.readouterr().err
 
 
@@ -729,7 +767,7 @@ def test_fp32_control_verifies_and_records_with_the_fp32_label(tmp_path: Path) -
     )
 
     run_dir, coco = make_run(tmp_path, quantize=None)
-    run = verify_run(run_dir, imgsz=640, coco_root=coco, head_commit=HEAD, dataset=EXPECT, quantize=None)
+    run = verify_run(run_dir, imgsz=640, dataset_spec=_spec(coco), head_commit=HEAD, quantize=None)
     record = build_record(
         run, exp_id=FP32_CONTROL_SERIES_ID, baseline_id=FP32_CONTROL_BASELINE, approval_ref="APPROVAL-TEST"
     )
@@ -743,7 +781,7 @@ def test_fp32_control_verifies_and_records_with_the_fp32_label(tmp_path: Path) -
 def test_fp16_run_is_refused_when_an_fp32_run_is_expected(tmp_path: Path) -> None:
     run_dir, coco = make_run(tmp_path)  # quantize=16
     with pytest.raises(RecordError) as info:
-        verify_run(run_dir, imgsz=640, coco_root=coco, head_commit=HEAD, dataset=EXPECT, quantize=None)
+        verify_run(run_dir, imgsz=640, dataset_spec=_spec(coco), head_commit=HEAD, quantize=None)
     assert "quantize" in " | ".join(info.value.problems)
 
 
@@ -754,28 +792,27 @@ def test_fp32_run_is_refused_under_the_fp16_protocol(tmp_path: Path) -> None:
 
 def test_fp32_argv_omits_quantize_and_names_the_run_distinctly(tmp_path: Path) -> None:
     wrapper = _load_wrapper()
-    argv = wrapper.build_argv(640, state_root=tmp_path, executable="yolo", quantize=None)
+    argv = wrapper.build_argv(640, state_root=tmp_path, ref=COCO_REF, data_yaml=YAML, executable="yolo", quantize=None)
     assert not any(a.startswith("quantize=") for a in argv)
     assert "exist_ok=True" in argv
-    assert wrapper.run_name(640, quantize=None) == "e1-yolo11n-coco-val2017-imgsz640-conf0001-fp32"
-    assert wrapper.run_name(640) == "e1-yolo11n-coco-val2017-imgsz640-conf0001"  # FP16 name unchanged
+    assert wrapper.run_name(640, "coco-val2017", quantize=None) == "e1-yolo11n-coco-val2017-imgsz640-conf0001-fp32"
+    assert wrapper.run_name(640, "coco-val2017") == "e1-yolo11n-coco-val2017-imgsz640-conf0001"  # FP16 name unchanged
 
 
 def test_wrapper_fp32_is_refused_at_any_size_but_the_approved_control(monkeypatch, capsys) -> None:
     wrapper = _load_wrapper()
     monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: pytest.fail("no git check first"))
     monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run"))
-    assert wrapper.main(["--imgsz", "960", "--precision", "fp32", "--approval-ref", "X"]) == 2
+    assert wrapper.main(["--imgsz", "960", "--precision", "fp32", "--approval-ref", "X", *DS_DUMMY]) == 2
     assert "only the approved 640 control" in capsys.readouterr().err
 
 
 def test_writer_control_dry_run_names_the_new_id_and_baseline(tmp_path: Path, monkeypatch, capsys) -> None:
     writer = _load_writer()
     monkeypatch.setattr(writer, "require_clean_worktree", lambda _root: HEAD)
-    monkeypatch.setattr(writer, "DatasetExpectation", lambda: EXPECT)
     run_dir, coco = make_run(tmp_path, quantize=None, run_overrides={"approval_ref": "CONTROL-REF"})
     code = writer.main(
-        ["--approval-ref", "CONTROL-REF", "--fp32-control", str(run_dir), "--coco-root", str(coco), "--dry-run"]
+        ["--approval-ref", "CONTROL-REF", "--fp32-control", str(run_dir), "--dataset-spec", str(_spec(coco)), "--dry-run"]
     )
     out = capsys.readouterr().out
     assert code == 0
@@ -786,10 +823,9 @@ def test_writer_control_dry_run_names_the_new_id_and_baseline(tmp_path: Path, mo
 def test_writer_control_refuses_a_different_approval(tmp_path: Path, monkeypatch, capsys) -> None:
     writer = _load_writer()
     monkeypatch.setattr(writer, "require_clean_worktree", lambda _root: HEAD)
-    monkeypatch.setattr(writer, "DatasetExpectation", lambda: EXPECT)
     run_dir, coco = make_run(tmp_path, quantize=None, run_overrides={"approval_ref": "CONTROL-REF"})
     code = writer.main(
-        ["--approval-ref", "OTHER", "--fp32-control", str(run_dir), "--coco-root", str(coco), "--dry-run"]
+        ["--approval-ref", "OTHER", "--fp32-control", str(run_dir), "--dataset-spec", str(_spec(coco)), "--dry-run"]
     )
     assert code == 1
     assert "!= --approval-ref 'OTHER'" in capsys.readouterr().err
@@ -927,7 +963,7 @@ def test_foreign_process_at_start_refuses_before_any_run(tmp_path: Path, monkeyp
     monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: HEAD)
     monkeypatch.setattr(wrapper.subprocess, "run", _fake_nvidia_smi("308159, .venv/bin/python\n"))
     monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run on a busy GPU"))
-    assert wrapper.main(["--imgsz", "640", "--approval-ref", "APPROVAL-TEST"]) == 2
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "APPROVAL-TEST", *_ds_args(tmp_path / "other")]) == 2
     assert "compute process" in capsys.readouterr().err
 
 
@@ -939,7 +975,7 @@ def test_unreadable_start_snapshot_refuses_before_any_run(tmp_path: Path, monkey
     monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: HEAD)
     monkeypatch.setattr(wrapper.subprocess, "run", _fake_nvidia_smi(None))
     monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run without a process list"))
-    assert wrapper.main(["--imgsz", "640", "--approval-ref", "APPROVAL-TEST"]) == 2
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "APPROVAL-TEST", *_ds_args(tmp_path / "other")]) == 2
     assert "cannot read the GPU process list" in capsys.readouterr().err
 
 
@@ -1034,7 +1070,7 @@ All three must hold: gain +0.010, small +0.020, precision floor 0.75.
 
 
 def test_candidate_run_name_is_derived_from_the_exp_id_and_imgsz() -> None:
-    assert candidate_run_name(CAND, 768) == CAND_NAME
+    assert candidate_run_name(CAND, 768, "coco-val2017") == CAND_NAME
 
 
 @pytest.mark.parametrize("imgsz", [320, 640, 768, 1280])
@@ -1082,15 +1118,15 @@ def test_build_record_takes_hypothesis_criteria_and_series_note(tmp_path: Path) 
 
 def test_wrapper_candidate_argv_uses_the_candidate_name_and_the_same_protocol(tmp_path: Path) -> None:
     wrapper = _load_wrapper()
-    argv = wrapper.build_argv(768, state_root=tmp_path, executable="yolo", exp_id=CAND)
+    argv = wrapper.build_argv(768, state_root=tmp_path, ref=COCO_REF, data_yaml=YAML, executable="yolo", exp_id=CAND)
     for token in ("conf=0.001", "imgsz=768", "batch=1", "device=0", "classes=[0]", "quantize=16", "exist_ok=True"):
         assert token in argv
     assert any(a.endswith(CAND_NAME) for a in argv)
-    base = wrapper.build_argv(640, state_root=tmp_path, executable="yolo")
+    base = wrapper.build_argv(640, state_root=tmp_path, ref=COCO_REF, data_yaml=YAML, executable="yolo")
     assert [a for a in argv if not a.startswith(("imgsz=", "name="))] == [
         a for a in base if not a.startswith(("imgsz=", "name="))
     ]
-    assert wrapper.run_name(640) == "e1-yolo11n-coco-val2017-imgsz640-conf0001"  # series name unchanged
+    assert wrapper.run_name(640, "coco-val2017") == "e1-yolo11n-coco-val2017-imgsz640-conf0001"  # series name unchanged
 
 
 @pytest.mark.parametrize(
@@ -1108,7 +1144,7 @@ def test_wrapper_refuses_a_bad_candidate_before_any_check_or_run(monkeypatch, ca
     wrapper = _load_wrapper()
     monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: pytest.fail("no git check first"))
     monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run"))
-    assert wrapper.main([*args, "--approval-ref", "X"]) == 2
+    assert wrapper.main([*args, "--approval-ref", "X", *DS_DUMMY]) == 2
     assert message in capsys.readouterr().err
 
 
@@ -1119,7 +1155,7 @@ def test_wrapper_refuses_an_existing_candidate_run_directory(tmp_path: Path, mon
     monkeypatch.setattr(wrapper, "repository_state_root", lambda: state)
     monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: HEAD)
     monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run over an existing run"))
-    assert wrapper.main(["--imgsz", "768", "--exp-id", CAND, "--approval-ref", "X"]) == 2
+    assert wrapper.main(["--imgsz", "768", "--exp-id", CAND, "--approval-ref", "X", *_ds_args(tmp_path)]) == 2
     assert "already exists" in capsys.readouterr().err
 
 
@@ -1145,11 +1181,16 @@ def test_wrapper_candidate_run_json_series_is_the_exp_id(tmp_path: Path, monkeyp
             return 0
 
     monkeypatch.setattr(wrapper.subprocess, "Popen", FakeProc)
-    assert wrapper.main(["--imgsz", "768", "--exp-id", CAND, "--approval-ref", "X"]) == 0
+    assert wrapper.main(["--imgsz", "768", "--exp-id", CAND, "--approval-ref", "X", *_ds_args(tmp_path / "inputs")]) == 0
     run = json.loads((state / "evaluations" / f"{CAND_NAME}.run.json").read_text())
     assert run["series"] == CAND and run["imgsz"] == 768 and run["approval_ref"] == "X"
     assert run["environment"] == fingerprint and seen_env[0]["YOLO_AUTOINSTALL"] == "False"
     assert run["vram_peak_above_idle_mib"] == run["vram_peak_mib"] - run["vram_baseline_mib"]
+    ref = load_eval_dataset_ref(_spec(tmp_path / "inputs" / "coco"))
+    assert run["dataset_id"] == "coco-val2017" and run["spec_sha256"] == ref.spec_sha256
+    assert run["label_digest"] == compute_label_digest(ref, tmp_path / "inputs" / "coco")
+    assert run["classes"] == [0] and run["data_yaml_sha256"] == sha256_file(Path(run["data_yaml"]))
+    assert any(a.endswith(CAND_NAME) for a in run["command"])
 
 
 # ── recorder candidate mode ─────────────────────────────────────────────────────────
@@ -1158,11 +1199,10 @@ def test_wrapper_candidate_run_json_series_is_the_exp_id(tmp_path: Path, monkeyp
 def _candidate_case(tmp_path: Path, monkeypatch, *, proposal: str = PROPOSAL, run_imgsz: int = 768, **make):
     writer = _load_writer()
     monkeypatch.setattr(writer, "require_clean_worktree", lambda _root: HEAD)
-    monkeypatch.setattr(writer, "DatasetExpectation", lambda: EXPECT)
     run_dir, coco = make_run(
         tmp_path / "r",
         imgsz=run_imgsz,
-        name=make.pop("name", candidate_run_name(CAND, run_imgsz)),
+        name=make.pop("name", candidate_run_name(CAND, run_imgsz, "coco-val2017")),
         series=make.pop("series", CAND),
         run_overrides={"approval_ref": "CAND-REF"},
     )
@@ -1170,7 +1210,7 @@ def _candidate_case(tmp_path: Path, monkeypatch, *, proposal: str = PROPOSAL, ru
     prop.write_text(proposal, encoding="utf-8")
     argv = [
         "--approval-ref", "CAND-REF", "--candidate", f"{CAND}={run_dir}",
-        "--baseline", "EXP-20261004-01", "--proposal", str(prop), "--coco-root", str(coco), "--dry-run",
+        "--baseline", "EXP-20261004-01", "--proposal", str(prop), "--dataset-spec", str(_spec(coco)), "--dry-run",
     ]
     return writer, argv
 
@@ -1334,7 +1374,7 @@ def test_fingerprint_error_creates_no_run_directory_and_never_starts_the_run(
     monkeypatch.setattr(wrapper, "snapshot_compute_apps", lambda *, at: {"at": at, "processes": []})
     monkeypatch.setattr(wrapper, "environment_fingerprint", boom)
     monkeypatch.setattr(wrapper.subprocess, "Popen", no_popen)
-    assert wrapper.main(["--imgsz", "640", "--approval-ref", "A-1"]) == 2
+    assert wrapper.main(["--imgsz", "640", "--approval-ref", "A-1", *DS_DUMMY]) == 2
     assert sorted(p.name for p in tmp_path.rglob("*")) == before
 
 
@@ -1360,3 +1400,156 @@ def test_old_format_run_json_still_parses_and_omits_the_new_notes(tmp_path: Path
     assert run.environment is None and run.vram_peak_above_idle_mib is None
     notes = json.loads(build_record(run, exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST").notes)
     assert "environment" not in notes and "vram_peak_above_idle_mib" not in notes
+
+
+# ── I4a: the reference drives the measured path (ADR-0025 §3.4, ADR-0017 amendment 2026-11-16) ──
+
+
+def test_coco_spec_reproduces_todays_strings_byte_for_byte() -> None:
+    wrapper = _load_wrapper()
+    ref = COCO_REF
+    assert ref.render_ledger_label(list_sha256=COCO_LIST_SHA) == f"coco-val2017-5k (val2017.txt sha256 {COCO_LIST_SHA})"
+    assert candidate_run_name("EXP-20261116-01", 640, ref.dataset_id) == (
+        "exp-20261116-01-yolo11n-coco-val2017-imgsz640-conf0001"
+    )
+    assert series_run_name(640, ref.dataset_id) == "e1-yolo11n-coco-val2017-imgsz640-conf0001"
+    assert series_run_name(640, ref.dataset_id, fp32=True) == "e1-yolo11n-coco-val2017-imgsz640-conf0001-fp32"
+    assert wrapper.run_name(960, ref.dataset_id) == "e1-yolo11n-coco-val2017-imgsz960-conf0001"
+
+
+@pytest.mark.parametrize("bad", ["", "Coco", "a b", "../x", "-x", "x-", "a/b", "a--b"])
+def test_run_name_fragment_must_be_a_safe_dataset_id(bad: str) -> None:
+    with pytest.raises(ValueError, match="dataset_id"):
+        candidate_run_name(CAND, 768, bad)
+
+
+def test_record_takes_dataset_version_label_digest_and_spec_hash_from_the_reference(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    run = _verify(run_dir, coco)
+    ref = load_eval_dataset_ref(_spec(coco))
+    record = build_record(run, exp_id="EXP-20261004-01", baseline_id="SELF", approval_ref="APPROVAL-TEST")
+    assert record.dataset_version == f"coco-val2017-5k (val2017.txt sha256 {run.val_txt_sha256})"
+    notes = json.loads(record.notes or "{}")
+    assert notes["label_digest"] == compute_label_digest(ref, coco)
+    assert notes["spec_sha256"] == ref.spec_sha256
+    assert notes["dataset_ref"].startswith("coco-val2017")
+
+
+def test_a_label_edited_after_the_run_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    (coco / "labels" / "val2017" / f"{STEM_A}.txt").write_text("0 0.5 0.5 0.06 0.06\n")
+    assert "labels changed since the run" in _problems(run_dir, coco)
+
+
+def test_a_run_without_a_label_digest_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides={"label_digest": None})
+    assert "label_digest" in _problems(run_dir, coco)
+
+
+def test_a_run_made_under_another_spec_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides={"spec_sha256": "0" * 64})
+    assert "spec_sha256" in _problems(run_dir, coco)
+
+
+def test_a_run_for_another_dataset_id_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, run_overrides={"dataset_id": "other"})
+    assert "dataset_id" in _problems(run_dir, coco)
+
+
+def test_a_pinned_label_digest_that_matches_verifies(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, pin_digest=True)
+    assert _verify(run_dir, coco).label_digest == compute_label_digest(load_eval_dataset_ref(_spec(coco)), coco)
+
+
+def test_a_pinned_label_digest_that_does_not_match_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, spec={"label_digest": "f" * 64})
+    assert "differ from the spec's label_digest" in _problems(run_dir, coco)
+
+
+def test_a_non_person_target_or_ignore_classes_are_not_scorable_yet(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path, spec={"target_class": 1})
+    assert "target_class 1 is not scorable" in _problems(run_dir, coco)
+    run_dir, coco = make_run(tmp_path / "ign", spec={"ignore_classes": [7]})
+    assert "ignore_classes are not scorable" in _problems(run_dir, coco)
+    assert scoring_problems(COCO_REF) == []
+
+
+def test_run_json_list_file_must_be_the_specs_list_file(tmp_path: Path) -> None:
+    other = tmp_path / "other.txt"
+    other.write_text("x\n")
+    run_dir2, coco2 = make_run(
+        tmp_path / "b", run_overrides={"val_txt": str(other), "val_txt_sha256": sha256_file(other)}
+    )
+    assert "is not the dataset spec's list file" in _problems(run_dir2, coco2)
+
+
+def test_a_missing_or_malformed_spec_is_refused(tmp_path: Path) -> None:
+    run_dir, coco = make_run(tmp_path)
+    _spec(coco).write_text("{not json")
+    assert "dataset spec" in _problems(run_dir, coco)
+    _spec(coco).unlink()
+    assert "dataset spec" in _problems(run_dir, coco)
+
+
+def test_recorder_requires_the_dataset_spec() -> None:
+    writer = _load_writer()
+    with pytest.raises(SystemExit):
+        writer.main(["--approval-ref", "X", "--run", "640=/x"])
+
+
+def test_wrapper_requires_dataset_spec_and_data_yaml() -> None:
+    wrapper = _load_wrapper()
+    for args in (
+        ["--imgsz", "640", "--approval-ref", "X", "--data-yaml", "d.yaml"],
+        ["--imgsz", "640", "--approval-ref", "X", "--dataset-spec", "s.json"],
+    ):
+        with pytest.raises(SystemExit):
+            wrapper.main(args)
+
+
+@pytest.mark.parametrize(
+    "names_text, expected",
+    [
+        ("names:\n  0: person\n  1: car\n", {0: "person", 1: "car"}),
+        ("names: [person, car]\n", {0: "person", 1: "car"}),
+        ("names:\n  - person\n  - car\n", {0: "person", 1: "car"}),
+    ],
+)
+def test_read_data_yaml_accepts_a_mapping_or_a_list_of_names(tmp_path: Path, names_text: str, expected: dict) -> None:
+    wrapper = _load_wrapper()
+    yaml = tmp_path / "d.yaml"
+    yaml.write_text(f"path: {tmp_path}\ntrain: val.txt\nval: val.txt\n{names_text}")
+    root, val, names = wrapper.read_data_yaml(yaml)
+    assert (root, val, names) == (tmp_path, tmp_path / "val.txt", expected)
+
+
+@pytest.mark.parametrize(
+    "names_text",
+    ["names: person\n", "names: {0: person}\n", "names:\n  0: a\n  - b\n", "names:\n  x: a\n", "names:\n  0: a\n  0: b\n", ""],
+)
+def test_read_data_yaml_refuses_any_other_names_form(tmp_path: Path, names_text: str) -> None:
+    wrapper = _load_wrapper()
+    yaml = tmp_path / "d.yaml"
+    yaml.write_text(f"path: {tmp_path}\nval: val.txt\n{names_text}")
+    with pytest.raises(ValueError, match="names"):
+        wrapper.read_data_yaml(yaml)
+
+
+def test_wrapper_refuses_a_yaml_that_does_not_match_the_reference(tmp_path: Path, monkeypatch, capsys) -> None:
+    wrapper = _load_wrapper()
+    make_run(tmp_path, name="fixture-run")
+    state = tmp_path / "state"
+    monkeypatch.setattr(wrapper, "repository_state_root", lambda: state)
+    monkeypatch.setattr(wrapper, "require_clean_worktree", lambda _r: HEAD)
+    monkeypatch.setattr(wrapper.subprocess, "Popen", lambda *a, **k: pytest.fail("no run on a mismatched yaml"))
+    yaml = state / "evaluations" / "coco-person-val.yaml"
+    good = yaml.read_text()
+    args = ["--imgsz", "640", "--approval-ref", "X", *_ds_args(tmp_path)]
+    for broken, message in (
+        (good.replace("val: val2017.txt", "val: other.txt"), "list file"),
+        (good.replace(f"path: {tmp_path / 'coco'}", f"path: {tmp_path}"), "dataset root"),
+        (good.replace("  0: person", "  1: person"), "target_class"),
+    ):
+        yaml.write_text(broken)
+        assert wrapper.main(args) == 2
+        assert message in capsys.readouterr().err

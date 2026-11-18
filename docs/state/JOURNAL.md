@@ -2671,3 +2671,21 @@ The measured run artifacts are unchanged. Earlier entries are not rewritten.
 **Why:** a run that installs packages mid-run is not reproducible (Q70). The raw peak stays; no comparison rule (D-125).
 
 **Learned:** the gate is `AUTOINSTALL = str(os.getenv("YOLO_AUTOINSTALL", True)).lower() == "true"` (utils/__init__.py:45), used at utils/checks.py:472, called from `check_requirements("faster-coco-eval>=1.6.7")` in models/yolo/detect/val.py:480. Citations (utils/__init__.py:45, utils/checks.py:472, models/yolo/detect/val.py:480) are from ultralytics 8.4.6 (Windows); 8.4.138 (the version the repo records for the Linux PC, e.g. DECISIONS.md and `yolo_eval.py`; not confirmed this session) to be checked on Linux. The wrapper imports `resource` (POSIX), so wrapper tests need Linux here. Q77 recorded (mAP rounding in the ledger).
+
+## 2026-11-18 — I4a wire EvalDatasetRef into the measured path (#178; Q69; ADR-0025 §3.4; ADR-0017 amendment 2026-11-16 item 1)
+
+**Changed:** the wrapper and recorder take `--dataset-spec PATH` (the `eval_dataset_ref.json` at the dataset root); the wrapper also takes a required `--data-yaml PATH`. `COCO_ROOT`, `--coco-root`, `DATA_YAML_NAME`, `CLASSES` and `DatasetExpectation` are gone. `verify_run(run_dir, imgsz=, dataset_spec=, head_commit=, quantize=)` takes layout, list file, expected counts and target class from the reference, recomputes `label_digest` with `compute_label_digest`, and refuses (fail closed) on: a digest missing from or different in run.json, a `spec_sha256` or `dataset_id` that differs from the spec, a set `label_digest` in the spec that differs from the labels on disk, a `val_txt` that is not the spec's list file, and any `target_class` other than 0 or any `ignore_classes` (not scorable until I6). run.json gains `dataset_spec`, `dataset_id`, `spec_sha256`, `label_digest`; the record notes gain `label_digest`, `spec_sha256`, `dataset_ref`. `cv_agent/datasets/eval_ref.py` gains `eval_items`, the one reader of the list file (the digest uses it; its output is unchanged). The wrapper refuses a data yaml whose `path` is not the dataset root, whose `path`/`val` is not the spec's list file, or whose `names` (mapping `0: person`, flow list `[person]` or block list `- person`; anything else refuses) lack `target_class`. The yaml's sha256 is recorded as before (`artifacts.data_yaml`); R1 must pass the same file or `--replication` reads a different yaml hash. The spec gains no yaml key (ADR-0025 strict keys unchanged).
+
+**COCO byte-compatibility:** `dataset_version` is `ref.render_ledger_label(list_sha256=…)`, which gives `coco-val2017-5k (val2017.txt sha256 4d010d0d…aa73)` for the COCO spec. The run-name fragment is the reference's `dataset_id` (`coco-val2017`), so `e1-yolo11n-coco-val2017-imgsz640-conf0001[-fp32]` and `exp-20261116-01-yolo11n-coco-val2017-imgsz640-conf0001` are unchanged; a test pins each string. An unsafe `dataset_id` (not lowercase, digits, `-`, `.`) cannot become a run name.
+
+**Why:** the measured path still hard-coded COCO, and nothing recorded or compared the label contents (Q69).
+
+**Learned:** old COCO run directories cannot pass `verify_run` at this HEAD regardless (the commit check), so requiring the new run.json fields removes nothing that verified before. The wrapper tests cannot import `resource` on Windows (D-103); they were run locally with a throwaway `resource` stub outside the repo.
+
+**Left open:** `acceptance.py` still compares `dataset_version` only; the digest gate is I4b (separate issue and PR after this merges). Q69 stays open until R1 records a digest. The owner places the COCO spec at `<coco_root>/eval_dataset_ref.json` on the Linux PC. Linux CI not yet seen.
+
+**Size:** ~518 lines added and ~126 removed across 6 files, before state files: production 262 added (datasets 30, records 92, wrapper 126, recorder 14), tests 256 added (about 151 new tests, the rest adapted fixtures and call sites). Over the ~400-line guide; the acceptance gate was already split out as I4b.
+
+## 2026-11-18 — correction to the I5 entry
+
+2026-11-18 correction to the I5 entry: the YOLO_AUTOINSTALL gate was verified on the Linux PC's ultralytics 8.4.138 (utils/__init__.py:72 env_bool, utils/checks.py:625, models/yolo/detect/val.py:590), not only 8.4.6; see Q70.
