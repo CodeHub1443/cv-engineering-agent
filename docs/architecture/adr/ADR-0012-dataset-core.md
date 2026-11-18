@@ -167,3 +167,11 @@ be added later"). **Not done by this status note:** a concrete
 hash computation, or dataset acquisition — building the backend module itself is a
 separate, later task (issue #63 scoped this session to decision-recording only). See
 `docs/state/DECISIONS.md` D-045.
+
+## Amendment (2026-11-16): evaluation dataset reference (ADR-0025, D-043 I1)
+
+**What this revises.** The §8 revisit trigger "`cv_agent.experiments` cross-validation of `dataset_version` is built (needs a decision on which layer owns the reference)". No existing text is edited.
+
+**Decision.** The datasets layer owns the reference. `EvalDatasetRef` (`cv_agent/datasets/eval_ref.py`, ADR-0025) shares the `(dataset_id, version)` key of this ADR `[P§32]` but is not a `DatasetManifest`: it has no items, splits or leakage check, and it adds a label fingerprint and the hash of its spec file. Experiments may import only that module (a new direction, experiments to datasets); datasets still imports nothing from experiments.
+
+**Not changed.** The manifest, the store protocol, the leakage checks, and the standard-library-only rule for `cv_agent/datasets/`.

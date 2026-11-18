@@ -93,3 +93,16 @@ def write_records(ledger, records: list[ExperimentRecord]) -> list[str]: ...
 5. **Interface delta (§5).** `build_record(..., hypothesis=HYPOTHESIS, success_criteria=SUCCESS_CRITERIA, series_note=None)`: the defaults reproduce the EXP-20261004 records. New in `evaluation_records.py`: `candidate_problems(exp_id, imgsz)`, `candidate_run_name(exp_id, imgsz)`, `is_exp_id`, `RESERVED_SERIES_IDS` and the imgsz bounds, shared by the wrapper and the recorder so the rule is stated once.
 
 **Not changed.** The record schema, the verifier, the metric code, the ledger, and the acceptance or compare entry points (a separate issue). This amendment approves no GPU run; each run still needs its own approval reference.
+
+## Amendment (2026-11-16): dataset reference and track mode (ADR-0025, D-043)
+
+**What this revises.** §3 and §4a assume the COCO val2017 dataset (the wrapper and recorder paths, `DatasetExpectation` defaults and the "coco-val2017" run-name fragment). No existing text is edited. This amendment is a plan for issues I4, I5 and I9; it changes no code.
+
+**Decision.**
+
+1. The wrapper, the recorder and `verify_run` take an `EvalDatasetRef` (ADR-0025) in place of `coco_root`, the `DatasetExpectation` defaults and the fixed layout. The run notes record `label_digest` and `spec_sha256` `[P§25]`.
+2. A `track` mode runs the tracker per sequence with a pinned tracker yaml (its sha256 recorded) and writes the `tracking/*` metric keys of ADR-0025 §3.9.
+3. The child process runs with `YOLO_AUTOINSTALL=False` (Q70) and the record carries an environment fingerprint: Python, torch, CUDA and ultralytics versions, and a sha256 of `pip freeze`.
+4. The record carries `vram_peak_above_idle_mib` (Q71).
+
+**Not changed.** Every §3 and §4a refusal stands. This amendment approves no GPU run; each run needs its own approval reference.
