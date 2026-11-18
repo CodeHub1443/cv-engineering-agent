@@ -156,6 +156,7 @@ class VerifiedRun:
     quantize: int | None = QUANTIZE
     environment: dict[str, str] | None = None
     vram_peak_above_idle_mib: int | None = None
+    gpu_coresident: tuple[dict[str, Any], ...] = ()
 
 
 def precision_label(quantize: int | None) -> str:
@@ -299,12 +300,42 @@ def _is_int(value: object) -> TypeGuard[int]:
 EXEMPT_GPU_PROCESS_NAMES = frozenset({"/usr/NX/bin/nxnode.bin"})
 
 
-def is_exempt_process(proc: object) -> bool:
-    """True only for an exact-name exempt process (ADR-0018 §3.16). Any other entry is blocking."""
-    return isinstance(proc, dict) and proc.get("name") in EXEMPT_GPU_PROCESS_NAMES
+def is_exempt_process(proc: object, allowed: frozenset[str] = frozenset()) -> bool:
+    """True only for an exact-name exempt process (ADR-0018 §3.16) or one named in ``allowed`` (the run's
+    recorded ``gpu_coresident``, ADR-0018 amendment 2026-11-18). Any other entry is blocking."""
+    return isinstance(proc, dict) and (proc.get("name") in EXEMPT_GPU_PROCESS_NAMES or proc.get("name") in allowed)
 
 
-def snapshot_foreign_pids(snapshot: object, own_pid: int) -> list[int] | None:
+GPU_CORESIDENT_CAVEAT = "GPU shared with co-resident process(es); latency/FPS/VRAM not comparable with clean-GPU runs."
+
+
+def coresident_problems(entries: object) -> list[str]:
+    """Why run.json ``gpu_coresident`` is malformed. Absent (None) is fine: older runs have no field."""
+    if entries is None:
+        return []
+    if not isinstance(entries, list):
+        return ["run.json gpu_coresident must be a list"]
+    for index, entry in enumerate(entries):
+        used = entry.get("used_mib") if isinstance(entry, dict) else None
+        if not (
+            isinstance(entry, dict)
+            and _is_int(entry.get("pid"))
+            and isinstance(entry.get("process_name"), str)
+            and entry["process_name"]
+            and (used is None or _is_int(used))
+        ):
+            return [f"run.json gpu_coresident[{index}] must be {{pid: int, process_name: str, used_mib: int|null}}"]
+    return []
+
+
+def coresident_names(entries: object) -> frozenset[str]:
+    """The process names in a ``gpu_coresident`` list; empty when it is absent or malformed."""
+    if coresident_problems(entries) or not isinstance(entries, list):
+        return frozenset()
+    return frozenset(e["process_name"] for e in entries)
+
+
+def snapshot_foreign_pids(snapshot: object, own_pid: int, allowed: frozenset[str] = frozenset()) -> list[int] | None:
     """Pids in one GPU-process snapshot other than the run's own and exempt processes. None if unreadable."""
     if not isinstance(snapshot, dict) or not isinstance(snapshot.get("processes"), list):
         return None
@@ -313,17 +344,18 @@ def snapshot_foreign_pids(snapshot: object, own_pid: int) -> list[int] | None:
         pid = proc.get("pid") if isinstance(proc, dict) else None
         if not _is_int(pid):
             return None
-        if pid != own_pid and not is_exempt_process(proc):
+        if pid != own_pid and not is_exempt_process(proc, allowed):
             foreign.append(pid)
     return foreign
 
 
-def foreign_process_seen(snapshots: object, own_pid: int) -> bool:
-    """True if any readable snapshot (start, during, end) names a process other than the run's own."""
+def foreign_process_seen(snapshots: object, own_pid: int, allowed: frozenset[str] = frozenset()) -> bool:
+    """True if any readable snapshot (start, during, end) names a process other than the run's own,
+    an exempt one, or one named in ``allowed``."""
     if not isinstance(snapshots, dict):
         return False
     parts = [snapshots.get("start"), *(snapshots.get("during") or []), snapshots.get("end")]
-    return any(snapshot_foreign_pids(part, own_pid) for part in parts)
+    return any(snapshot_foreign_pids(part, own_pid, allowed) for part in parts)
 
 
 def gpu_process_problems(run: dict) -> list[str]:
@@ -332,29 +364,30 @@ def gpu_process_problems(run: dict) -> list[str]:
     own = run.get("own_pid")
     if not isinstance(snaps, dict) or not _is_int(own):
         return ["run.json has no gpu_process_snapshots or own_pid: GPU-process provenance is required (ADR-0018)"]
-    problems: list[str] = []
+    problems: list[str] = coresident_problems(run.get("gpu_coresident"))
+    allowed = coresident_names(run.get("gpu_coresident"))
     start, during, end = snaps.get("start"), snaps.get("during"), snaps.get("end")
     if not isinstance(during, list) or not during:
         problems.append("GPU-process snapshots during polling are missing (ADR-0018)")
         during = []
     if not isinstance(start, dict) or not isinstance(start.get("processes"), list):
         problems.append("GPU-process snapshot at start is missing or unreadable: cannot read the GPU process list")
-    elif [p for p in start["processes"] if not is_exempt_process(p)]:
-        blocking = [p for p in start["processes"] if not is_exempt_process(p)]
+    elif [p for p in start["processes"] if not is_exempt_process(p, allowed)]:
+        blocking = [p for p in start["processes"] if not is_exempt_process(p, allowed)]
         problems.append(f"GPU had {len(blocking)} compute process(es) before the run started")
     if not isinstance(end, dict) or not isinstance(end.get("processes"), list):
         problems.append("GPU-process snapshot at end is missing or unreadable")
     for index, snap in enumerate(during):
-        if snapshot_foreign_pids(snap, own) is None:
+        if snapshot_foreign_pids(snap, own, allowed) is None:
             problems.append(f"GPU-process snapshot during[{index}] is unreadable")
     for index, snap in enumerate(during):
-        foreign = snapshot_foreign_pids(snap, own)
+        foreign = snapshot_foreign_pids(snap, own, allowed)
         if foreign:
             problems.append(f"foreign GPU process during the run (pids {foreign}, sample {index})")
-    end_foreign = snapshot_foreign_pids(end, own)
+    end_foreign = snapshot_foreign_pids(end, own, allowed)
     if end_foreign:
         problems.append(f"foreign GPU process at end of the run (pids {end_foreign})")
-    seen = foreign_process_seen(snaps, own)
+    seen = foreign_process_seen(snaps, own, allowed)
     if run.get("foreign_process_seen") is not seen:
         problems.append(
             f"run.json foreign_process_seen={run.get('foreign_process_seen')!r} does not match the snapshots ({seen})"
@@ -626,6 +659,7 @@ def verify_run(
         ram_peak_mib=ram_peak,
         environment=run.get("environment") if isinstance(run.get("environment"), dict) else None,
         vram_peak_above_idle_mib=above if isinstance(above := run.get("vram_peak_above_idle_mib"), int) else None,
+        gpu_coresident=tuple(run["gpu_coresident"]) if run.get("gpu_coresident") else (),
     )
 
 
@@ -700,6 +734,11 @@ def build_record(
         "vram_baseline_mib": run.vram_baseline_mib,
         **({"vram_peak_above_idle_mib": run.vram_peak_above_idle_mib} if run.vram_peak_above_idle_mib is not None else {}),
         **({"environment": run.environment} if run.environment is not None else {}),
+        **(
+            {"gpu_coresident": list(run.gpu_coresident), "gpu_coresident_caveat": GPU_CORESIDENT_CAVEAT}
+            if run.gpu_coresident
+            else {}
+        ),
         "omitted_metrics": list(run.omitted_strata),
         "predictions_min_person_score": run.min_person_score,
         "dataset_ref": f"{run.dataset_id} (version label {run.dataset_version})",

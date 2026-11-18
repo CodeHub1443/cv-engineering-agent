@@ -112,3 +112,17 @@ with no workload behind it.
 ## Amendment (2026-11-04, D-087)
 
 The owner's standing authorization (D-080) supersedes per-run owner approval for GPU runs. §3.8 and §6's "fresh owner approval reference" is satisfied by a reference issued under the D-080 standing grant, bound to one experiment and one cost ceiling (ADR-0019, H1) and recorded before the run. The idle-GPU and process-provenance rules are unchanged. The original §3.8 and §6 text above is not rewritten. Status remains Accepted. `[P§24]`
+
+## Amendment (2026-11-18, D-128): explicit co-resident GPU process opt-in
+
+**Why.** The owner keeps RustDesk (`/usr/share/rustdesk/rustdesk --server`, a remote-desktop screen encoder, about 140 MiB) running on the Linux PC. `nvidia-smi` lists it as a compute process, so the start-snapshot rule refuses every measured run (§3.10, §6.6). §3.16 exempts exactly one executable, by a constant. A second hard-coded name would repeat that; the exception belongs to the run, stated by the operator, and visible in the record. Issue #184. `[P§25]`, `[P§12]`
+
+**Decision.**
+- `scripts/run_yolo_val_measured.py` takes a repeatable `--allow-gpu-process EXECUTABLE_PATH`. The value must be an absolute path and is matched **exactly** against the `nvidia-smi` process name. There is no default allowlist and no config file. Any compute process that is neither §3.16-exempt nor named still refuses the run before anything starts.
+- A named process that is present at the start snapshot is recorded in `run.json` as `gpu_coresident: [{pid, process_name, used_mib}]`. A named process that is absent is allowed and records `[]`. `used_mib` is `null` if `nvidia-smi` reports `[N/A]`. The compute-apps query now also asks for `used_memory`; a snapshot row without it (the earlier two-column form) still parses and still verifies.
+- The writer (`verify_run`) treats the names in `gpu_coresident` as non-foreign at the start, during and end snapshots, and recomputes `foreign_process_seen` the same way. A named process that was absent at the start and appears mid-run is **not** in `gpu_coresident` and is still foreign (fail closed). A malformed `gpu_coresident` is refused. A `run.json` without the field behaves as before.
+- When `gpu_coresident` is non-empty the record's notes carry `gpu_coresident` and the caveat: "GPU shared with co-resident process(es); latency/FPS/VRAM not comparable with clean-GPU runs." `scripts/compare_candidate.py` prints an informational note naming the process when either record has a non-empty `gpu_coresident`.
+
+**Comparability.** Accuracy metrics (mAP, AP@0.5 by size, fixed-threshold P/R) do not depend on the GPU being shared and are compared as before. Latency, FPS and VRAM of a co-resident run are not comparable with a clean-GPU run. `acceptance.py` and the replication verdict are unchanged: they judge metrics only, so the note is information, not a verdict input.
+
+**Unchanged.** §3.16 and its constant; the polling limit (a process that starts and exits between 1-second polls is not seen); the start/during/end provenance for every un-named process. The opt-in is per run: it is not a standing exemption. The original text above is not rewritten. `[P§25]`, `[P§12]`
